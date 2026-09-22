@@ -662,3 +662,18 @@ def test_native_poll_ignores_target_folder_present_before_dialog():
     assert job._perform_native_update(DIRECTIVE, wait_seconds=0.2, poll_seconds=0.01) is True
     job._close_after_inprocess_update.assert_not_called()
     assert _state(job)["stage"] == "postponed"
+
+
+# ── Réconciliation de la cible précédente avant une nouvelle directive ────
+
+def test_schedule_update_reconciles_previous_target_before_new_directive():
+    """Cas du banc : la directive suivante arrive avant le timer de
+    réconciliation ; la campagne précédente doit être rapportée installed."""
+    job = _job(current_version=CURRENT)
+    job._save_update_state({"campaign_id": 6, "target_version": CURRENT}, "installed_native", route="native")
+    done = threading.Event()
+    job._perform_update = lambda d: done.set()
+    job._schedule_update({"action": "update", "target_version": TARGET, "campaign_id": 7})
+    assert done.wait(2)
+    installed_calls = [c for c in job._report_update_status.call_args_list if c.args[0] == 6 and c.args[1] == "installed"]
+    assert installed_calls, "la campagne précédente doit être rapportée installed avant la nouvelle directive"

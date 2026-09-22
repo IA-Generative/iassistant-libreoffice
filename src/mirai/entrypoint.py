@@ -1919,6 +1919,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         urgency = directive.get("urgency", "normal")
 
         target_version = str(directive.get("target_version") or "").strip()
+
+        # Réconcilier d'abord une mise à jour précédente déjà active : la
+        # directive suivante peut arriver dans les secondes du démarrage, avant
+        # le timer de réconciliation, et écraserait l'état persistant — la
+        # campagne précédente ne serait jamais rapportée « installed ».
+        previous = self._load_update_state()
+        previous_target = str(previous.get("target_version", "")).strip() if previous else ""
+        if previous_target and previous_target != target_version:
+            try:
+                self._reconcile_update_state()
+            except Exception as exc:
+                log_to_file(f"_schedule_update: reconciliation failed: {exc}")
+
         if target_version and target_version in MainJob._update_launch_blocked_cls:
             log_to_file(
                 f"Update skipped: install of {target_version} was blocked by the "
