@@ -179,7 +179,10 @@ l'appel s'est exécuté sans exception avant le délai, faux sinon.
    Dès qu'elle vaut la cible : état `installed_native`, télémétrie
    `UpdateInstalledPendingRestart`, puis `_close_after_inprocess_update()` de fix/MAJ
    (message « installée, LibreOffice va se fermer », fermeture propre sur le thread
-   principal). Renvoie vrai.
+   principal). La fermeture est retentée jusqu'à acceptation : LibreOffice la refuse
+   (veto) tant que sa fenêtre de progression est ouverte ; il ne propose pas
+   lui-même de redémarrer sur ce chemin (l'invite native n'existe qu'à la fermeture
+   du Gestionnaire des extensions). Renvoie vrai.
 5. Délai écoulé : l'utilisateur a annulé, ignoré ou fermé. État `postponed` avec
    `postponed_until = maintenant + 24 h`, télémétrie `UpdatePostponed`. Renvoie vrai.
 

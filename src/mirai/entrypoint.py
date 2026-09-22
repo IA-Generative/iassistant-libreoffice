@@ -37,6 +37,8 @@ _NATIVE_INSTALL_WAIT_SECONDS = 900
 _NATIVE_POLL_SECONDS = 5
 _NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
 _NATIVE_MAX_ATTEMPTS = 2
+_CLOSE_RETRY_SECONDS = 120
+_CLOSE_RETRY_INTERVAL_SECONDS = 3
 _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
 _MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
@@ -2715,10 +2717,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         on every platform and spawns nothing.
 
         `Desktop.terminate()` must run on the **main thread** (from this update-worker
-        thread it corrupts the macOS layout engine); we marshal it via
-        `com.sun.star.awt.AsyncCallback` + `_MainThreadCallback` (pré-lié au
-        chargement du module, aucun import UNO depuis le worker), falling back
-        to SIGTERM.
+        thread it corrupts the macOS layout engine), via `_run_on_main_thread`. Sur la
+        route native, LibreOffice refuse la fermeture (veto) tant qu'une de ses
+        fenêtres modales — la progression de la mise à jour — est encore ouverte : on
+        retente périodiquement jusqu'à acceptation ou expiration du délai, sans jamais
+        basculer sur SIGTERM pour un simple veto.
         """
         # Best-effort: tell the user before closing.
         try:
@@ -2732,8 +2735,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 box = toolkit.createMessageBox(
                     parent, 1, MSG_BUTTONS.BUTTONS_OK, "MIrAI — Mise à jour",
                     "La mise à jour a été installée.\n\n"
-                    "LibreOffice va se fermer : rouvrez-le pour\n"
-                    "utiliser la nouvelle version."
+                    "LibreOffice va se fermer pour l'activer, dès que la\n"
+                    "fenêtre de mise à jour sera refermée. Rouvrez-le ensuite."
                 )
                 box.execute()
                 try:
@@ -2747,35 +2750,36 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         ctx = self.ctx
         smgr = self.ctx.getServiceManager()
 
-        def _terminate_on_main():
-            try:
-                desktop = smgr.createInstanceWithContext(
-                    "com.sun.star.frame.Desktop", ctx
-                )
-                if desktop is not None:
-                    log_to_file("_close_after_inprocess_update: terminating on main thread")
-                    if desktop.terminate():
-                        log_to_file("_close_after_inprocess_update: terminated on main thread")
-                    else:
-                        log_to_file("_close_after_inprocess_update: terminate vetoed (dialogue ouvert ?) — LibreOffice reste ouvert, la MAJ s'active au prochain démarrage")
-            except Exception as term_err:
-                log_to_file(f"_close_after_inprocess_update: main-thread terminate failed: {term_err}")
+        def _terminate():
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            if desktop is None:
+                raise RuntimeError("Desktop unavailable")
+            if not desktop.terminate():
+                raise RuntimeError("vetoed")
 
-        try:
-            if _MainThreadCallback is None:
-                raise RuntimeError("_MainThreadCallback unavailable")
-            async_cb = smgr.createInstanceWithContext(
-                "com.sun.star.awt.AsyncCallback", ctx
-            )
-            if async_cb is not None:
-                async_cb.addCallback(_MainThreadCallback(_terminate_on_main), None)
-                log_to_file("_close_after_inprocess_update: close scheduled on main thread")
+        # Fermeture propre sur le MAIN thread, retentée : LibreOffice la refuse
+        # (veto) tant qu'un de ses dialogues modaux est ouvert — typiquement la
+        # fenêtre de progression de la mise à jour native. Jamais de SIGTERM sur
+        # un veto ; SIGTERM seulement si le thread principal est injoignable.
+        deadline = time.time() + _CLOSE_RETRY_SECONDS
+        vetoed_logged = False
+        while True:
+            ok, err = self._run_on_main_thread(_terminate, 10, "_close_after_inprocess_update")
+            if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
+                log_to_file("_close_after_inprocess_update: terminate accepted on main thread")
                 return
-            log_to_file("_close_after_inprocess_update: AsyncCallback unavailable, SIGTERM fallback")
-        except Exception as cb_err:
-            log_to_file(f"_close_after_inprocess_update: AsyncCallback path failed ({cb_err}), SIGTERM fallback")
-        # Fallback: quit (SIGTERM). The update still applies on next open.
-        self._terminate_on_main_thread()
+            if err == "vetoed":
+                if not vetoed_logged:
+                    log_to_file("_close_after_inprocess_update: terminate vetoed (dialogue ouvert), nouvel essai périodique")
+                    vetoed_logged = True
+                if time.time() < deadline:
+                    time.sleep(_CLOSE_RETRY_INTERVAL_SECONDS)
+                    continue
+                log_to_file("_close_after_inprocess_update: veto persistant, abandon — la MAJ s'active au prochain démarrage")
+                return
+            log_to_file(f"_close_after_inprocess_update: main thread unreachable ({err}), SIGTERM fallback")
+            self._terminate_on_main_thread()
+            return
 
     def _terminate_on_main_thread(self):
         """Quit LibreOffice without calling desktop.terminate() from a background thread.

@@ -491,17 +491,33 @@ def test_trigger_counts_started_timeout_as_triggered():
         block.set()
 
 
-def test_close_after_inprocess_update_schedules_terminate_via_prebound_callback():
-    job, _dialog, async_cb = _job_with_services()
+def _close_job(terminate_results):
+    """Desktop.terminate() renvoie successivement les valeurs données."""
+    job, _dialog, _async_cb = _job_with_services()
     smgr = job.ctx.getServiceManager.return_value
     desktop = MagicMock(name="Desktop")
+    desktop.terminate.side_effect = list(terminate_results)
     previous = smgr.createInstanceWithContext.side_effect
     smgr.createInstanceWithContext.side_effect = (
         lambda name, ctx: desktop if name == "com.sun.star.frame.Desktop" else previous(name, ctx))
     job._terminate_on_main_thread = MagicMock()
+    return job, desktop
+
+
+def test_close_after_inprocess_update_retries_until_veto_clears(monkeypatch):
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    job, desktop = _close_job([False, False, True])
     job._close_after_inprocess_update()
-    async_cb.addCallback.assert_called_once()
-    desktop.terminate.assert_called_once()
+    assert desktop.terminate.call_count == 3
+    job._terminate_on_main_thread.assert_not_called()
+
+
+def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch):
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
+    job, desktop = _close_job([False] * 50)
+    job._close_after_inprocess_update()
+    assert desktop.terminate.call_count >= 2
     job._terminate_on_main_thread.assert_not_called()
 
 

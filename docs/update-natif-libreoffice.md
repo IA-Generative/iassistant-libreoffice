@@ -25,6 +25,11 @@ mise à jour des extensions — le chemin de la bulle de notification de LibreOf
 l'effet « push » sur la route native. Le bouton « Vérifier les mises à jour » du
 Gestionnaire des extensions reste disponible au support, indépendamment du plugin.
 
+**Fermeture après installation (route 1).** La fermeture est retentée jusqu'à
+acceptation : LibreOffice la refuse (veto) tant que sa fenêtre de progression
+est ouverte ; il ne propose pas lui-même de redémarrer sur ce chemin (l'invite
+native n'existe qu'à la fermeture du Gestionnaire des extensions).
+
 **Refus et reports.** Un « Non » (route 2), une annulation ou une version ignorée dans
 le dialogue natif (route 1) posent `postponed_until` dans `pending_update/update_state.json` :
 la cible n'est pas reproposée avant 24 h, et rien n'est retéléchargé entre-temps.
