@@ -284,7 +284,7 @@ def _events(job):
 def test_native_update_installed_then_closes():
     job = _native_job([CURRENT, CURRENT, CURRENT, TARGET])
     assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
-    assert job._get_extension_version.call_count == 4
+    assert job._get_extension_version.call_count == 5
 
     job._wait_before_prompting.assert_called_once()
     job._trigger_native_update_dialog.assert_called_once()
@@ -613,7 +613,7 @@ def _fake_cache(versions):
 def test_cached_package_versions_lists_our_identifier_only():
     job = _job()
     job._package_cache_dir = lambda: _fake_cache([CURRENT, TARGET])
-    assert job._cached_package_versions() == {CURRENT, TARGET}
+    assert job._versions_of(job._cached_package_versions()) == {CURRENT, TARGET}
 
 
 def test_cached_package_versions_never_raises():
@@ -624,13 +624,25 @@ def test_cached_package_versions_never_raises():
 
 def test_native_poll_detects_install_via_package_cache_when_registry_stale():
     """Cas mesuré sur le banc : getExtensionList renvoie toujours l'ancienne
-    version en session, mais le dossier du nouveau paquet est dans le cache."""
+    version en session, mais le dossier du nouveau paquet est dans le cache.
+    Détection confirmée sur deux lectures consécutives (les polls #2 et #3)."""
     job = _native_job([CURRENT])
     calls = {"n": 0}
     def _cache():
         calls["n"] += 1
-        return _fake_cache([CURRENT, TARGET] if calls["n"] >= 2 else [CURRENT])
+        return _fake_cache([CURRENT, TARGET] if calls["n"] >= 3 else [CURRENT])
     job._package_cache_dir = _cache
     assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
     job._close_after_inprocess_update.assert_called_once()
     assert _state(job)["stage"] == "installed_native"
+
+
+def test_native_poll_ignores_target_folder_present_before_dialog():
+    """Dossier résiduel d'une tentative antérieure : présent AVANT le dialogue,
+    il ne doit pas compter comme une installation."""
+    job = _native_job([CURRENT])
+    cache = _fake_cache([CURRENT, TARGET])
+    job._package_cache_dir = lambda: cache
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=0.2, poll_seconds=0.01) is True
+    job._close_after_inprocess_update.assert_not_called()
+    assert _state(job)["stage"] == "postponed"

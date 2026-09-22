@@ -3070,12 +3070,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return here
 
     def _cached_package_versions(self):
-        """Versions de NOTRE extension présentes dans le cache des paquets sur
-        disque. En session, LibreOffice garde l'ancien paquet enregistré jusqu'au
-        redémarrage : le registre (getExtensionList) ne voit jamais la nouvelle
-        version, mais son dossier existe déjà dans le cache — c'est le signal
-        fiable d'une installation native aboutie. Best-effort, jamais d'exception."""
-        versions = set()
+        """Entrées (dossier <lu…>, version) de NOTRE extension présentes dans le
+        cache des paquets sur disque. En session, LibreOffice garde l'ancien
+        paquet enregistré jusqu'au redémarrage : le registre (getExtensionList)
+        ne voit jamais la nouvelle version, mais son dossier existe déjà dans le
+        cache — c'est le signal fiable d'une installation native aboutie. Le nom
+        du dossier <lu…> est gardé (pas seulement la version) pour distinguer un
+        dossier apparu pendant l'attente d'un dossier résiduel d'une tentative
+        antérieure sur la même cible. Best-effort, jamais d'exception."""
+        entries = set()
         try:
             import re
             cache = self._package_cache_dir()
@@ -3093,10 +3096,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         continue
                     m = re.search(r'<version\s+value="([^"]+)"', text)
                     if m:
-                        versions.add(m.group(1).strip())
+                        entries.add((lu, m.group(1).strip()))
         except Exception as exc:
             log_to_file(f"_cached_package_versions: {exc}")
-        return versions
+        return entries
+
+    @staticmethod
+    def _versions_of(entries):
+        return {v for (_d, v) in entries}
 
     def _perform_native_update(self, directive, wait_seconds=None, poll_seconds=None):
         """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
@@ -3112,7 +3119,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         des paquets sur disque (`_cached_package_versions`) — en session,
         LibreOffice garde l'ancien paquet enregistré jusqu'au redémarrage, donc
         le registre seul reste bloqué sur l'ancienne version même après une
-        installation native aboutie.
+        installation native aboutie. Détection confirmée sur deux lectures
+        consécutives, et uniquement pour un dossier apparu après l'ouverture du
+        dialogue.
         """
         wait_seconds = _NATIVE_INSTALL_WAIT_SECONDS if wait_seconds is None else wait_seconds
         poll_seconds = _NATIVE_POLL_SECONDS if poll_seconds is None else poll_seconds
@@ -3123,6 +3132,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         version_before = str(self._get_extension_version() or "")
         attempts = self._native_attempts_for(target_version)
 
+        cached_before = self._cached_package_versions()
         self._wait_before_prompting()
         log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
         if not self._trigger_native_update_dialog():
@@ -3142,23 +3152,27 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         deadline = time.time() + wait_seconds
         last_seen = None
         polls = 0
+        hits = 0
         while time.time() < deadline:
             time.sleep(poll_seconds)
             polls += 1
             probe_start = time.time()
             seen = str(self._get_extension_version() or "")
             cached = self._cached_package_versions()
-            if target_version in cached:
+            new_entries = cached - cached_before
+            if target_version in self._versions_of(new_entries):
                 seen = target_version
             probe_ms = int((time.time() - probe_start) * 1000)
+            hits = hits + 1 if seen == target_version else 0
             # Journal de diagnostic : valeur vue à chaque changement (et à la
             # première lecture), ou lecture anormalement lente (>1 s).
             if seen != last_seen or probe_ms > 1000:
                 log_to_file(
-                    f"_perform_native_update: poll #{polls} installed={seen or '-'} cache={sorted(cached) or '-'} "
-                    f"target={target_version} ({probe_ms} ms)")
+                    f"_perform_native_update: poll #{polls} installed={seen or '-'} "
+                    f"cache={sorted(self._versions_of(cached)) or '-'} target={target_version} "
+                    f"hits={hits} ({probe_ms} ms)")
                 last_seen = seen
-            if seen == target_version:
+            if hits >= 2:
                 log_to_file(f"_perform_native_update: {target_version} installed natively, closing for restart")
                 self._save_update_state(directive, "installed_native", route="native")
                 self._send_telemetry("UpdateInstalledPendingRestart", {
