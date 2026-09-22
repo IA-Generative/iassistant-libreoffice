@@ -159,8 +159,8 @@ Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe
 
 1. Le plugin appelle `/config/{slug}/config.json` au démarrage et à chaque action
 2. Le DM compare la version du plugin avec la campagne active
-3. Si une mise à jour est disponible, le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé en ordre *last-good d'abord*, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
-4. Vérifie le checksum SHA-256
+3. Si une mise à jour est disponible, le plugin choisit la route. **Native** si le feed `<update-information>` de l'extension installée annonce exactement la version cible : LibreOffice télécharge alors l'OXT lui-même, avec sa pile HTTP, rien ne transite par le plugin. Sinon **dirigée** : le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé en ordre *last-good d'abord*, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
+4. Route dirigée : vérifie le checksum SHA-256. Route native : pas de hash, la confiance repose sur TLS vers le DM
 5. **Installe la mise à jour**, avec repli en cascade — un seul primitif, `addExtension` sur le thread principal :
    1. **Route native pilotée** — si le feed `<update-information>` de l'extension installée annonce exactement la version cible, le plugin ouvre le dialogue natif « Mise à jour des extensions » (`PackageManagerDialog`, `SHOW_UPDATE_DIALOG`) : LibreOffice télécharge et installe lui-même, avec sa pile HTTP ; le plugin ferme ensuite LibreOffice proprement. _(#5, #9)_
    2. **Route dirigée** — sinon (amorçage, rollback, feed injoignable ou divergent) : téléchargement avec failover multi-bootstrap, sha256, `addExtension` in-process, fermeture propre. **Aucun processus enfant.** _(#4, #15, #16)_
