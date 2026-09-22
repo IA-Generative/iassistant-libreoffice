@@ -222,3 +222,14 @@ def test_trigger_times_out_when_main_thread_unavailable():
     job, dialog, _ = _job_with_services(run_callback=False)
     assert job._trigger_native_update_dialog(timeout=0.2) is False
     dialog.trigger.assert_not_called()
+
+
+def test_trigger_late_callback_after_timeout_is_noop():
+    """Le main thread se libère APRÈS le timeout : le rappel ne doit plus ouvrir
+    le dialogue (l'appelant a déjà dégradé vers la route dirigée)."""
+    job, dialog, async_cb = _job_with_services(run_callback=False)
+    captured = {}
+    async_cb.addCallback.side_effect = lambda cb, data: captured.setdefault("cb", cb)
+    assert job._trigger_native_update_dialog(timeout=0.2) is False
+    captured["cb"].notify(None)
+    dialog.trigger.assert_not_called()
