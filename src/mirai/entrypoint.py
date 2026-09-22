@@ -2754,7 +2754,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 )
                 if desktop is not None:
                     log_to_file("_close_after_inprocess_update: terminating on main thread")
-                    desktop.terminate()
+                    if desktop.terminate():
+                        log_to_file("_close_after_inprocess_update: terminated on main thread")
+                    else:
+                        log_to_file("_close_after_inprocess_update: terminate vetoed (dialogue ouvert ?) — LibreOffice reste ouvert, la MAJ s'active au prochain démarrage")
             except Exception as term_err:
                 log_to_file(f"_close_after_inprocess_update: main-thread terminate failed: {term_err}")
 
@@ -3057,6 +3060,44 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except (TypeError, ValueError):
             return 0
 
+    def _package_cache_dir(self):
+        """Dossier du cache des paquets utilisateur
+        (<profil>/user/uno_packages/cache/uno_packages), déduit de l'emplacement
+        de ce module : <cache>/<lu…>/<paquet>.oxt/src/mirai/entrypoint.py."""
+        here = os.path.abspath(__file__)
+        for _ in range(5):
+            here = os.path.dirname(here)
+        return here
+
+    def _cached_package_versions(self):
+        """Versions de NOTRE extension présentes dans le cache des paquets sur
+        disque. En session, LibreOffice garde l'ancien paquet enregistré jusqu'au
+        redémarrage : le registre (getExtensionList) ne voit jamais la nouvelle
+        version, mais son dossier existe déjà dans le cache — c'est le signal
+        fiable d'une installation native aboutie. Best-effort, jamais d'exception."""
+        versions = set()
+        try:
+            import re
+            cache = self._package_cache_dir()
+            for lu in os.listdir(cache):
+                lu_dir = os.path.join(cache, lu)
+                if not os.path.isdir(lu_dir):
+                    continue
+                for pkg in os.listdir(lu_dir):
+                    desc = os.path.join(lu_dir, pkg, "description.xml")
+                    if not os.path.isfile(desc):
+                        continue
+                    with open(desc, encoding="utf-8", errors="replace") as fh:
+                        text = fh.read()
+                    if f'identifier value="{_EXTENSION_IDENTIFIER}"' not in text:
+                        continue
+                    m = re.search(r'<version\s+value="([^"]+)"', text)
+                    if m:
+                        versions.add(m.group(1).strip())
+        except Exception as exc:
+            log_to_file(f"_cached_package_versions: {exc}")
+        return versions
+
     def _perform_native_update(self, directive, wait_seconds=None, poll_seconds=None):
         """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
 
@@ -3065,6 +3106,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         échoué, sans rien rapporter ni persister : l'appelant bascule en route
         dirigée. Après l'installation, l'ancien dossier de l'extension a été
         remplacé : d'ici la fermeture, aucun import de module du plugin.
+
+        Détection de l'installation : combine le registre
+        (`_get_extension_version`, via `PackageInformationProvider`) et le cache
+        des paquets sur disque (`_cached_package_versions`) — en session,
+        LibreOffice garde l'ancien paquet enregistré jusqu'au redémarrage, donc
+        le registre seul reste bloqué sur l'ancienne version même après une
+        installation native aboutie.
         """
         wait_seconds = _NATIVE_INSTALL_WAIT_SECONDS if wait_seconds is None else wait_seconds
         poll_seconds = _NATIVE_POLL_SECONDS if poll_seconds is None else poll_seconds
@@ -3099,12 +3147,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             polls += 1
             probe_start = time.time()
             seen = str(self._get_extension_version() or "")
+            cached = self._cached_package_versions()
+            if target_version in cached:
+                seen = target_version
             probe_ms = int((time.time() - probe_start) * 1000)
             # Journal de diagnostic : valeur vue à chaque changement (et à la
             # première lecture), ou lecture anormalement lente (>1 s).
             if seen != last_seen or probe_ms > 1000:
                 log_to_file(
-                    f"_perform_native_update: poll #{polls} installed={seen or '-'} "
+                    f"_perform_native_update: poll #{polls} installed={seen or '-'} cache={sorted(cached) or '-'} "
                     f"target={target_version} ({probe_ms} ms)")
                 last_seen = seen
             if seen == target_version:
