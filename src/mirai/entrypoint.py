@@ -1969,10 +1969,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # différée (elle ne dérange pas l'utilisateur) ni un rollback (LO ne
             # propose que des versions plus récentes) ; bornée en tentatives.
             if action == "update" and urgency != "deferred":
-                previous = self._load_update_state()
-                attempts = 0
-                if str(previous.get("target_version", "")) == str(target_version):
-                    attempts = int(previous.get("native_attempts") or 0)
+                attempts = self._native_attempts_for(target_version)
                 if attempts < _NATIVE_MAX_ATTEMPTS and self._native_feed_offers(target_version):
                     if self._perform_native_update(directive):
                         return
@@ -2804,7 +2801,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return
         try:
             previous = self._load_update_state()
-            target = str(directive.get("target_version", ""))
+            target = str(directive.get("target_version", "")).strip()
             same = bool(previous) and str(previous.get("target_version", "")) == target
             version_before = str(previous.get("version_before") or "") if same else ""
             if not version_before:
@@ -2988,6 +2985,20 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             time.sleep(1)
         time.sleep(30)
 
+    def _native_attempts_for(self, target_version):
+        """Tentatives natives déjà faites pour cette cible (état persistant) ;
+        0 si autre cible, état absent ou champ illisible. Cible et état sont
+        comparés normalisés (strip) : c'est la même normalisation que
+        _save_update_state et _schedule_update."""
+        target = str(target_version or "").strip()
+        previous = self._load_update_state()
+        if not target or str(previous.get("target_version", "")).strip() != target:
+            return 0
+        try:
+            return int(previous.get("native_attempts") or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def _perform_native_update(self, directive, wait_seconds=None, poll_seconds=None):
         """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
 
@@ -3002,11 +3013,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         target_version = str(directive.get("target_version", "")).strip()
         campaign_id = directive.get("campaign_id")
         campaign_attr = str(campaign_id) if campaign_id is not None else ""
+        urgency = directive.get("urgency", "normal")
         version_before = str(self._get_extension_version() or "")
-        previous = self._load_update_state()
-        attempts = 0
-        if str(previous.get("target_version", "")) == target_version:
-            attempts = int(previous.get("native_attempts") or 0)
+        attempts = self._native_attempts_for(target_version)
 
         self._wait_before_prompting()
         log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
@@ -3021,6 +3030,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "campaign_id": campaign_attr,
             "route": "native",
             "attempt": str(attempts + 1),
+            "urgency": urgency,
         })
 
         deadline = time.time() + wait_seconds
@@ -3034,7 +3044,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "campaign_id": campaign_attr,
                     "route": "native",
                 })
-                self._close_after_inprocess_update()
+                try:
+                    self._close_after_inprocess_update()
+                except Exception as exc:
+                    log_to_file(f"_perform_native_update: close failed (update is installed): {exc}")
                 return True
 
         log_to_file("_perform_native_update: no install detected, postponed")
@@ -3044,6 +3057,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "version_after": target_version,
             "campaign_id": campaign_attr,
             "route": "native",
+            "urgency": urgency,
         })
         return True
 
