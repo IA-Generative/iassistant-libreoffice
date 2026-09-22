@@ -238,8 +238,8 @@ def test_trigger_late_callback_after_timeout_is_noop():
 # ── _perform_native_update : dialogue natif, surveillance, fermeture ─────
 
 def _native_job(versions, trigger=True):
-    """versions : réponses successives de _get_extension_version (la première
-    est version_before, puis la surveillance)."""
+    """versions : réponses successives de _get_extension_version — version_before,
+    puis la surveillance (la dernière valeur reste collante)."""
     job = _job()
     seq = list(versions)
     job._get_extension_version = MagicMock(side_effect=lambda: seq.pop(0) if len(seq) > 1 else seq[0])
@@ -258,8 +258,9 @@ def _events(job):
 
 
 def test_native_update_installed_then_closes():
-    job = _native_job([CURRENT, CURRENT, TARGET])
+    job = _native_job([CURRENT, CURRENT, CURRENT, TARGET])
     assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert job._get_extension_version.call_count == 4
 
     job._wait_before_prompting.assert_called_once()
     job._trigger_native_update_dialog.assert_called_once()
@@ -304,6 +305,28 @@ def test_native_update_returns_false_without_side_effects_when_trigger_fails():
     job._report_update_status.assert_not_called()
     job._send_telemetry.assert_not_called()
     assert not os.path.isfile(job._update_state_path())
+
+
+def test_native_attempts_for_normalises_target_and_tolerates_corruption():
+    job = _job()
+    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "native_dialog",
+                           route="native", native_attempts=1)
+    assert job._native_attempts_for(TARGET) == 1
+    assert job._native_attempts_for(f"  {TARGET} ") == 1
+    assert job._native_attempts_for("0.0.1.0.99") == 0
+    assert job._native_attempts_for("") == 0
+    with open(job._update_state_path(), "w", encoding="utf-8") as fh:
+        json.dump({"target_version": TARGET, "native_attempts": "x"}, fh)
+    assert job._native_attempts_for(TARGET) == 0
+
+
+def test_native_update_still_true_when_close_raises():
+    """Installée mais fermeture en échec : l'issue reste « installée » (état
+    installed_native), jamais un rapport failed."""
+    job = _native_job([CURRENT, CURRENT, TARGET])
+    job._close_after_inprocess_update = MagicMock(side_effect=RuntimeError("terminate"))
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert _state(job)["stage"] == "installed_native"
 
 
 # ── Choix de route dans _perform_update ──────────────────────────────────
