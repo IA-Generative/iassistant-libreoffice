@@ -2930,6 +2930,51 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             f"_native_feed_offers: target={target} announced={announced or '-'} offers={offers}")
         return offers
 
+    def _trigger_native_update_dialog(self, timeout=_NATIVE_TRIGGER_TIMEOUT_SECONDS):
+        """Ouvre, sur le thread PRINCIPAL, le dialogue natif « Mise à jour des
+        extensions » : PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG"), l'appel
+        exact de la bulle de notification de LibreOffice (updatecheck.cxx). LO
+        interroge le feed, télécharge et installe lui-même ; ses dialogues tournent
+        sur son thread de commandes, l'appel rend la main aussitôt.
+        Vrai si le déclenchement s'est exécuté sans exception avant `timeout`."""
+        if _MainThreadCallback is None:
+            return False
+        holder = {"ok": False, "err": ""}
+        done = threading.Event()
+        ctx = self.ctx
+
+        def _do_trigger():
+            try:
+                dialog = ctx.getServiceManager().createInstanceWithContext(
+                    "com.sun.star.deployment.ui.PackageManagerDialog", ctx)
+                if dialog is None:
+                    holder["err"] = "PackageManagerDialog unavailable"
+                    return
+                dialog.trigger("SHOW_UPDATE_DIALOG")
+                holder["ok"] = True
+            except Exception as exc:
+                holder["err"] = str(exc)
+            finally:
+                done.set()
+
+        try:
+            async_cb = self.ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.awt.AsyncCallback", self.ctx)
+            if async_cb is None:
+                return False
+            async_cb.addCallback(_MainThreadCallback(_do_trigger), None)
+        except Exception as exc:
+            log_to_file(f"_trigger_native_update_dialog: schedule failed: {exc}")
+            return False
+        if not done.wait(timeout):
+            log_to_file("_trigger_native_update_dialog: timeout waiting for main thread")
+            return False
+        if holder["ok"]:
+            log_to_file("_trigger_native_update_dialog: SHOW_UPDATE_DIALOG triggered")
+            return True
+        log_to_file(f"_trigger_native_update_dialog: failed: {holder['err']}")
+        return False
+
     # ── Diagnostic passif du feed natif (<update-information>, issue #5) ──
     # LibreOffice récupère le feed avec SA pile HTTP (proxy/TLS/GPO propres),
     # pas celle du plugin. Ce check headless valide donc, sans aucune action

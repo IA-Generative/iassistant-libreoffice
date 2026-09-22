@@ -179,3 +179,46 @@ def test_native_feed_offers_false_on_error_or_missing_provider():
     job2.ctx.getValueByName = MagicMock(return_value=None)
     assert job2._native_feed_offers(TARGET) is False
     assert job2._native_feed_offers("") is False
+
+
+# ── _trigger_native_update_dialog : PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG") ──
+# L'appel exact de la bulle de notification de LibreOffice (updatecheck.cxx →
+# showExtensionDialog). Il met la vérification en file sur le thread de commandes
+# de LO et rend la main ; il doit partir du thread principal (AsyncCallback).
+
+PMD = "com.sun.star.deployment.ui.PackageManagerDialog"
+ASYNC = "com.sun.star.awt.AsyncCallback"
+
+
+def _job_with_services(run_callback=True):
+    """AsyncCallback synchrone (le main thread est disponible tout de suite)
+    ou inerte (run_callback=False) ; PackageManagerDialog mocké."""
+    job = _job()
+    smgr = job.ctx.getServiceManager.return_value
+    default = smgr.createInstanceWithContext.return_value
+    dialog = MagicMock(name="PackageManagerDialog")
+    async_cb = MagicMock(name="AsyncCallback")
+    if run_callback:
+        async_cb.addCallback.side_effect = lambda cb, data: cb.notify(data)
+    services = {PMD: dialog, ASYNC: async_cb}
+    smgr.createInstanceWithContext.side_effect = lambda name, ctx: services.get(name, default)
+    return job, dialog, async_cb
+
+
+def test_trigger_opens_update_dialog_on_main_thread():
+    job, dialog, async_cb = _job_with_services()
+    assert job._trigger_native_update_dialog(timeout=2) is True
+    async_cb.addCallback.assert_called_once()
+    dialog.trigger.assert_called_once_with("SHOW_UPDATE_DIALOG")
+
+
+def test_trigger_returns_false_when_dialog_raises():
+    job, dialog, _ = _job_with_services()
+    dialog.trigger.side_effect = RuntimeError("Cannot initialize VCL")
+    assert job._trigger_native_update_dialog(timeout=2) is False
+
+
+def test_trigger_times_out_when_main_thread_unavailable():
+    job, dialog, _ = _job_with_services(run_callback=False)
+    assert job._trigger_native_update_dialog(timeout=0.2) is False
+    dialog.trigger.assert_not_called()
