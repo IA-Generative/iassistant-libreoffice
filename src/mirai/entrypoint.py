@@ -1853,11 +1853,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _get_extension_version(self):
         """Version installée de l'extension, lue dans le REGISTRE des extensions
-        (PackageInformationProvider.getExtensionList : paires [identifiant, version],
-        version la plus haute entre dépôts) — pas dans le description.xml du
-        paquet courant : après une mise à jour native, l'ancien dossier a disparu
-        et l'ancien module tournant encore ne verrait jamais la nouvelle version.
-        Repli sur description.xml (tests, LibreOffice dégradé)."""
+        (PackageInformationProvider.getExtensionList : une paire [identifiant,
+        version] par extension, LibreOffice y retient la version la plus haute
+        entre dépôts ; on prend la première paire de notre identifiant) — pas
+        dans le description.xml du paquet courant : après une mise à jour
+        native, l'ancien dossier a disparu et l'ancien module tournant encore
+        ne verrait jamais la nouvelle version. Repli sur description.xml
+        (tests, LibreOffice dégradé)."""
         try:
             pip = self.ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.deployment.PackageInformationProvider", self.ctx
