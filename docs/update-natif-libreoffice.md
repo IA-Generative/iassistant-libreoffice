@@ -104,7 +104,7 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
 
 ## Fiabilité route 2, dirigée (issue #9) — décisions implémentées
 
-- **Install sur le main thread via `theExtensionManager.addExtension`**, sans
+- **Install sur le main thread via `ExtensionManager.addExtension`**, sans
   remove-avant-add : le remplacement même-identifiant est atomique
   (`VersionException` auto-approuvée). Les cycles `removePackage`/`addPackage`
   bas niveau depuis le thread worker — la cause des entrées fantômes — sont
