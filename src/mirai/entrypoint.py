@@ -1850,15 +1850,24 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # ── Update & Feature Toggling (schema_version 2) ─────────────────
 
     def _get_extension_version(self):
-        """Return the installed version from description.xml in the .oxt package."""
+        """Version installée de l'extension, lue dans le REGISTRE des extensions
+        (PackageInformationProvider.getExtensionList : paires [identifiant, version],
+        version la plus haute entre dépôts) — pas dans le description.xml du
+        paquet courant : après une mise à jour native, l'ancien dossier a disparu
+        et l'ancien module tournant encore ne verrait jamais la nouvelle version.
+        Repli sur description.xml (tests, LibreOffice dégradé)."""
         try:
             pip = self.ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.deployment.PackageInformationProvider", self.ctx
             )
             if pip:
-                version = pip.getExtensionVersion("fr.gouv.interieur.mirai")
-                if version:
-                    return str(version).strip()
+                for pair in pip.getExtensionList() or ():
+                    try:
+                        ident, version = str(pair[0]), str(pair[1])
+                    except Exception:
+                        continue
+                    if ident == _EXTENSION_IDENTIFIER and version.strip():
+                        return version.strip()
         except Exception:
             pass
         # Fallback: parse description.xml from the package directory
