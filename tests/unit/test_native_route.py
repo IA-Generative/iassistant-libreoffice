@@ -233,3 +233,140 @@ def test_trigger_late_callback_after_timeout_is_noop():
     assert job._trigger_native_update_dialog(timeout=0.2) is False
     captured["cb"].notify(None)
     dialog.trigger.assert_not_called()
+
+
+# ── _perform_native_update : dialogue natif, surveillance, fermeture ─────
+
+def _native_job(versions, trigger=True):
+    """versions : réponses successives de _get_extension_version (la première
+    est version_before, puis la surveillance)."""
+    job = _job()
+    seq = list(versions)
+    job._get_extension_version = MagicMock(side_effect=lambda: seq.pop(0) if len(seq) > 1 else seq[0])
+    job._wait_before_prompting = MagicMock()
+    job._trigger_native_update_dialog = MagicMock(return_value=trigger)
+    job._close_after_inprocess_update = MagicMock()
+    return job
+
+
+DIRECTIVE = {"action": "update", "target_version": TARGET, "campaign_id": 7,
+             "artifact_url": "/catalog/mirai-libreoffice/download", "urgency": "normal"}
+
+
+def _events(job):
+    return [c.args[0] for c in job._send_telemetry.call_args_list]
+
+
+def test_native_update_installed_then_closes():
+    job = _native_job([CURRENT, CURRENT, TARGET])
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+
+    job._wait_before_prompting.assert_called_once()
+    job._trigger_native_update_dialog.assert_called_once()
+    job._report_update_status.assert_called_once_with(7, "deferred", CURRENT, TARGET)
+    job._close_after_inprocess_update.assert_called_once()
+    state = _state(job)
+    assert state["stage"] == "installed_native"
+    assert state["route"] == "native"
+    assert state["native_attempts"] == 1
+    assert state["version_before"] == CURRENT
+    assert _events(job) == ["UpdateNativeDialogShown", "UpdateInstalledPendingRestart"]
+    attrs = job._send_telemetry.call_args_list[1].args[1]
+    assert attrs["route"] == "native" and attrs["version_after"] == TARGET
+
+
+def test_native_update_postponed_when_nothing_installed():
+    job = _native_job([CURRENT])
+    before = time.time()
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=0.05, poll_seconds=0.01) is True
+
+    job._close_after_inprocess_update.assert_not_called()
+    state = _state(job)
+    assert state["stage"] == "postponed"
+    assert state["route"] == "native"
+    assert state["postponed_until"] >= before + entrypoint._UPDATE_POSTPONE_SECONDS - 1
+    assert _events(job) == ["UpdateNativeDialogShown", "UpdatePostponed"]
+    assert job._send_telemetry.call_args_list[1].args[1]["route"] == "native"
+
+
+def test_native_update_counts_attempts_for_same_target():
+    job = _native_job([CURRENT])
+    job._save_update_state(DIRECTIVE, "postponed", route="native", native_attempts=1)
+    job._perform_native_update(DIRECTIVE, wait_seconds=0.05, poll_seconds=0.01)
+    assert _state(job)["native_attempts"] == 2
+    attrs = job._send_telemetry.call_args_list[0].args[1]
+    assert attrs["attempt"] == "2"
+
+
+def test_native_update_returns_false_without_side_effects_when_trigger_fails():
+    job = _native_job([CURRENT], trigger=False)
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=0.05, poll_seconds=0.01) is False
+    job._report_update_status.assert_not_called()
+    job._send_telemetry.assert_not_called()
+    assert not os.path.isfile(job._update_state_path())
+
+
+# ── Choix de route dans _perform_update ──────────────────────────────────
+
+def _routing_job(feed_offers=True, native_result=True):
+    job = _job()
+    job._native_feed_offers = MagicMock(return_value=feed_offers)
+    job._perform_native_update = MagicMock(return_value=native_result)
+    job._wait_before_prompting = MagicMock()
+    job.get_ssl_context = MagicMock()
+    job._urlopen = MagicMock()
+    job._urlopen.return_value.__enter__.return_value.read.return_value = b"oxt-bytes"
+    job._failover_ordered_urls = MagicMock(return_value=["https://dm.example"])
+    return job
+
+
+def test_perform_update_takes_native_route_without_downloading():
+    job = _routing_job()
+    job._perform_update(dict(DIRECTIVE))
+    job._native_feed_offers.assert_called_once_with(TARGET)
+    job._perform_native_update.assert_called_once()
+    job._urlopen.assert_not_called()
+
+
+def test_perform_update_falls_back_to_directed_route_when_native_fails():
+    job = _routing_job(native_result=False)
+    job._perform_update(dict(DIRECTIVE))
+    job._perform_native_update.assert_called_once()
+    assert job._urlopen.called, "la route dirigée doit télécharger"
+
+
+def test_perform_update_skips_native_when_feed_diverges():
+    job = _routing_job(feed_offers=False)
+    job._perform_update(dict(DIRECTIVE))
+    job._perform_native_update.assert_not_called()
+    assert job._urlopen.called
+
+
+def test_perform_update_skips_native_for_deferred_urgency_and_rollback():
+    job = _routing_job()
+    job._perform_update(dict(DIRECTIVE, urgency="deferred"))
+    job._perform_update(dict(DIRECTIVE, action="rollback"))
+    job._native_feed_offers.assert_not_called()
+    job._perform_native_update.assert_not_called()
+
+
+def test_perform_update_skips_native_after_max_attempts():
+    job = _routing_job()
+    job._save_update_state(DIRECTIVE, "postponed", route="native",
+                           native_attempts=entrypoint._NATIVE_MAX_ATTEMPTS)
+    job._perform_update(dict(DIRECTIVE))
+    job._native_feed_offers.assert_not_called()
+    assert job._urlopen.called
+
+
+def test_directed_route_postponed_sets_cooldown():
+    """Route dirigée, l'utilisateur répond « Non » (msgbox mocké ≠ 2) → état
+    postponed avec échéance, route « directed »."""
+    job = _routing_job(feed_offers=False)
+    before = time.time()
+    job._perform_update(dict(DIRECTIVE))
+    state = _state(job)
+    assert state["stage"] == "postponed"
+    assert state["route"] == "directed"
+    assert state["postponed_until"] >= before + entrypoint._UPDATE_POSTPONE_SECONDS - 1
+    assert "UpdatePostponed" in _events(job)
