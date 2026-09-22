@@ -104,7 +104,7 @@ def test_load_update_state_returns_empty_when_missing_or_corrupt():
 
 # ── Cooldown : une cible refusée ou ignorée n'est pas reproposée avant 24 h ──
 
-def _schedule_and_wait(job, directive, seconds=0.5):
+def _schedule_and_wait(job, directive, seconds=2):
     done = threading.Event()
     job._perform_update = lambda d: done.set()
     job._schedule_update(directive)
@@ -130,6 +130,15 @@ def test_schedule_update_ignores_cooldown_of_other_target():
     job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
                            route="native", postponed_until=time.time() + 3600)
     assert _schedule_and_wait(job, {"action": "update", "target_version": "0.0.1.0.33"}) is True
+
+
+def test_schedule_update_tolerates_corrupt_postponed_until():
+    """Un état corrompu ne doit jamais faire échouer le rafraîchissement de config."""
+    job = _job()
+    os.makedirs(os.path.dirname(job._update_state_path()), exist_ok=True)
+    with open(job._update_state_path(), "w", encoding="utf-8") as fh:
+        json.dump({"target_version": TARGET, "postponed_until": "x"}, fh)
+    assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is True
 
 
 # ── _native_feed_offers : PackageInformationProvider.isUpdateAvailable ────
