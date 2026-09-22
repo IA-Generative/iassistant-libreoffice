@@ -82,7 +82,9 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
 
 1. Installer une version N, publier N+1 côté DM (feed à jour).
 2. Outils → Gestionnaire des extensions → **Vérifier les mises à jour** :
-   la MAJ doit apparaître ; installer ; redémarrer quand LO le propose.
+   la MAJ doit apparaître ; installer ; sur le chemin manuel LibreOffice propose
+   le redémarrage à la fermeture du Gestionnaire ; sur le chemin piloté c'est le
+   plugin qui ferme LibreOffice.
 3. Répéter 3 cycles consécutifs : l'extension doit rester visible et
    fonctionnelle (pas d'entrées fantômes dans `registrymodifications.xcu`).
 4. Points durs à valider sur poste durci MI :
@@ -98,7 +100,7 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
 6. Après « Installer » dans le dialogue natif : observer la boîte « installée,
    LibreOffice va se fermer » du plugin pendant que le dialogue LibreOffice
    est encore ouvert, et vérifier si la fermeture est refusée
-   (`grep "main-thread terminate failed" ~/log.txt`).
+   (`grep -E "terminate (accepted|vetoed)|veto persistant|refusée par l'utilisateur" ~/log.txt`).
 7. `grep "_native_feed_offers" ~/log.txt` sur le poste durci : `offers=True`
    prouve que la pile UCB de LibreOffice traverse proxy et TLS jusqu'au feed.
 8. Deux sauts natifs consécutifs N → N+1 → N+2 avec inspection de
