@@ -42,6 +42,8 @@ _CLOSE_RETRY_INTERVAL_SECONDS = 3
 _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
 _MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
+_MAIN_THREAD_VETOED = "vetoed"
+_CLOSE_USER_REFUSAL_SECONDS = 1.0
 
 # Interfaces UNO pré-bindées au chargement du module (= thread principal), pour le
 # même motif que _EXT_MGR_SINGLETON : le worker d'update ne peut pas faire de
@@ -1030,6 +1032,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "UpdateInstallFailed": "update",
         "NativeFeedCheck": "update",
         "UpdateNativeDialogShown": "update",
+        "UpdateCloseDeferred": "update",
         "ExtendSelection": "extend",
         "EditSelection": "edit",
         "ResizeSelection": "resize",
@@ -1079,6 +1082,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "UpdateInstalledPendingRestart",
         "UpdateInstallFailed",
         "UpdateNativeDialogShown",
+        "UpdateCloseDeferred",
         "ExtensionUpdated",
         "NativeFeedCheck",
     }
@@ -1856,11 +1860,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _get_extension_version(self):
         """Version installée de l'extension, lue dans le REGISTRE des extensions
         (PackageInformationProvider.getExtensionList : une paire [identifiant,
-        version] par extension, LibreOffice y retient la version la plus haute
-        entre dépôts ; on prend la première paire de notre identifiant) — pas
-        dans le description.xml du paquet courant : après une mise à jour
-        native, l'ancien dossier a disparu et l'ancien module tournant encore
-        ne verrait jamais la nouvelle version. Repli sur description.xml
+        version] par extension ; on prend la première paire de notre
+        identifiant) — pas dans le description.xml du paquet courant : après
+        une mise à jour native, notre propre description.xml décrit encore
+        l'ancien paquet (LibreOffice le garde chargé jusqu'au redémarrage) :
+        lire le registre, jamais son propre dossier. Repli sur description.xml
         (tests, LibreOffice dégradé)."""
         try:
             pip = self.ctx.getServiceManager().createInstanceWithContext(
@@ -1875,7 +1879,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     if ident == _EXTENSION_IDENTIFIER and version.strip():
                         return version.strip()
         except Exception as exc:
-            log_to_file(f"_get_extension_version: registry read failed: {exc}")
+            if not getattr(self, "_registry_read_failure_logged", False):
+                log_to_file(f"_get_extension_version: registry read failed: {exc}")
+                self._registry_read_failure_logged = True
         # Fallback: parse description.xml from the package directory
         try:
             pkg_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1920,18 +1926,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         target_version = str(directive.get("target_version") or "").strip()
 
-        # Réconcilier d'abord une mise à jour précédente déjà active : la
-        # directive suivante peut arriver dans les secondes du démarrage, avant
-        # le timer de réconciliation, et écraserait l'état persistant — la
-        # campagne précédente ne serait jamais rapportée « installed ».
-        previous = self._load_update_state()
-        previous_target = str(previous.get("target_version", "")).strip() if previous else ""
-        if previous_target and previous_target != target_version:
-            try:
-                self._reconcile_update_state()
-            except Exception as exc:
-                log_to_file(f"_schedule_update: reconciliation failed: {exc}")
-
         if target_version and target_version in MainJob._update_launch_blocked_cls:
             log_to_file(
                 f"Update skipped: install of {target_version} was blocked by the "
@@ -1954,6 +1948,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 )
                 return
 
+        # Déjà installée, en attente de redémarrage (fermeture refusée ou
+        # abandonnée) : ne pas re-proposer — la réconciliation au prochain
+        # démarrage rapportera « installed ».
+        if target_version and str(state.get("target_version", "")).strip() == target_version \
+                and state.get("stage") in ("installed_native", "installed_inprocess"):
+            log_to_file(f"Update skipped: {target_version} already installed, pending restart")
+            return
+
         with MainJob._update_lock_cls:
             if MainJob._update_in_progress_cls:
                 log_to_file("Update already in progress, skipping duplicate schedule")
@@ -1968,6 +1970,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
+                # Réconcilier d'abord une mise à jour précédente déjà active (la
+                # directive suivante peut arriver avant le timer de réconciliation
+                # et écraserait l'état persistant). Hors du chemin de fetch config,
+                # sous le verrou « en cours » : ni blocage, ni doublon.
+                previous = self._load_update_state()
+                previous_target = str(previous.get("target_version", "")).strip() if previous else ""
+                if previous_target and previous_target != target_version:
+                    try:
+                        self._reconcile_update_state()
+                    except Exception as exc:
+                        log_to_file(f"_schedule_update: reconciliation failed: {exc}")
                 self._perform_update(directive)
             finally:
                 with MainJob._update_lock_cls:
@@ -2559,11 +2572,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             except Exception as exc:
                 log_to_file(f"_install_oxt_inprocess: ExtensionManager.get failed: {exc}")
             if mgr is not None:
-                try:
-                    mgr.removeExtension(_EXTENSION_IDENTIFIER, "", "user", abort, cmd_env)
-                    log_to_file("_install_oxt_inprocess: removed prior extension before add")
-                except Exception as rm_exc:
-                    log_to_file(f"_install_oxt_inprocess: removeExtension (ignored): {rm_exc}")
+                # Pas de remove-avant-add : addExtension remplace atomiquement une
+                # extension de même identifiant (VersionException approuvée par le
+                # handler silencieux), comme sur le chemin main-thread.
                 mgr.addExtension(oxt_url, props, "user", abort, cmd_env)
                 log_to_file("_install_oxt_inprocess: installed via ExtensionManager singleton")
                 return True
@@ -2713,7 +2724,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             # Close LibreOffice cleanly so the user reopens it with the new version
             # active. We deliberately do NOT re-exec.
-            self._close_after_inprocess_update()
+            if not self._close_after_inprocess_update():
+                self._send_telemetry("UpdateCloseDeferred", {"route": "directed"})
             return True
         except Exception as exc:
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
@@ -2732,9 +2744,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         `Desktop.terminate()` must run on the **main thread** (from this update-worker
         thread it corrupts the macOS layout engine), via `_run_on_main_thread`. Sur la
         route native, LibreOffice refuse la fermeture (veto) tant qu'une de ses
-        fenêtres modales — la progression de la mise à jour — est encore ouverte : on
-        retente périodiquement jusqu'à acceptation ou expiration du délai, sans jamais
-        basculer sur SIGTERM pour un simple veto.
+        fenêtres modales — la progression de la mise à jour — est encore ouverte, ou
+        si le thread principal est occupé (timeout) : on retente périodiquement
+        jusqu'à acceptation ou expiration du délai. Un veto qui a mis du temps à
+        arriver est traité comme un refus humain (« Enregistrer ? » → Annuler) et
+        respecté sans nouvel essai. SIGTERM n'intervient que si le thread principal
+        est injoignable (callback/AsyncCallback indisponible) — jamais pour un simple
+        veto ou une occupation temporaire.
+
+        Retourne True si la fermeture a été acceptée, False sinon (veto persistant,
+        refus humain, ou SIGTERM déclenché).
         """
         # Best-effort: tell the user before closing.
         try:
@@ -2768,31 +2787,39 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if desktop is None:
                 raise RuntimeError("Desktop unavailable")
             if not desktop.terminate():
-                raise RuntimeError("vetoed")
+                raise RuntimeError(_MAIN_THREAD_VETOED)
 
-        # Fermeture propre sur le MAIN thread, retentée : LibreOffice la refuse
-        # (veto) tant qu'un de ses dialogues modaux est ouvert — typiquement la
-        # fenêtre de progression de la mise à jour native. Jamais de SIGTERM sur
-        # un veto ; SIGTERM seulement si le thread principal est injoignable.
         deadline = time.time() + _CLOSE_RETRY_SECONDS
         vetoed_logged = False
         while True:
+            attempt_start = time.time()
             ok, err = self._run_on_main_thread(_terminate, 10, "_close_after_inprocess_update")
+            attempt_s = time.time() - attempt_start
             if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
                 log_to_file("_close_after_inprocess_update: terminate accepted on main thread")
-                return
-            if err == "vetoed":
+                return True
+            if err == _MAIN_THREAD_VETOED and attempt_s >= _CLOSE_USER_REFUSAL_SECONDS:
+                # Un veto qui a pris du temps est une réponse humaine (« Enregistrer ? »
+                # → Annuler) : on la respecte, pas de harcèlement.
+                log_to_file(f"_close_after_inprocess_update: fermeture refusée par l'utilisateur ({attempt_s:.1f} s), abandon")
+                return False
+            if err in (_MAIN_THREAD_VETOED, "timeout"):
+                # Veto immédiat = dialogue modal de LibreOffice encore ouvert (fenêtre de
+                # progression de la MAJ) ; timeout = thread principal occupé. Dans les
+                # deux cas on réessaie jusqu'à l'échéance — jamais de SIGTERM ici.
                 if not vetoed_logged:
-                    log_to_file("_close_after_inprocess_update: terminate vetoed (dialogue ouvert), nouvel essai périodique")
+                    log_to_file(f"_close_after_inprocess_update: terminate {err} (dialogue ouvert ou thread principal occupé), nouvel essai périodique")
                     vetoed_logged = True
                 if time.time() < deadline:
                     time.sleep(_CLOSE_RETRY_INTERVAL_SECONDS)
                     continue
                 log_to_file("_close_after_inprocess_update: veto persistant, abandon — la MAJ s'active au prochain démarrage")
-                return
+                return False
+            # Le thread principal est injoignable (callback/AsyncCallback indisponible,
+            # planification impossible) : seul cas où SIGTERM reste justifié.
             log_to_file(f"_close_after_inprocess_update: main thread unreachable ({err}), SIGTERM fallback")
             self._terminate_on_main_thread()
-            return
+            return False
 
     def _terminate_on_main_thread(self):
         """Quit LibreOffice without calling desktop.terminate() from a background thread.
@@ -3109,7 +3136,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         continue
                     with open(desc, encoding="utf-8", errors="replace") as fh:
                         text = fh.read()
-                    if f'identifier value="{_EXTENSION_IDENTIFIER}"' not in text:
+                    if not re.search(r'<identifier\s+value="' + re.escape(_EXTENSION_IDENTIFIER) + r'"', text):
                         continue
                     m = re.search(r'<version\s+value="([^"]+)"', text)
                     if m:
@@ -3128,8 +3155,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         Renvoie True si le dialogue a été montré et l'issue traitée — installée
         (fermeture propre) ou reportée (cooldown) ; False si le déclenchement a
         échoué, sans rien rapporter ni persister : l'appelant bascule en route
-        dirigée. Après l'installation, l'ancien dossier de l'extension a été
-        remplacé : d'ici la fermeture, aucun import de module du plugin.
+        dirigée. Après l'installation native, LibreOffice garde l'ancien paquet
+        chargé jusqu'au redémarrage et le nouveau dossier apparaît à côté : d'ici
+        la fermeture, aucun import de module du plugin.
 
         Détection de l'installation : combine le registre
         (`_get_extension_version`, via `PackageInformationProvider`) et le cache
@@ -3137,8 +3165,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         LibreOffice garde l'ancien paquet enregistré jusqu'au redémarrage, donc
         le registre seul reste bloqué sur l'ancienne version même après une
         installation native aboutie. Détection confirmée sur deux lectures
-        consécutives, et uniquement pour un dossier apparu après l'ouverture du
-        dialogue.
+        consécutives, et uniquement pour un dossier apparu depuis l'instantané
+        pris avant l'attente et l'ouverture du dialogue.
         """
         wait_seconds = _NATIVE_INSTALL_WAIT_SECONDS if wait_seconds is None else wait_seconds
         poll_seconds = _NATIVE_POLL_SECONDS if poll_seconds is None else poll_seconds
@@ -3180,7 +3208,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if target_version in self._versions_of(new_entries):
                 seen = target_version
             probe_ms = int((time.time() - probe_start) * 1000)
-            hits = hits + 1 if seen == target_version else 0
+            hits = hits + 1 if seen == target_version and target_version else 0
             # Journal de diagnostic : valeur vue à chaque changement (et à la
             # première lecture), ou lecture anormalement lente (>1 s).
             if seen != last_seen or probe_ms > 1000:
@@ -3197,10 +3225,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "campaign_id": campaign_attr,
                     "route": "native",
                 })
+                closed = False
                 try:
-                    self._close_after_inprocess_update()
+                    closed = self._close_after_inprocess_update()
                 except Exception as exc:
                     log_to_file(f"_perform_native_update: close failed (update is installed): {exc}")
+                if not closed:
+                    self._send_telemetry("UpdateCloseDeferred", {
+                        "version_after": target_version,
+                        "campaign_id": campaign_attr,
+                        "route": "native",
+                    })
                 return True
 
         log_to_file(f"_perform_native_update: no install detected after {polls} polls (last seen {last_seen or '-'}), postponed")
