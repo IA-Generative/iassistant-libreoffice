@@ -28,6 +28,14 @@ _EXTENSION_IDENTIFIER = "fr.gouv.interieur.mirai"
 _UPDATE_FEED_PATH = "/catalog/mirai-libreoffice/update.xml"
 _UPDATE_FEED_NS = "http://openoffice.org/extensions/update/2006"
 
+# Route native pilotée (spec 2026-09-22) : refus mémorisé, attente de
+# l'installation par LibreOffice, bornes du déclenchement.
+_UPDATE_POSTPONE_SECONDS = 24 * 3600
+_NATIVE_INSTALL_WAIT_SECONDS = 900
+_NATIVE_POLL_SECONDS = 5
+_NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
+_NATIVE_MAX_ATTEMPTS = 2
+
 # Interfaces UNO pré-bindées au chargement du module (= thread principal), pour le
 # même motif que _EXT_MGR_SINGLETON : le worker d'update ne peut pas faire de
 # `from com.sun.star… import …` lui-même ("No module named 'com'"). Elles servent
@@ -2735,20 +2743,55 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return ""
         return os.path.join(base, "pending_update", "update_state.json")
 
-    def _save_update_state(self, directive, stage):
-        """Persiste l'état de la campagne en cours (best-effort, jamais bloquant)."""
+    def _load_update_state(self):
+        """État persistant de la MAJ en cours, ou {} (fichier absent ou illisible).
+        La réconciliation garde sa propre lecture, qui supprime un fichier corrompu."""
+        path = self._update_state_path()
+        if not path or not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, encoding="utf-8") as fh:
+                state = json.load(fh)
+        except Exception:
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    def _save_update_state(self, directive, stage, route=None, postponed_until=None,
+                           native_attempts=None):
+        """Persiste l'état de la campagne en cours (best-effort, jamais bloquant).
+
+        Pour une même cible, les champs non fournis (route, postponed_until,
+        native_attempts) et version_before sont conservés depuis l'état
+        précédent : après l'installation, la version active est déjà la cible,
+        et version_before doit rester celle d'avant pour la réconciliation.
+        """
         path = self._update_state_path()
         if not path:
             return
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            previous = self._load_update_state()
+            target = str(directive.get("target_version", ""))
+            same = bool(previous) and str(previous.get("target_version", "")) == target
+            version_before = str(previous.get("version_before") or "") if same else ""
+            if not version_before:
+                version_before = str(self._get_extension_version() or "")
+            if route is None:
+                route = str(previous.get("route") or "") if same else ""
+            if postponed_until is None:
+                postponed_until = float(previous.get("postponed_until") or 0) if same else 0.0
+            if native_attempts is None:
+                native_attempts = int(previous.get("native_attempts") or 0) if same else 0
             state = {
                 "campaign_id": directive.get("campaign_id"),
-                "target_version": str(directive.get("target_version", "")),
-                "version_before": str(self._get_extension_version() or ""),
+                "target_version": target,
+                "version_before": version_before,
                 "stage": stage,
                 "ts": time.time(),
+                "route": route,
+                "postponed_until": float(postponed_until),
+                "native_attempts": int(native_attempts),
             }
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(state, fh)
         except Exception as exc:
