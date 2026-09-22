@@ -8,7 +8,6 @@ Run:  pytest tests/unit/test_native_route.py -v
 import json
 import os
 import tempfile
-import threading
 import time
 from unittest.mock import MagicMock
 
@@ -17,7 +16,6 @@ from tests.stubs.uno_stubs import install, make_job
 install()
 
 from src.mirai import entrypoint
-from src.mirai.entrypoint import MainJob
 
 TARGET = "0.0.1.0.32"
 CURRENT = "0.0.1.0.31"
