@@ -37,6 +37,8 @@ _NATIVE_INSTALL_WAIT_SECONDS = 900
 _NATIVE_POLL_SECONDS = 5
 _NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
 _NATIVE_MAX_ATTEMPTS = 2
+_PROMPT_WIZARD_WAIT_SECONDS = 120
+_PROMPT_GRACE_SECONDS = 30
 _MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
 
 # Interfaces UNO pré-bindées au chargement du module (= thread principal), pour le
@@ -3023,16 +3025,21 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return False
 
     def _wait_before_prompting(self):
-        """Laisse l'assistant d'enrôlement se terminer (120 s max), puis un délai
-        de grâce de 30 s pour ne pas interrompre l'utilisateur d'emblée."""
-        _wait_start = time.time()
-        _max_wait = 120
-        while time.time() - _wait_start < _max_wait:
+        """Laisse l'assistant d'enrôlement se terminer (budget
+        _PROMPT_WIZARD_WAIT_SECONDS), puis un délai de grâce, puis revérifie :
+        l'assistant peut s'être ouvert pendant la grâce (auto-check à T+3 s) et le
+        dialogue de mise à jour ne doit pas se superposer à lui."""
+        deadline = time.time() + _PROMPT_WIZARD_WAIT_SECONDS
+        self._wait_wizard_closed(deadline)
+        time.sleep(_PROMPT_GRACE_SECONDS)
+        self._wait_wizard_closed(deadline + _PROMPT_GRACE_SECONDS)
+
+    def _wait_wizard_closed(self, deadline):
+        while time.time() < deadline:
             with MainJob._enrollment_wizard_lock_cls:
                 if not MainJob._enrollment_wizard_active_cls:
-                    break
+                    return
             time.sleep(1)
-        time.sleep(30)
 
     def _native_attempts_for(self, target_version):
         """Tentatives natives déjà faites pour cette cible (état persistant) ;
