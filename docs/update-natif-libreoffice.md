@@ -87,7 +87,7 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
      du Gestionnaire des extensions déclenche le check (pas de périodique) ;
    - certificats : la chaîne TLS du bootstrap doit être reconnue par LO.
 
-## Fiabilité route 1 (issue #9) — décisions implémentées
+## Fiabilité route 2, dirigée (issue #9) — décisions implémentées
 
 - **Install sur le main thread via `theExtensionManager.addExtension`**, sans
   remove-avant-add : le remplacement même-identifiant est atomique
