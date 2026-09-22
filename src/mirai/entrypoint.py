@@ -2698,7 +2698,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         `Desktop.terminate()` must run on the **main thread** (from this update-worker
         thread it corrupts the macOS layout engine); we marshal it via
-        `com.sun.star.awt.AsyncCallback`, falling back to SIGTERM.
+        `com.sun.star.awt.AsyncCallback` + `_MainThreadCallback` (pré-lié au
+        chargement du module, aucun import UNO depuis le worker), falling back
+        to SIGTERM.
         """
         # Best-effort: tell the user before closing.
         try:
@@ -2726,26 +2728,26 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # Clean shutdown on the MAIN thread — NO requestRestart (no windowless re-exec).
         ctx = self.ctx
         smgr = self.ctx.getServiceManager()
+
+        def _terminate_on_main():
+            try:
+                desktop = smgr.createInstanceWithContext(
+                    "com.sun.star.frame.Desktop", ctx
+                )
+                if desktop is not None:
+                    log_to_file("_close_after_inprocess_update: terminating on main thread")
+                    desktop.terminate()
+            except Exception as term_err:
+                log_to_file(f"_close_after_inprocess_update: main-thread terminate failed: {term_err}")
+
         try:
-            from com.sun.star.awt import XCallback
-
-            class _CloseOnMain(unohelper.Base, XCallback):
-                def notify(self, _data):
-                    try:
-                        desktop = smgr.createInstanceWithContext(
-                            "com.sun.star.frame.Desktop", ctx
-                        )
-                        if desktop is not None:
-                            log_to_file("_close_after_inprocess_update: terminating on main thread")
-                            desktop.terminate()
-                    except Exception as term_err:
-                        log_to_file(f"_close_after_inprocess_update: main-thread terminate failed: {term_err}")
-
+            if _MainThreadCallback is None:
+                raise RuntimeError("_MainThreadCallback unavailable")
             async_cb = smgr.createInstanceWithContext(
                 "com.sun.star.awt.AsyncCallback", ctx
             )
             if async_cb is not None:
-                async_cb.addCallback(_CloseOnMain(), None)
+                async_cb.addCallback(_MainThreadCallback(_terminate_on_main), None)
                 log_to_file("_close_after_inprocess_update: close scheduled on main thread")
                 return
             log_to_file("_close_after_inprocess_update: AsyncCallback unavailable, SIGTERM fallback")

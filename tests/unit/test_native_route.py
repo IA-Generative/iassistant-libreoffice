@@ -477,6 +477,20 @@ def test_trigger_counts_started_timeout_as_triggered():
         block.set()
 
 
+def test_close_after_inprocess_update_schedules_terminate_via_prebound_callback():
+    job, _dialog, async_cb = _job_with_services()
+    smgr = job.ctx.getServiceManager.return_value
+    desktop = MagicMock(name="Desktop")
+    previous = smgr.createInstanceWithContext.side_effect
+    smgr.createInstanceWithContext.side_effect = (
+        lambda name, ctx: desktop if name == "com.sun.star.frame.Desktop" else previous(name, ctx))
+    job._terminate_on_main_thread = MagicMock()
+    job._close_after_inprocess_update()
+    async_cb.addCallback.assert_called_once()
+    desktop.terminate.assert_called_once()
+    job._terminate_on_main_thread.assert_not_called()
+
+
 def test_install_in_flight_skips_legacy_worker_path():
     """addExtension encore en cours sur le main thread → pas de repli
     thePackageManagerFactory depuis le worker (double install)."""
