@@ -528,7 +528,7 @@ def test_install_in_flight_skips_legacy_worker_path():
 # ── _get_extension_version lit le registre, pas son propre description.xml ──
 
 def _job_with_extension_list(pairs):
-    job = make_job()
+    job = make_job(config_dir=tempfile.mkdtemp())
     smgr = job.ctx.getServiceManager.return_value
     default = smgr.createInstanceWithContext.return_value
     pip = MagicMock(name="PackageInformationProvider")
@@ -542,7 +542,7 @@ def test_get_extension_version_reads_registry_pairs():
     job, pip = _job_with_extension_list([("org.example.other", "9.9"), ("fr.gouv.interieur.mirai", " 0.0.1.0.32 ")])
     assert job._get_extension_version() == "0.0.1.0.32"
     pip.getExtensionList.assert_called_once()
-    assert not hasattr(pip, "getExtensionVersion") or not pip.getExtensionVersion.called
+    assert not pip.getExtensionVersion.called
 
 
 def test_get_extension_version_falls_back_when_registry_unavailable():
