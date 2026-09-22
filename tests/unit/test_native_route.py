@@ -590,3 +590,47 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
     job._wait_before_prompting()
     assert time.time() - t0 >= 1.0, "doit attendre la fermeture de l'assistant ouvert pendant la grâce"
     assert MainJob._enrollment_wizard_active_cls is False
+
+
+# ── Détection native par le cache des paquets (le registre reste ancien en session) ──
+
+def _fake_cache(versions):
+    """Cache <cache>/<lu>/<pkg>.oxt/description.xml pour chaque version donnée."""
+    cache = tempfile.mkdtemp()
+    for i, v in enumerate(versions):
+        pkg = os.path.join(cache, f"lu{i}.tmp_", f"mirai-libreoffice-{v}.oxt")
+        os.makedirs(pkg)
+        with open(os.path.join(pkg, "description.xml"), "w", encoding="utf-8") as fh:
+            fh.write('<description><identifier value="fr.gouv.interieur.mirai"/>'
+                     f'<version value="{v}"/></description>')
+    other = os.path.join(cache, "luX.tmp_", "other.oxt")
+    os.makedirs(other)
+    with open(os.path.join(other, "description.xml"), "w", encoding="utf-8") as fh:
+        fh.write('<description><identifier value="org.example.other"/><version value="9"/></description>')
+    return cache
+
+
+def test_cached_package_versions_lists_our_identifier_only():
+    job = _job()
+    job._package_cache_dir = lambda: _fake_cache([CURRENT, TARGET])
+    assert job._cached_package_versions() == {CURRENT, TARGET}
+
+
+def test_cached_package_versions_never_raises():
+    job = _job()
+    job._package_cache_dir = lambda: "/nonexistent/cache/dir"
+    assert job._cached_package_versions() == set()
+
+
+def test_native_poll_detects_install_via_package_cache_when_registry_stale():
+    """Cas mesuré sur le banc : getExtensionList renvoie toujours l'ancienne
+    version en session, mais le dossier du nouveau paquet est dans le cache."""
+    job = _native_job([CURRENT])
+    calls = {"n": 0}
+    def _cache():
+        calls["n"] += 1
+        return _fake_cache([CURRENT, TARGET] if calls["n"] >= 2 else [CURRENT])
+    job._package_cache_dir = _cache
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    job._close_after_inprocess_update.assert_called_once()
+    assert _state(job)["stage"] == "installed_native"
