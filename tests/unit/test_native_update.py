@@ -122,16 +122,16 @@ def _job_with_sync_async_callback():
 
 
 def test_main_thread_install_uses_extension_manager_add_only():
-    """addExtension(repo 'user') via le singleton theExtensionManager, sans
+    """addExtension(repo 'user') via le singleton ExtensionManager, sans
     removeExtension/removePackage préalable."""
     job, async_cb = _job_with_sync_async_callback()
-    mgr = MagicMock(name="theExtensionManager")
+    mgr = MagicMock(name="ExtensionManager")
     job.ctx.getValueByName.return_value = mgr
 
     assert job._run_install_on_main_thread("file:///x.oxt", (), None, timeout=2) is True
     async_cb.addCallback.assert_called_once()
     job.ctx.getValueByName.assert_called_with(
-        "/singletons/com.sun.star.deployment.theExtensionManager")
+        "/singletons/com.sun.star.deployment.ExtensionManager")
     mgr.addExtension.assert_called_once()
     args = mgr.addExtension.call_args.args
     assert args[0] == "file:///x.oxt"
@@ -146,7 +146,7 @@ def test_main_thread_install_times_out_to_false():
     job = make_job()
     async_cb = MagicMock(name="AsyncCallback")   # addCallback n'exécute rien
     job.ctx.getServiceManager.return_value.createInstanceWithContext.return_value = async_cb
-    mgr = MagicMock(name="theExtensionManager")
+    mgr = MagicMock(name="ExtensionManager")
     job.ctx.getValueByName.return_value = mgr
 
     start = time.time()
@@ -161,7 +161,7 @@ def test_main_thread_install_times_out_to_false():
 def test_main_thread_install_reports_manager_failure():
     """addExtension lève (ex. refus de policy) → False, pour dégradation."""
     job, _ = _job_with_sync_async_callback()
-    mgr = MagicMock(name="theExtensionManager")
+    mgr = MagicMock(name="ExtensionManager")
     mgr.addExtension.side_effect = RuntimeError("denied")
     job.ctx.getValueByName.return_value = mgr
 

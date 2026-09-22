@@ -245,6 +245,20 @@ def test_trigger_late_callback_after_timeout_is_noop():
     dialog.trigger.assert_not_called()
 
 
+def test_main_thread_install_resolves_the_real_extension_manager_singleton():
+    """Le singleton UNO est com.sun.star.deployment.ExtensionManager ; le nom
+    theExtensionManager n'existe pas (getValueByName → None), ce qui faisait
+    toujours retomber l'install sur l'ancien chemin worker."""
+    job, _dialog, _async_cb = _job_with_services()
+    mgr = MagicMock(name="ExtensionManager")
+    def _by_name(path):
+        return mgr if path == "/singletons/com.sun.star.deployment.ExtensionManager" else None
+    job.ctx.getValueByName = MagicMock(side_effect=_by_name)
+    assert job._run_install_on_main_thread("file:///x.oxt", (), None, timeout=2) is True
+    mgr.addExtension.assert_called_once()
+    assert job._main_thread_install_in_flight is False
+
+
 # ── _perform_native_update : dialogue natif, surveillance, fermeture ─────
 
 def _native_job(versions, trigger=True):

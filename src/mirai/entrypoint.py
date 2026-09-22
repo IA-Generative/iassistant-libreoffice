@@ -8,13 +8,15 @@ import urllib.error
 import ssl
 
 # Pre-bind the ExtensionManager singleton on the MAIN thread (module load =
-# extension registration). pyuno's `from com.sun.star… import …` hook is NOT
-# available on background threads ("No module named 'com'"), so the update worker
-# thread cannot import it itself — it reuses this reference. See
-# _install_oxt_inprocess (which prefers the import-free PackageManagerFactory and
-# uses this only as a fallback).
+# extension registration). The singleton is `ExtensionManager`
+# (com.sun.star.deployment.ExtensionManager) — there is no `theExtensionManager`.
+# pyuno's `from com.sun.star… import …` hook is NOT available on background
+# threads ("No module named 'com'"), so the update worker thread cannot import
+# it itself — it reuses this reference. See _install_oxt_inprocess (which
+# prefers the import-free PackageManagerFactory and uses this only as a
+# fallback).
 try:
-    from com.sun.star.deployment import theExtensionManager as _EXT_MGR_SINGLETON
+    from com.sun.star.deployment import ExtensionManager as _EXT_MGR_SINGLETON
 except Exception:
     _EXT_MGR_SINGLETON = None
 
@@ -2488,7 +2490,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
           1. **thePackageManagerFactory** obtained via `ctx.getValueByName` — a plain
              UNO method call, **no import** → works off the main thread. Its
              `getPackageManager("user").addPackage(...)` deploys the OXT. (The probe
-             showed this singleton resolves where `theExtensionManager` does not.)
+             showed this singleton resolves where `ExtensionManager` does not.)
           2. The **ExtensionManager singleton pre-bound on the MAIN thread** at module
              load (`_EXT_MGR_SINGLETON`) → `addExtension`, as a fallback.
 
@@ -2525,7 +2527,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             try:
                 mgr = _EXT_MGR_SINGLETON.get(self.ctx)
             except Exception as exc:
-                log_to_file(f"_install_oxt_inprocess: theExtensionManager.get failed: {exc}")
+                log_to_file(f"_install_oxt_inprocess: ExtensionManager.get failed: {exc}")
             if mgr is not None:
                 try:
                     mgr.removeExtension(_EXTENSION_IDENTIFIER, "", "user", abort, cmd_env)
@@ -2611,16 +2613,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             mgr = None
             try:
                 mgr = ctx.getValueByName(
-                    "/singletons/com.sun.star.deployment.theExtensionManager")
+                    "/singletons/com.sun.star.deployment.ExtensionManager")
             except Exception as exc:
-                log_to_file(f"_run_install_on_main_thread: getValueByName(theExtensionManager): {exc}")
+                log_to_file(f"_run_install_on_main_thread: getValueByName(ExtensionManager): {exc}")
             if mgr is None and _EXT_MGR_SINGLETON is not None:
                 try:
                     mgr = _EXT_MGR_SINGLETON.get(ctx)
                 except Exception as exc:
-                    log_to_file(f"_run_install_on_main_thread: theExtensionManager.get: {exc}")
+                    log_to_file(f"_run_install_on_main_thread: ExtensionManager.get: {exc}")
             if mgr is None:
-                raise RuntimeError("theExtensionManager unavailable")
+                raise RuntimeError("ExtensionManager unavailable")
             mgr.addExtension(oxt_url, props, "user", None, cmd_env)
 
         ok, err = self._run_on_main_thread(_install, timeout, "_run_install_on_main_thread")
