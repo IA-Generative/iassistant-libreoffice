@@ -11,17 +11,23 @@ thread principal de soffice** — le code exact du Gestionnaire des extensions, 
 seule voie validée comme fiable sur plusieurs cycles. Aucune route par défaut ne
 spawne de processus enfant (immunisé WinError 5 / AppLocker / Defender ASR).
 
-| Route | Déclencheur | Installation | Cohorte/canary |
+| Route | Déclencheur | Téléchargement + installation | Cohorte/canary |
 |---|---|---|---|
-| **1. Pilotée DM** (principale) | Directive `update` du DM (polling config) | Download + checksum par le plugin → `addExtension` main-thread → fermeture propre → réconciliation au redémarrage | ✅ oui |
-| **2. Native LibreOffice** | Bouton « Vérifier les mises à jour » du Gestionnaire des extensions (ou check périodique LO si activé) | LibreOffice fait tout : fetch du feed, download, install, redémarrage | ❌ feed anonyme |
-| **3. Manuelle** (fallback validé GPO) | Message « mise à jour bloquée » + bouton « Ouvrir le dossier » | L'utilisateur double-clique l'OXT stagé → Gestionnaire des extensions | ✅ (directive) |
+| **1. Native pilotée** (principale) | Directive `update` du DM, si le feed installé annonce exactement `target_version` | LibreOffice : dialogue « Mise à jour des extensions » ouvert par le plugin via `PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG")`, download depuis le feed, `addExtension` | ✅ sur le déclenchement (le feed, lui, est anonyme) |
+| **2. Dirigée** (repli) | Directive `update` ou `rollback` ; feed absent, injoignable ou divergent ; urgence `deferred` ; deux tentatives natives sans installation | Plugin : download failover + sha256 → `addExtension` main-thread → fermeture propre | ✅ oui |
+| **3. Manuelle** (fallback validé GPO) | Échec de 2 | L'utilisateur double-clique l'OXT stagé → Gestionnaire des extensions | ✅ (directive) |
 
 Point établi en vérifiant les sources LibreOffice (`desktop/source/deployment/gui/`) :
-le dialogue « Vérifier les mises à jour » **n'est pas un service UNO créable**
-(seuls `PackageManagerDialog`, `LicenseDialog`, `UpdateRequiredDialog` le sont).
-Le « push » programmatique passe donc par la route 1 (directive DM + `addExtension`),
-pas par l'ouverture du dialogue natif.
+le service créable `com.sun.star.deployment.ui.PackageManagerDialog` implémente
+`XJobExecutor`, et `trigger("SHOW_UPDATE_DIALOG")` ouvre directement le dialogue de
+mise à jour des extensions — le chemin de la bulle de notification de LibreOffice
+(`updatecheck.cxx`, `showExtensionDialog`). C'est ainsi que la directive DM produit
+l'effet « push » sur la route native. Le bouton « Vérifier les mises à jour » du
+Gestionnaire des extensions reste disponible au support, indépendamment du plugin.
+
+**Refus et reports.** Un « Non » (route 2), une annulation ou une version ignorée dans
+le dialogue natif (route 1) posent `postponed_until` dans `pending_update/update_state.json` :
+la cible n'est pas reproposée avant 24 h, et rien n'est retéléchargé entre-temps.
 
 ## Ce que le build bake dans `description.xml`
 
