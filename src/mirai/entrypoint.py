@@ -1913,7 +1913,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # ni retélécharger à chaque rafraîchissement de config avant l'échéance.
         state = self._load_update_state()
         if target_version and str(state.get("target_version", "")) == target_version:
-            until = float(state.get("postponed_until") or 0)
+            try:
+                until = float(state.get("postponed_until") or 0)
+            except (TypeError, ValueError):
+                until = 0.0
             if until > time.time():
                 log_to_file(
                     f"Update skipped: {target_version} postponed until "
