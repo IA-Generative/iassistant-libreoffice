@@ -2886,6 +2886,50 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
+    # ── Route native pilotée (spec 2026-09-22, issue #9) ─────────────────
+    # Le DM décide (directive update), LibreOffice installe (dialogue « Mise à
+    # jour des extensions »). Le plugin ne télécharge rien : il vérifie que le
+    # feed <update-information> de l'extension installée annonce exactement la
+    # cible, ouvre le dialogue natif sur le thread principal, puis surveille la
+    # version installée et ferme LibreOffice proprement.
+
+    def _native_feed_offers(self, target_version):
+        """Vrai si le feed de l'extension INSTALLÉE annonce exactement
+        target_version. Interrogé par LibreOffice lui-même
+        (PackageInformationProvider.isUpdateAvailable, pile HTTP de LO — le
+        même chemin que son contrôle périodique). Faux si bloc feed absent,
+        feed injoignable, version divergente, ou erreur : la route dirigée prend
+        alors le relais. Singleton obtenu sans import (thread worker)."""
+        target = str(target_version or "").strip()
+        if not target:
+            return False
+        try:
+            provider = self.ctx.getValueByName(
+                "/singletons/com.sun.star.deployment.PackageInformationProvider")
+        except Exception as exc:
+            log_to_file(f"_native_feed_offers: provider unavailable: {exc}")
+            return False
+        if provider is None:
+            return False
+        try:
+            pairs = provider.isUpdateAvailable(_EXTENSION_IDENTIFIER)
+        except Exception as exc:
+            log_to_file(f"_native_feed_offers: isUpdateAvailable failed: {exc}")
+            return False
+        announced = ""
+        for pair in pairs or ():
+            try:
+                ident, version = str(pair[0]), str(pair[1])
+            except Exception:
+                continue
+            if ident == _EXTENSION_IDENTIFIER:
+                announced = version
+                break
+        offers = announced == target
+        log_to_file(
+            f"_native_feed_offers: target={target} announced={announced or '-'} offers={offers}")
+        return offers
+
     # ── Diagnostic passif du feed natif (<update-information>, issue #5) ──
     # LibreOffice récupère le feed avec SA pile HTTP (proxy/TLS/GPO propres),
     # pas celle du plugin. Ce check headless valide donc, sans aucune action
