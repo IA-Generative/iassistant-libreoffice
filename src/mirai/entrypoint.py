@@ -2489,8 +2489,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
           1. **thePackageManagerFactory** obtained via `ctx.getValueByName` — a plain
              UNO method call, **no import** → works off the main thread. Its
-             `getPackageManager("user").addPackage(...)` deploys the OXT. (The probe
-             showed this singleton resolves where `ExtensionManager` does not.)
+             `getPackageManager("user").addPackage(...)` deploys the OXT. (Historique :
+             la sonde terrain n'obtenait jamais le nom inexistant theExtensionManager ;
+             avec le vrai singleton ExtensionManager, ce repli n'a plus de raison
+             d'être et ne sert qu'en dernier recours.)
           2. The **ExtensionManager singleton pre-bound on the MAIN thread** at module
              load (`_EXT_MGR_SINGLETON`) → `addExtension`, as a fallback.
 
