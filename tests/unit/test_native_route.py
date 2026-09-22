@@ -569,3 +569,24 @@ def test_native_poll_sees_new_version_from_registry():
     pip.getExtensionList.side_effect = _list
     assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
     job._close_after_inprocess_update.assert_called_once()
+
+
+# ── _wait_before_prompting revérifie l'assistant après le délai de grâce ────
+
+def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
+    monkeypatch.setattr(entrypoint, "_PROMPT_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(entrypoint, "_PROMPT_WIZARD_WAIT_SECONDS", 5)
+    job = _job()
+    MainJob._enrollment_wizard_active_cls = False
+    def _open_then_close():
+        time.sleep(0.02)
+        with MainJob._enrollment_wizard_lock_cls:
+            MainJob._enrollment_wizard_active_cls = True
+        time.sleep(1.2)
+        with MainJob._enrollment_wizard_lock_cls:
+            MainJob._enrollment_wizard_active_cls = False
+    threading.Thread(target=_open_then_close, daemon=True).start()
+    t0 = time.time()
+    job._wait_before_prompting()
+    assert time.time() - t0 >= 1.0, "doit attendre la fermeture de l'assistant ouvert pendant la grâce"
+    assert MainJob._enrollment_wizard_active_cls is False
