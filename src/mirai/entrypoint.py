@@ -1872,8 +1872,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         continue
                     if ident == _EXTENSION_IDENTIFIER and version.strip():
                         return version.strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_to_file(f"_get_extension_version: registry read failed: {exc}")
         # Fallback: parse description.xml from the package directory
         try:
             pkg_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -3092,9 +3092,22 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         })
 
         deadline = time.time() + wait_seconds
+        last_seen = None
+        polls = 0
         while time.time() < deadline:
             time.sleep(poll_seconds)
-            if str(self._get_extension_version() or "") == target_version:
+            polls += 1
+            probe_start = time.time()
+            seen = str(self._get_extension_version() or "")
+            probe_ms = int((time.time() - probe_start) * 1000)
+            # Journal de diagnostic : valeur vue à chaque changement (et à la
+            # première lecture), ou lecture anormalement lente (>1 s).
+            if seen != last_seen or probe_ms > 1000:
+                log_to_file(
+                    f"_perform_native_update: poll #{polls} installed={seen or '-'} "
+                    f"target={target_version} ({probe_ms} ms)")
+                last_seen = seen
+            if seen == target_version:
                 log_to_file(f"_perform_native_update: {target_version} installed natively, closing for restart")
                 self._save_update_state(directive, "installed_native", route="native")
                 self._send_telemetry("UpdateInstalledPendingRestart", {
@@ -3108,7 +3121,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file(f"_perform_native_update: close failed (update is installed): {exc}")
                 return True
 
-        log_to_file("_perform_native_update: no install detected, postponed")
+        log_to_file(f"_perform_native_update: no install detected after {polls} polls (last seen {last_seen or '-'}), postponed")
         self._save_update_state(directive, "postponed", route="native",
                                 postponed_until=time.time() + _UPDATE_POSTPONE_SECONDS)
         self._send_telemetry("UpdatePostponed", {
