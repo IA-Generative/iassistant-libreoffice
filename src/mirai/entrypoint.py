@@ -2524,6 +2524,43 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return _SilentCommandEnv(_SilentInteractionHandler())
         return None
 
+    def _run_on_main_thread(self, action, timeout, label):
+        """Exécute `action()` sur le thread PRINCIPAL de LibreOffice, planifié via
+        com.sun.star.awt.AsyncCallback + _MainThreadCallback, et attend au plus
+        `timeout` s. Renvoie (ok, err). Après un timeout, le callback éventuel
+        devient no-op (garde `cancelled`) : un rappel tardif ne doit ni installer
+        deux fois ni ouvrir un dialogue après que l'appelant a dégradé."""
+        if _MainThreadCallback is None:
+            return False, "main-thread callback unavailable"
+        holder = {"ok": False, "err": "", "cancelled": False}
+        done = threading.Event()
+
+        def _run():
+            if holder["cancelled"]:
+                return
+            try:
+                action()
+                holder["ok"] = True
+            except Exception as exc:
+                holder["err"] = str(exc)
+            finally:
+                done.set()
+
+        try:
+            async_cb = self.ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.awt.AsyncCallback", self.ctx)
+            if async_cb is None:
+                return False, "AsyncCallback unavailable"
+            async_cb.addCallback(_MainThreadCallback(_run), None)
+        except Exception as exc:
+            log_to_file(f"{label}: schedule failed: {exc}")
+            return False, f"schedule failed: {exc}"
+        if not done.wait(timeout):
+            holder["cancelled"] = True
+            log_to_file(f"{label}: timeout waiting for main thread")
+            return False, "timeout"
+        return holder["ok"], holder["err"]
+
     def _run_install_on_main_thread(self, oxt_url, props, cmd_env, timeout=90):
         """Installe l'OXT via ExtensionManager.addExtension sur le thread PRINCIPAL.
 
@@ -2540,54 +2577,29 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         dégrade). Après un timeout, le callback éventuel devient no-op (garde
         `cancelled`) pour interdire une double installation concurrente.
         """
-        if _MainThreadCallback is None:
-            return False
-        holder = {"ok": False, "err": "", "cancelled": False}
-        done = threading.Event()
         ctx = self.ctx
 
-        def _do_install():
-            if holder["cancelled"]:
-                return
+        def _install():
+            mgr = None
             try:
-                mgr = None
-                try:
-                    mgr = ctx.getValueByName(
-                        "/singletons/com.sun.star.deployment.theExtensionManager")
-                except Exception as exc:
-                    log_to_file(f"_run_install_on_main_thread: getValueByName(theExtensionManager): {exc}")
-                if mgr is None and _EXT_MGR_SINGLETON is not None:
-                    try:
-                        mgr = _EXT_MGR_SINGLETON.get(ctx)
-                    except Exception as exc:
-                        log_to_file(f"_run_install_on_main_thread: theExtensionManager.get: {exc}")
-                if mgr is None:
-                    holder["err"] = "theExtensionManager unavailable"
-                    return
-                mgr.addExtension(oxt_url, props, "user", None, cmd_env)
-                holder["ok"] = True
+                mgr = ctx.getValueByName(
+                    "/singletons/com.sun.star.deployment.theExtensionManager")
             except Exception as exc:
-                holder["err"] = str(exc)
-            finally:
-                done.set()
+                log_to_file(f"_run_install_on_main_thread: getValueByName(theExtensionManager): {exc}")
+            if mgr is None and _EXT_MGR_SINGLETON is not None:
+                try:
+                    mgr = _EXT_MGR_SINGLETON.get(ctx)
+                except Exception as exc:
+                    log_to_file(f"_run_install_on_main_thread: theExtensionManager.get: {exc}")
+            if mgr is None:
+                raise RuntimeError("theExtensionManager unavailable")
+            mgr.addExtension(oxt_url, props, "user", None, cmd_env)
 
-        try:
-            async_cb = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.awt.AsyncCallback", self.ctx)
-            if async_cb is None:
-                return False
-            async_cb.addCallback(_MainThreadCallback(_do_install), None)
-        except Exception as exc:
-            log_to_file(f"_run_install_on_main_thread: schedule failed: {exc}")
-            return False
-        if not done.wait(timeout):
-            holder["cancelled"] = True
-            log_to_file("_run_install_on_main_thread: timeout waiting for main thread")
-            return False
-        if holder["ok"]:
+        ok, err = self._run_on_main_thread(_install, timeout, "_run_install_on_main_thread")
+        if ok:
             log_to_file("_run_install_on_main_thread: addExtension OK (main thread)")
             return True
-        log_to_file(f"_run_install_on_main_thread: install failed: {holder['err']}")
+        log_to_file(f"_run_install_on_main_thread: install failed: {err}")
         return False
 
     def _install_and_restart_in_process(self, oxt_path):
@@ -2936,43 +2948,22 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         exact de la bulle de notification de LibreOffice (updatecheck.cxx). LO
         interroge le feed, télécharge et installe lui-même ; ses dialogues tournent
         sur son thread de commandes, l'appel rend la main aussitôt.
-        Vrai si le déclenchement s'est exécuté sans exception avant `timeout`."""
-        if _MainThreadCallback is None:
-            return False
-        holder = {"ok": False, "err": ""}
-        done = threading.Event()
+        Vrai si le déclenchement s'est exécuté sans exception avant `timeout`.
+        Après un timeout, le rappel éventuel devient no-op (voir _run_on_main_thread)."""
         ctx = self.ctx
 
-        def _do_trigger():
-            try:
-                dialog = ctx.getServiceManager().createInstanceWithContext(
-                    "com.sun.star.deployment.ui.PackageManagerDialog", ctx)
-                if dialog is None:
-                    holder["err"] = "PackageManagerDialog unavailable"
-                    return
-                dialog.trigger("SHOW_UPDATE_DIALOG")
-                holder["ok"] = True
-            except Exception as exc:
-                holder["err"] = str(exc)
-            finally:
-                done.set()
+        def _trigger():
+            dialog = ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.deployment.ui.PackageManagerDialog", ctx)
+            if dialog is None:
+                raise RuntimeError("PackageManagerDialog unavailable")
+            dialog.trigger("SHOW_UPDATE_DIALOG")
 
-        try:
-            async_cb = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.awt.AsyncCallback", self.ctx)
-            if async_cb is None:
-                return False
-            async_cb.addCallback(_MainThreadCallback(_do_trigger), None)
-        except Exception as exc:
-            log_to_file(f"_trigger_native_update_dialog: schedule failed: {exc}")
-            return False
-        if not done.wait(timeout):
-            log_to_file("_trigger_native_update_dialog: timeout waiting for main thread")
-            return False
-        if holder["ok"]:
+        ok, err = self._run_on_main_thread(_trigger, timeout, "_trigger_native_update_dialog")
+        if ok:
             log_to_file("_trigger_native_update_dialog: SHOW_UPDATE_DIALOG triggered")
             return True
-        log_to_file(f"_trigger_native_update_dialog: failed: {holder['err']}")
+        log_to_file(f"_trigger_native_update_dialog: failed: {err}")
         return False
 
     # ── Diagnostic passif du feed natif (<update-information>, issue #5) ──
