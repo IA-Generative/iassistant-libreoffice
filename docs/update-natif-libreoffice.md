@@ -83,9 +83,24 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
 4. Points durs à valider sur poste durci MI :
    - **proxy** : LibreOffice récupère le feed avec sa propre pile HTTP
      (Options → Internet → Proxy, ou proxy système) — pas celle du plugin ;
-   - **GPO « Mise à jour en ligne »** : si désactivée, seul le bouton manuel
-     du Gestionnaire des extensions déclenche le check (pas de périodique) ;
+   - **GPO « Mise à jour en ligne »** : si désactivée, plus de contrôle
+     hebdomadaire ; restent le bouton manuel du Gestionnaire des extensions et
+     le déclenchement par le plugin sur directive DM ;
    - certificats : la chaîne TLS du bootstrap doit être reconnue par LO.
+5. Sonde Basic : `oDlg.trigger("SHOW_UPDATE_DIALOG")` doit **rendre la main
+   avant** que le dialogue soit fermé (garantie empirique que le timeout du
+   plugin reste théorique).
+6. Après « Installer » dans le dialogue natif : observer la boîte « installée,
+   LibreOffice va se fermer » du plugin pendant que le dialogue LibreOffice
+   est encore ouvert, et vérifier si la fermeture est refusée
+   (`grep "main-thread terminate failed" ~/log.txt`).
+7. `grep "_native_feed_offers" ~/log.txt` sur le poste durci : `offers=True`
+   prouve que la pile UCB de LibreOffice traverse proxy et TLS jusqu'au feed.
+8. Deux sauts natifs consécutifs N → N+1 → N+2 avec inspection de
+   `pending_update/update_state.json` entre les deux (`route`,
+   `native_attempts`, purge après réconciliation), puis un « ignorer »
+   volontaire deux fois pour voir la bascule en route dirigée à la troisième
+   directive.
 
 ## Fiabilité route 2, dirigée (issue #9) — décisions implémentées
 
