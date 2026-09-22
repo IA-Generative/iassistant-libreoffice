@@ -1965,6 +1965,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         tmp_path = None
         try:
+            # Route native d'abord (spec 2026-09-22) : jamais pour une directive
+            # différée (elle ne dérange pas l'utilisateur) ni un rollback (LO ne
+            # propose que des versions plus récentes) ; bornée en tentatives.
+            if action == "update" and urgency != "deferred":
+                previous = self._load_update_state()
+                attempts = 0
+                if str(previous.get("target_version", "")) == str(target_version):
+                    attempts = int(previous.get("native_attempts") or 0)
+                if attempts < _NATIVE_MAX_ATTEMPTS and self._native_feed_offers(target_version):
+                    if self._perform_native_update(directive):
+                        return
+                    log_to_file("_perform_update: native route unavailable, falling back to directed route")
+
             # Download with failover across bootstrap DMs (2 passes), per-URL TLS.
             binary = None
             full_url = candidate_urls[0]
@@ -2174,16 +2187,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # comptait comme réussies des installations jamais abouties.
             self._report_update_status(campaign_id, "deferred", version_before, target_version)
 
-            # Wait for enrollment wizard to finish and let user settle in
-            _wait_start = time.time()
-            _max_wait = 120  # max 2 min
-            while time.time() - _wait_start < _max_wait:
-                with MainJob._enrollment_wizard_lock_cls:
-                    if not MainJob._enrollment_wizard_active_cls:
-                        break
-                time.sleep(1)
-            # Extra grace period so the user isn't interrupted immediately
-            time.sleep(30)
+            self._wait_before_prompting()
             log_to_file("_perform_update: showing update dialog to user")
 
             # Ask user BEFORE launching the install script
@@ -2229,11 +2233,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             if user_wants_restart:
                 log_to_file("_perform_update: user accepted restart")
-                self._save_update_state(directive, "user_accepted")
+                self._save_update_state(directive, "user_accepted", route="directed")
                 self._send_telemetry("UpdateAccepted", {
                     "version_after": target_version,
                     "campaign_id": str(campaign_id) if campaign_id is not None else "",
                     "urgency": urgency,
+                    "route": "directed",
                 })
                 # In-process (ExtensionManager sur le main thread) : la seule voie
                 # automatique par défaut — aucun processus enfant (WinError 5-immune).
@@ -2245,6 +2250,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     self._send_telemetry("UpdateInstalledPendingRestart", {
                         "version_after": target_version,
                         "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                        "route": "directed",
                     })
                     return
                 # Script de secours : uniquement si explicitement réactivé
@@ -2286,14 +2292,18 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "version_after": target_version,
                     "campaign_id": str(campaign_id) if campaign_id is not None else "",
                     "fallback": "manual",
+                    "route": "directed",
                 })
                 self._notify_update_blocked(target_version, install_script)
             else:
                 log_to_file("_perform_update: user postponed restart")
+                self._save_update_state(directive, "postponed", route="directed",
+                                        postponed_until=time.time() + _UPDATE_POSTPONE_SECONDS)
                 self._send_telemetry("UpdatePostponed", {
                     "version_after": target_version,
                     "campaign_id": str(campaign_id) if campaign_id is not None else "",
                     "urgency": urgency,
+                    "route": "directed",
                 })
 
         except Exception as e:
@@ -2965,6 +2975,77 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return True
         log_to_file(f"_trigger_native_update_dialog: failed: {err}")
         return False
+
+    def _wait_before_prompting(self):
+        """Laisse l'assistant d'enrôlement se terminer (120 s max), puis un délai
+        de grâce de 30 s pour ne pas interrompre l'utilisateur d'emblée."""
+        _wait_start = time.time()
+        _max_wait = 120
+        while time.time() - _wait_start < _max_wait:
+            with MainJob._enrollment_wizard_lock_cls:
+                if not MainJob._enrollment_wizard_active_cls:
+                    break
+            time.sleep(1)
+        time.sleep(30)
+
+    def _perform_native_update(self, directive, wait_seconds=None, poll_seconds=None):
+        """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
+
+        Renvoie True si le dialogue a été montré et l'issue traitée — installée
+        (fermeture propre) ou reportée (cooldown) ; False si le déclenchement a
+        échoué, sans rien rapporter ni persister : l'appelant bascule en route
+        dirigée. Après l'installation, l'ancien dossier de l'extension a été
+        remplacé : d'ici la fermeture, aucun import de module du plugin.
+        """
+        wait_seconds = _NATIVE_INSTALL_WAIT_SECONDS if wait_seconds is None else wait_seconds
+        poll_seconds = _NATIVE_POLL_SECONDS if poll_seconds is None else poll_seconds
+        target_version = str(directive.get("target_version", "")).strip()
+        campaign_id = directive.get("campaign_id")
+        campaign_attr = str(campaign_id) if campaign_id is not None else ""
+        version_before = str(self._get_extension_version() or "")
+        previous = self._load_update_state()
+        attempts = 0
+        if str(previous.get("target_version", "")) == target_version:
+            attempts = int(previous.get("native_attempts") or 0)
+
+        self._wait_before_prompting()
+        log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
+        if not self._trigger_native_update_dialog():
+            return False
+
+        self._report_update_status(campaign_id, "deferred", version_before, target_version)
+        self._save_update_state(directive, "native_dialog", route="native",
+                                native_attempts=attempts + 1)
+        self._send_telemetry("UpdateNativeDialogShown", {
+            "version_after": target_version,
+            "campaign_id": campaign_attr,
+            "route": "native",
+            "attempt": str(attempts + 1),
+        })
+
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            time.sleep(poll_seconds)
+            if str(self._get_extension_version() or "") == target_version:
+                log_to_file(f"_perform_native_update: {target_version} installed natively, closing for restart")
+                self._save_update_state(directive, "installed_native", route="native")
+                self._send_telemetry("UpdateInstalledPendingRestart", {
+                    "version_after": target_version,
+                    "campaign_id": campaign_attr,
+                    "route": "native",
+                })
+                self._close_after_inprocess_update()
+                return True
+
+        log_to_file("_perform_native_update: no install detected, postponed")
+        self._save_update_state(directive, "postponed", route="native",
+                                postponed_until=time.time() + _UPDATE_POSTPONE_SECONDS)
+        self._send_telemetry("UpdatePostponed", {
+            "version_after": target_version,
+            "campaign_id": campaign_attr,
+            "route": "native",
+        })
+        return True
 
     # ── Diagnostic passif du feed natif (<update-information>, issue #5) ──
     # LibreOffice récupère le feed avec SA pile HTTP (proxy/TLS/GPO propres),
