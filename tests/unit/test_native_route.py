@@ -129,3 +129,53 @@ def test_schedule_update_ignores_cooldown_of_other_target():
     job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
                            route="native", postponed_until=time.time() + 3600)
     assert _schedule_and_wait(job, {"action": "update", "target_version": "0.0.1.0.33"}) is True
+
+
+# ── _native_feed_offers : PackageInformationProvider.isUpdateAvailable ────
+# C'est LibreOffice qui interroge le feed cuit dans l'extension INSTALLÉE, avec
+# sa pile HTTP. Vrai seulement si la version annoncée == cible de la directive.
+
+PIP_PATH = "/singletons/com.sun.star.deployment.PackageInformationProvider"
+
+
+def _job_with_provider(pairs=None, error=None):
+    job = _job()
+    provider = MagicMock(name="PackageInformationProvider")
+    if error is not None:
+        provider.isUpdateAvailable.side_effect = error
+    else:
+        provider.isUpdateAvailable.return_value = tuple(pairs or ())
+    job.ctx.getValueByName = MagicMock(return_value=provider)
+    return job, provider
+
+
+def test_native_feed_offers_true_when_announced_version_matches():
+    job, provider = _job_with_provider([("fr.gouv.interieur.mirai", TARGET)])
+    assert job._native_feed_offers(TARGET) is True
+    job.ctx.getValueByName.assert_called_with(PIP_PATH)
+    provider.isUpdateAvailable.assert_called_once_with("fr.gouv.interieur.mirai")
+
+
+def test_native_feed_offers_false_when_version_differs():
+    job, _ = _job_with_provider([("fr.gouv.interieur.mirai", "0.0.1.0.40")])
+    assert job._native_feed_offers(TARGET) is False
+
+
+def test_native_feed_offers_false_when_feed_silent():
+    """Bloc feed absent, feed injoignable ou pas plus récent → séquence vide."""
+    job, _ = _job_with_provider([])
+    assert job._native_feed_offers(TARGET) is False
+
+
+def test_native_feed_offers_ignores_other_extensions():
+    job, _ = _job_with_provider([("org.example.other", TARGET)])
+    assert job._native_feed_offers(TARGET) is False
+
+
+def test_native_feed_offers_false_on_error_or_missing_provider():
+    job, _ = _job_with_provider(error=RuntimeError("proxy"))
+    assert job._native_feed_offers(TARGET) is False
+    job2 = _job()
+    job2.ctx.getValueByName = MagicMock(return_value=None)
+    assert job2._native_feed_offers(TARGET) is False
+    assert job2._native_feed_offers("") is False
