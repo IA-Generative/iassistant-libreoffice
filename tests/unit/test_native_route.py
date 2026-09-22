@@ -17,6 +17,7 @@ from tests.stubs.uno_stubs import install, make_job
 install()
 
 from src.mirai import entrypoint
+from src.mirai.entrypoint import MainJob
 
 TARGET = "0.0.1.0.32"
 CURRENT = "0.0.1.0.31"
@@ -393,3 +394,31 @@ def test_directed_route_postponed_sets_cooldown():
     assert state["route"] == "directed"
     assert state["postponed_until"] >= before + entrypoint._UPDATE_POSTPONE_SECONDS - 1
     assert "UpdatePostponed" in _events(job)
+
+
+# ── Télémétrie ───────────────────────────────────────────────────────────
+
+UPDATE_EVENTS = {
+    "UpdateStaged", "UpdateAccepted", "UpdatePostponed", "UpdateInstalledPendingRestart",
+    "UpdateInstallFailed", "UpdateNativeDialogShown", "ExtensionUpdated", "NativeFeedCheck",
+}
+
+
+def test_update_events_are_technical():
+    """Sans cela, le pipeline sécurisé jette ces spans avant la liaison
+    utilisateur : l'entonnoir de campagne serait aveugle sur une partie du parc."""
+    assert UPDATE_EVENTS <= MainJob._TECHNICAL_EVENTS
+
+
+def test_action_names_cover_native_dialog_event():
+    assert MainJob._ACTION_NAMES["UpdateNativeDialogShown"] == "update"
+
+
+def test_reconcile_joins_route_to_extension_updated():
+    job = _job(current_version=TARGET)
+    job._save_update_state(DIRECTIVE, "installed_native", route="native")
+    job._reconcile_update_state()
+    updated = [c for c in job._send_telemetry.call_args_list if c.args[0] == "ExtensionUpdated"]
+    assert len(updated) == 1
+    assert updated[0].args[1]["route"] == "native"
+    assert updated[0].args[1]["confirmed"] == "true"

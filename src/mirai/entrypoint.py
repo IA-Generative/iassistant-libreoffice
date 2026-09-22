@@ -1022,6 +1022,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "UpdateInstalledPendingRestart": "update",
         "UpdateInstallFailed": "update",
         "NativeFeedCheck": "update",
+        "UpdateNativeDialogShown": "update",
         "ExtendSelection": "extend",
         "EditSelection": "edit",
         "ResizeSelection": "resize",
@@ -1063,6 +1064,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "ProxyTest",
         "ConfigWaitAtTrigger",
         "ActionUnhandled",
+        # Flux de mise à jour (issue #9) : télémétrie technique de flotte,
+        # envoyée même avant la liaison utilisateur.
+        "UpdateStaged",
+        "UpdateAccepted",
+        "UpdatePostponed",
+        "UpdateInstalledPendingRestart",
+        "UpdateInstallFailed",
+        "UpdateNativeDialogShown",
+        "ExtensionUpdated",
+        "NativeFeedCheck",
     }
 
     def _send_telemetry(self, span_name, attributes=None):
@@ -2878,6 +2889,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "version_after": target,
                     "campaign_id": str(state.get("campaign_id") or ""),
                     "confirmed": "true",
+                    "route": str(state.get("route") or ""),
                 })
             except Exception:
                 pass
