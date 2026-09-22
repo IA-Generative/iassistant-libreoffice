@@ -2056,6 +2056,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # démarrage rapporte l'issue RÉELLE au DM (_reconcile_update_state).
             self._save_update_state(directive, "staged")
             self._send_telemetry("UpdateStaged", {
+                "route": "directed",
                 "version_after": target_version,
                 "campaign_id": str(campaign_id) if campaign_id is not None else "",
                 "urgency": urgency,
@@ -2960,6 +2961,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_native_feed_offers: provider unavailable: {exc}")
             return False
         if provider is None:
+            log_to_file("_native_feed_offers: PackageInformationProvider unavailable")
             return False
         try:
             pairs = provider.isUpdateAvailable(_EXTENSION_IDENTIFIER)
