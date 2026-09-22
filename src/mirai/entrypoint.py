@@ -1897,6 +1897,18 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             )
             return
 
+        # Refus ou report mémorisé (route native ou dirigée) : ne pas reproposer
+        # ni retélécharger à chaque rafraîchissement de config avant l'échéance.
+        state = self._load_update_state()
+        if target_version and str(state.get("target_version", "")) == target_version:
+            until = float(state.get("postponed_until") or 0)
+            if until > time.time():
+                log_to_file(
+                    f"Update skipped: {target_version} postponed until "
+                    f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(until))}"
+                )
+                return
+
         with MainJob._update_lock_cls:
             if MainJob._update_in_progress_cls:
                 log_to_file("Update already in progress, skipping duplicate schedule")

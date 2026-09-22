@@ -8,6 +8,7 @@ Run:  pytest tests/unit/test_native_route.py -v
 import json
 import os
 import tempfile
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -98,3 +99,33 @@ def test_load_update_state_returns_empty_when_missing_or_corrupt():
     with open(job._update_state_path(), "w") as fh:
         fh.write("{not json")
     assert job._load_update_state() == {}
+
+
+# ── Cooldown : une cible refusée ou ignorée n'est pas reproposée avant 24 h ──
+
+def _schedule_and_wait(job, directive, seconds=0.5):
+    done = threading.Event()
+    job._perform_update = lambda d: done.set()
+    job._schedule_update(directive)
+    return done.wait(seconds)
+
+
+def test_schedule_update_skips_target_in_cooldown():
+    job = _job()
+    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
+                           route="native", postponed_until=time.time() + 3600)
+    assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is False
+
+
+def test_schedule_update_runs_after_cooldown_expired():
+    job = _job()
+    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
+                           route="native", postponed_until=time.time() - 1)
+    assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is True
+
+
+def test_schedule_update_ignores_cooldown_of_other_target():
+    job = _job()
+    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
+                           route="native", postponed_until=time.time() + 3600)
+    assert _schedule_and_wait(job, {"action": "update", "target_version": "0.0.1.0.33"}) is True
