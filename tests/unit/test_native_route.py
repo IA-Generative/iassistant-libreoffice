@@ -28,6 +28,7 @@ def _job(current_version=CURRENT):
     job._get_extension_version = MagicMock(return_value=current_version)
     job._report_update_status = MagicMock()
     job._send_telemetry = MagicMock()
+    job._package_cache_dir = lambda d=tempfile.mkdtemp(): d
     return job
 
 
@@ -44,6 +45,11 @@ def test_constants_match_spec():
     assert entrypoint._NATIVE_POLL_SECONDS == 5
     assert entrypoint._NATIVE_TRIGGER_TIMEOUT_SECONDS == 30
     assert entrypoint._NATIVE_MAX_ATTEMPTS == 2
+    assert entrypoint._CLOSE_RETRY_SECONDS == 120
+    assert entrypoint._CLOSE_RETRY_INTERVAL_SECONDS == 3
+    assert entrypoint._PROMPT_WIZARD_WAIT_SECONDS == 120
+    assert entrypoint._PROMPT_GRACE_SECONDS == 30
+    assert entrypoint._CLOSE_USER_REFUSAL_SECONDS == 1.0
 
 
 def test_save_update_state_persists_route_and_cooldown_fields():
@@ -270,6 +276,7 @@ def _native_job(versions, trigger=True):
     job._wait_before_prompting = MagicMock()
     job._trigger_native_update_dialog = MagicMock(return_value=trigger)
     job._close_after_inprocess_update = MagicMock()
+    job._package_cache_dir = lambda d=tempfile.mkdtemp(): d
     return job
 
 
@@ -424,6 +431,7 @@ def test_directed_route_postponed_sets_cooldown():
 UPDATE_EVENTS = {
     "UpdateStaged", "UpdateAccepted", "UpdatePostponed", "UpdateInstalledPendingRestart",
     "UpdateInstallFailed", "UpdateNativeDialogShown", "ExtensionUpdated", "NativeFeedCheck",
+    "UpdateCloseDeferred",
 }
 
 
@@ -507,7 +515,7 @@ def _close_job(terminate_results):
 def test_close_after_inprocess_update_retries_until_veto_clears(monkeypatch):
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
     job, desktop = _close_job([False, False, True])
-    job._close_after_inprocess_update()
+    assert job._close_after_inprocess_update() is True
     assert desktop.terminate.call_count == 3
     job._terminate_on_main_thread.assert_not_called()
 
@@ -516,9 +524,57 @@ def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch):
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
     job, desktop = _close_job([False] * 50)
-    job._close_after_inprocess_update()
+    assert job._close_after_inprocess_update() is False
     assert desktop.terminate.call_count >= 2
     job._terminate_on_main_thread.assert_not_called()
+
+
+def test_close_after_inprocess_update_respects_user_refusal(monkeypatch):
+    """Un veto lent = l'utilisateur a répondu Annuler à « Enregistrer ? » :
+    une seule tentative, pas de harcèlement."""
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(entrypoint, "_CLOSE_USER_REFUSAL_SECONDS", 0.05)
+    job, desktop = _close_job([False, False, True])
+    slow = desktop.terminate.side_effect
+    def _slow():
+        time.sleep(0.1)
+        return next(slow)
+    desktop.terminate.side_effect = _slow
+    assert job._close_after_inprocess_update() is False
+    assert desktop.terminate.call_count == 1
+
+
+def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch):
+    """Callback jamais démarré (thread principal occupé) → on réessaie, JAMAIS de SIGTERM."""
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
+    job, _dialog, async_cb = _job_with_services(run_callback=False)
+    job._terminate_on_main_thread = MagicMock()
+    job._run_on_main_thread = MagicMock(return_value=(False, "timeout"))
+    assert job._close_after_inprocess_update() is False
+    assert job._run_on_main_thread.call_count >= 2
+    job._terminate_on_main_thread.assert_not_called()
+
+
+def test_close_after_inprocess_update_sigterm_only_when_unreachable():
+    job, _dialog, _async_cb = _job_with_services()
+    job._terminate_on_main_thread = MagicMock()
+    job._run_on_main_thread = MagicMock(return_value=(False, "AsyncCallback unavailable"))
+    assert job._close_after_inprocess_update() is False
+    job._terminate_on_main_thread.assert_called_once()
+
+
+def test_schedule_update_skips_target_installed_pending_restart():
+    job = _job()
+    job._save_update_state({"campaign_id": 9, "target_version": TARGET}, "installed_native", route="native")
+    assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is False
+
+
+def test_native_close_deferred_emits_telemetry():
+    job = _native_job([CURRENT, CURRENT, TARGET, TARGET])
+    job._close_after_inprocess_update = MagicMock(return_value=False)
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert "UpdateCloseDeferred" in _events(job)
 
 
 def test_install_in_flight_skips_legacy_worker_path():
