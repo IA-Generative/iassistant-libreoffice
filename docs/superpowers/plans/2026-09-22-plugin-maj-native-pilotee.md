@@ -797,8 +797,9 @@ Après `_trigger_native_update_dialog` :
         Renvoie True si le dialogue a été montré et l'issue traitée — installée
         (fermeture propre) ou reportée (cooldown) ; False si le déclenchement a
         échoué, sans rien rapporter ni persister : l'appelant bascule en route
-        dirigée. Après l'installation, l'ancien dossier de l'extension a été
-        remplacé : d'ici la fermeture, aucun import de module du plugin.
+        dirigée. Après l'installation native, LibreOffice garde l'ancien paquet
+        chargé jusqu'au redémarrage ; le nouveau dossier apparaît à côté : d'ici
+        la fermeture, aucun import de module du plugin.
         """
         wait_seconds = _NATIVE_INSTALL_WAIT_SECONDS if wait_seconds is None else wait_seconds
         poll_seconds = _NATIVE_POLL_SECONDS if poll_seconds is None else poll_seconds

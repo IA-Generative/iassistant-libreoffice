@@ -126,6 +126,11 @@ Une section courte dans `docs/plugin-developer/` : contrat du feed, champ
 | `_NATIVE_POLL_SECONDS` | 5 | Période de surveillance de la version installée |
 | `_NATIVE_TRIGGER_TIMEOUT_SECONDS` | 30 | Attente de l'exécution du déclenchement sur le thread principal |
 | `_NATIVE_MAX_ATTEMPTS` | 2 | Au-delà, la cible passe en route dirigée |
+| `_PROMPT_WIZARD_WAIT_SECONDS` | 120 | Attente maximale de la fermeture de l'assistant d'enrôlement |
+| `_PROMPT_GRACE_SECONDS` | 30 | Délai de grâce après l'assistant, avant de reproposer une mise à jour |
+| `_CLOSE_RETRY_SECONDS` | 120 | Délai total de réessai de la fermeture après installation |
+| `_CLOSE_RETRY_INTERVAL_SECONDS` | 3 | Période entre deux tentatives de fermeture |
+| `_CLOSE_USER_REFUSAL_SECONDS` | 1.0 | Durée d'un veto au-delà de laquelle il est traité comme un refus humain |
 
 ### 5.2 État persistant `pending_update/update_state.json`
 
@@ -143,10 +148,13 @@ arguments nommés facultatifs et conserve les valeurs non fournies.
 `_update_launch_blocked_cls`, mise à jour en cours. Garde ajoutée : si l'état persistant
 porte la même `target_version` et `postponed_until` dans le futur, on saute, avec une
 ligne de log. Fini le retéléchargement et le re-prompt à chaque rafraîchissement de
-config.
+config. Le worker réconcilie d'abord une mise à jour précédente d'une autre cible
+(rapport `installed` si elle est active), puis une cible déjà installée en attente de
+redémarrage est ignorée.
 
 **Attente commune, `_wait_before_prompting`.** Le code existant de fix/MAJ, factorisé :
-attente de la fin de l'assistant d'enrôlement (120 s max) puis délai de grâce de 30 s.
+attente de la fin de l'assistant d'enrôlement (120 s max) puis délai de grâce de 30 s,
+puis revérifie l'assistant après la grâce.
 
 **Choix de route, dans `_perform_update`, avant tout téléchargement.**
 Si `action == "update"`, si `urgency != "deferred"` (une directive différée ne dérange
@@ -175,18 +183,17 @@ l'appel s'est exécuté sans exception avant le délai, faux sinon.
    rapporté ni persisté.
 3. Rapport `deferred` au DM, état `native_dialog` avec `route = native` et
    `native_attempts + 1`, télémétrie `UpdateNativeDialogShown`.
-4. Surveillance : toutes les 5 s pendant 900 s au plus, `_get_extension_version()`.
-   Dès qu'elle vaut la cible : état `installed_native`, télémétrie
-   `UpdateInstalledPendingRestart`, puis `_close_after_inprocess_update()` de fix/MAJ
-   (message « installée, LibreOffice va se fermer », fermeture propre sur le thread
-   principal). La fermeture est retentée jusqu'à acceptation : LibreOffice la refuse
-   (veto) tant que sa fenêtre de progression est ouverte ; il ne propose pas
-   lui-même de redémarrer sur ce chemin (l'invite native n'existe qu'à la fermeture
-   du Gestionnaire des extensions). Renvoie vrai.
+4. Surveillance toutes les 5 s pendant 900 s au plus : version du registre
+   (`getExtensionList`) ou dossier de paquet apparu dans le cache depuis l'instantané
+   pris avant l'attente ; confirmée sur deux lectures consécutives. Puis état
+   `installed_native`, télémétrie, fermeture retentée (veto de LibreOffice tant que sa
+   fenêtre de progression est ouverte ; refus humain respecté ; abandon après 120 s →
+   `UpdateCloseDeferred`, activation au prochain démarrage).
 5. Délai écoulé : l'utilisateur a annulé, ignoré ou fermé. État `postponed` avec
    `postponed_until = maintenant + 24 h`, télémétrie `UpdatePostponed`. Renvoie vrai.
 
-Après l'installation native, l'ancien dossier de l'extension a été remplacé. Entre la
+Après l'installation native, LibreOffice garde l'ancien paquet chargé jusqu'au
+redémarrage ; le nouveau dossier apparaît à côté dans le cache des paquets. Entre la
 détection et la fermeture, le worker n'importe aucun module du plugin : seuls des
 appels UNO et des modules déjà chargés.
 
@@ -286,6 +293,10 @@ Liste de contrôle :
   atteint.
 - LibreOffice sans le module de mise à jour d'extensions (paquets Linux de distribution)
   masque le bouton natif ; les builds Windows et macOS de la Document Foundation l'ont.
+- Mesuré sur le banc du 2026-09-22 : le registre reste ancien en session, `terminate()`
+  est refusé tant que la fenêtre de progression est ouverte, et LibreOffice ne propose
+  pas de redémarrer sur le chemin programmatique (l'invite n'existe qu'à la fermeture du
+  Gestionnaire des extensions).
 
 ## 9. Hors périmètre
 
