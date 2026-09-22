@@ -35,6 +35,7 @@ _NATIVE_INSTALL_WAIT_SECONDS = 900
 _NATIVE_POLL_SECONDS = 5
 _NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
 _NATIVE_MAX_ATTEMPTS = 2
+_MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
 
 # Interfaces UNO pré-bindées au chargement du module (= thread principal), pour le
 # même motif que _EXT_MGR_SINGLETON : le worker d'update ne peut pas faire de
@@ -2545,17 +2546,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _run_on_main_thread(self, action, timeout, label):
         """Exécute `action()` sur le thread PRINCIPAL de LibreOffice, planifié via
         com.sun.star.awt.AsyncCallback + _MainThreadCallback, et attend au plus
-        `timeout` s. Renvoie (ok, err). Après un timeout, le callback éventuel
-        devient no-op (garde `cancelled`) : un rappel tardif ne doit ni installer
-        deux fois ni ouvrir un dialogue après que l'appelant a dégradé."""
+        `timeout` s. Renvoie (ok, err). Après un timeout : si le callback n'a pas
+        démarré il devient no-op (garde `cancelled`) ; s'il a démarré, `action()`
+        tourne peut-être encore sur le thread principal et l'appelant ne doit pas
+        lancer un second flux (err == _MAIN_THREAD_TIMEOUT_AFTER_START)."""
         if _MainThreadCallback is None:
             return False, "main-thread callback unavailable"
-        holder = {"ok": False, "err": "", "cancelled": False}
+        holder = {"ok": False, "err": "", "cancelled": False, "started": False}
         done = threading.Event()
 
         def _run():
             if holder["cancelled"]:
                 return
+            holder["started"] = True
             try:
                 action()
                 holder["ok"] = True
@@ -2575,6 +2578,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return False, f"schedule failed: {exc}"
         if not done.wait(timeout):
             holder["cancelled"] = True
+            if holder["started"]:
+                log_to_file(f"{label}: timeout, action still running on main thread")
+                return False, _MAIN_THREAD_TIMEOUT_AFTER_START
             log_to_file(f"{label}: timeout waiting for main thread")
             return False, "timeout"
         return holder["ok"], holder["err"]
@@ -2614,6 +2620,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             mgr.addExtension(oxt_url, props, "user", None, cmd_env)
 
         ok, err = self._run_on_main_thread(_install, timeout, "_run_install_on_main_thread")
+        self._main_thread_install_in_flight = (err == _MAIN_THREAD_TIMEOUT_AFTER_START)
         if ok:
             log_to_file("_run_install_on_main_thread: addExtension OK (main thread)")
             return True
@@ -2655,6 +2662,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 props = ()
 
             if not self._run_install_on_main_thread(oxt_url, props, cmd_env):
+                if getattr(self, "_main_thread_install_in_flight", False):
+                    # addExtension tourne encore sur le thread principal : surtout
+                    # pas de second flux (double install = corruption du registre).
+                    # Repli manuel ; la réconciliation au prochain démarrage
+                    # rapportera « installed » si l'install a abouti.
+                    log_to_file("_perform_update: main-thread install still running, not starting a second one")
+                    return False
                 log_to_file("_perform_update: main-thread install unavailable, trying legacy worker path")
                 if not self._install_oxt_inprocess(oxt_url, props, None, cmd_env):
                     log_to_file("_perform_update: in-process deployment API unavailable")
@@ -2968,7 +2982,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         interroge le feed, télécharge et installe lui-même ; ses dialogues tournent
         sur son thread de commandes, l'appel rend la main aussitôt.
         Vrai si le déclenchement s'est exécuté sans exception avant `timeout`.
-        Après un timeout, le rappel éventuel devient no-op (voir _run_on_main_thread)."""
+        Après un timeout, le rappel éventuel devient no-op (voir _run_on_main_thread).
+        Un timeout après démarrage compte comme déclenché : l'effet est en cours,
+        la surveillance ou le report qui suivent sont l'issue sûre."""
         ctx = self.ctx
 
         def _trigger():
@@ -2979,8 +2995,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             dialog.trigger("SHOW_UPDATE_DIALOG")
 
         ok, err = self._run_on_main_thread(_trigger, timeout, "_trigger_native_update_dialog")
-        if ok:
-            log_to_file("_trigger_native_update_dialog: SHOW_UPDATE_DIALOG triggered")
+        if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
+            suffix = "" if ok else " (still running on main thread)"
+            log_to_file(f"_trigger_native_update_dialog: SHOW_UPDATE_DIALOG triggered{suffix}")
             return True
         log_to_file(f"_trigger_native_update_dialog: failed: {err}")
         return False

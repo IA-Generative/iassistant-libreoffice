@@ -422,3 +422,67 @@ def test_reconcile_joins_route_to_extension_updated():
     assert len(updated) == 1
     assert updated[0].args[1]["route"] == "native"
     assert updated[0].args[1]["confirmed"] == "true"
+
+
+# ── Timeout après démarrage : jamais de second flux ──────────────────────
+
+def _blocking_dialog_job(block):
+    """Le callback main-thread est capturé et exécuté sur un thread qui bloque
+    dans dialog.trigger jusqu'à `block.set()` : simule une action encore en
+    cours quand le worker atteint son timeout."""
+    job, dialog, async_cb = _job_with_services(run_callback=False)
+    captured = {}
+    async_cb.addCallback.side_effect = lambda cb, data: captured.setdefault("cb", cb)
+    dialog.trigger.side_effect = lambda _evt: block.wait(5)
+
+    def _run_later():
+        while "cb" not in captured:
+            time.sleep(0.01)
+        captured["cb"].notify(None)
+
+    threading.Thread(target=_run_later, daemon=True).start()
+    return job, dialog
+
+
+def test_run_on_main_thread_reports_timeout_after_start():
+    block = threading.Event()
+    job, dialog = _blocking_dialog_job(block)
+    try:
+        ok, err = job._run_on_main_thread(
+            lambda: dialog.trigger("SHOW_UPDATE_DIALOG"), 0.3, "test")
+        assert ok is False
+        assert err == entrypoint._MAIN_THREAD_TIMEOUT_AFTER_START
+    finally:
+        block.set()
+
+
+def test_trigger_counts_started_timeout_as_triggered():
+    """L'action a démarré mais dure : l'effet est en cours, on ne bascule PAS
+    en route dirigée (deux flux d'installation concurrents sinon)."""
+    block = threading.Event()
+    job, dialog = _blocking_dialog_job(block)
+    try:
+        assert job._trigger_native_update_dialog(timeout=0.3) is True
+        dialog.trigger.assert_called_once_with("SHOW_UPDATE_DIALOG")
+    finally:
+        block.set()
+
+
+def test_install_in_flight_skips_legacy_worker_path():
+    """addExtension encore en cours sur le main thread → pas de repli
+    thePackageManagerFactory depuis le worker (double install)."""
+    job = _job()
+    fd, path = tempfile.mkstemp(suffix=".oxt")
+    os.close(fd)
+    try:
+        def _fake_install(*_a, **_k):
+            job._main_thread_install_in_flight = True
+            return False
+        job._run_install_on_main_thread = _fake_install
+        job._install_oxt_inprocess = MagicMock(return_value=True)
+        job._close_after_inprocess_update = MagicMock()
+        assert job._install_and_restart_in_process(path) is False
+        job._install_oxt_inprocess.assert_not_called()
+        job._close_after_inprocess_update.assert_not_called()
+    finally:
+        os.remove(path)
