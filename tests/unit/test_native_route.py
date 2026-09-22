@@ -523,3 +523,49 @@ def test_install_in_flight_skips_legacy_worker_path():
         job._close_after_inprocess_update.assert_not_called()
     finally:
         os.remove(path)
+
+
+# ── _get_extension_version lit le registre, pas son propre description.xml ──
+
+def _job_with_extension_list(pairs):
+    job = make_job()
+    smgr = job.ctx.getServiceManager.return_value
+    default = smgr.createInstanceWithContext.return_value
+    pip = MagicMock(name="PackageInformationProvider")
+    pip.getExtensionList.return_value = tuple(pairs)
+    smgr.createInstanceWithContext.side_effect = (
+        lambda name, ctx: pip if name == "com.sun.star.deployment.PackageInformationProvider" else default)
+    return job, pip
+
+
+def test_get_extension_version_reads_registry_pairs():
+    job, pip = _job_with_extension_list([("org.example.other", "9.9"), ("fr.gouv.interieur.mirai", " 0.0.1.0.32 ")])
+    assert job._get_extension_version() == "0.0.1.0.32"
+    pip.getExtensionList.assert_called_once()
+    assert not hasattr(pip, "getExtensionVersion") or not pip.getExtensionVersion.called
+
+
+def test_get_extension_version_falls_back_when_registry_unavailable():
+    """Registre injoignable → repli description.xml (ici absent) → chaîne vide,
+    jamais d'exception."""
+    job, pip = _job_with_extension_list([])
+    pip.getExtensionList.side_effect = RuntimeError("no registry")
+    assert job._get_extension_version() == ""
+
+
+def test_native_poll_sees_new_version_from_registry():
+    """Après l'installation native, l'ancien module tourne encore ; il doit voir
+    la nouvelle version via le registre, pas via son propre dossier disparu."""
+    job, pip = _job_with_extension_list([("fr.gouv.interieur.mirai", CURRENT)])
+    job._report_update_status = MagicMock()
+    job._send_telemetry = MagicMock()
+    job._wait_before_prompting = MagicMock()
+    job._trigger_native_update_dialog = MagicMock(return_value=True)
+    job._close_after_inprocess_update = MagicMock()
+    calls = {"n": 0}
+    def _list():
+        calls["n"] += 1
+        return ((("fr.gouv.interieur.mirai", TARGET),) if calls["n"] >= 3 else (("fr.gouv.interieur.mirai", CURRENT),))
+    pip.getExtensionList.side_effect = _list
+    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    job._close_after_inprocess_update.assert_called_once()

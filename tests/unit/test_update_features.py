@@ -344,7 +344,7 @@ def test_lo11_perform_update_releases_flag_on_exception():
 def test_lo12_get_extension_version_returns_version():
     job = make_job()
     mock_pip = MagicMock()
-    mock_pip.getExtensionVersion.return_value = "1.9.0"
+    mock_pip.getExtensionList.return_value = (("fr.gouv.interieur.mirai", "1.9.0"),)
     job.ctx.getServiceManager.return_value.createInstanceWithContext.return_value = mock_pip
 
     version = job._get_extension_version()
