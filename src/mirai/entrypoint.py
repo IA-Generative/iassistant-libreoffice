@@ -2767,8 +2767,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 box = toolkit.createMessageBox(
                     parent, 1, MSG_BUTTONS.BUTTONS_OK, "MIrAI — Mise à jour",
                     "La mise à jour a été installée.\n\n"
-                    "LibreOffice va se fermer pour l'activer, dès que la\n"
-                    "fenêtre de mise à jour sera refermée. Rouvrez-le ensuite."
+                    "LibreOffice va se fermer pour l'activer.\n"
+                    "Rouvrez-le ensuite."
                 )
                 box.execute()
                 try:
