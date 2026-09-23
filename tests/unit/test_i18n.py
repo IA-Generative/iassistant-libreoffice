@@ -7,16 +7,20 @@ Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 1. aucune cle n'est partiellement traduite (parite des cinq locales) ;
 2. la resolution de langue suit l'ordre persiste -> UNO -> environnement -> fr ;
 3. toute cle referencee par un appel `_t(...)` existe vraiment, et les cles a
-   placeholders s'interpolent sans laisser d'accolade visible.
+   placeholders s'interpolent sans laisser d'accolade visible ;
+4. les libelles statiques d'`oxt/Addons.xcu` correspondent au catalogue.
 """
 
+import json
 import os
 import re
+import tempfile
+import xml.etree.ElementTree as ET
 
 import pytest
 
 from src.mirai import i18n
-from tests.stubs.uno_stubs import install
+from tests.stubs.uno_stubs import install, make_job
 
 install()
 
@@ -25,6 +29,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 _ENV_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
 
 _LOCALE_DEPENDENT_FILES = (
+    "src/mirai/entrypoint.py",
+    "src/mirai/menu_actions/calc.py",
     "src/mirai/core/presets.py",
     "src/mirai/core/suggestions.py",
     "src/mirai/core/selection_info.py",
@@ -35,6 +41,16 @@ _LOCALE_DEPENDENT_FILES = (
     "src/mirai/core/capabilities.py",
     "src/mirai/core/clickable.py",
     "src/mirai/ui/palette.py",
+)
+
+_ADDON_KEYS = (
+    "addon.menubar",
+    "addon.open_assistant",
+    "addon.settings",
+    "addon.test_model",
+    "addon.documentation",
+    "addon.about",
+    "addon.toolbar",
 )
 
 # (cle, kwargs) — chaque couple doit s'interpoler dans les cinq locales.
@@ -305,6 +321,44 @@ def test_uno_locale_ignores_non_string_values_from_the_stub():
 
 
 # ---------------------------------------------------------------------------
+# Persistance de la langue
+# ---------------------------------------------------------------------------
+
+
+def test_ui_language_is_persisted_and_reread():
+    config_dir = tempfile.mkdtemp()
+    job = make_job(config_dir=config_dir)
+    job.set_config("ui_language", "zh")
+    with open(os.path.join(config_dir, "config.json"), encoding="utf-8") as handle:
+        assert json.load(handle)["ui_language"] == "zh"
+    assert job._get_config_from_file("ui_language", "") == "zh"
+
+
+def test_persisted_language_is_applied_at_startup():
+    config_dir = tempfile.mkdtemp()
+    with open(os.path.join(config_dir, "config.json"), "w", encoding="utf-8") as handle:
+        json.dump({"ui_language": "es"}, handle)
+    make_job(config_dir=config_dir)
+    assert i18n.get_locale() == "es"
+
+
+def test_startup_falls_back_to_environment_when_nothing_is_persisted(monkeypatch):
+    config_dir = tempfile.mkdtemp()
+    _clear_locale_env(monkeypatch)
+    monkeypatch.setenv("LC_ALL", "pt_BR.UTF-8")
+    make_job(config_dir=config_dir)
+    assert i18n.get_locale() == "pt"
+
+
+def test_startup_ignores_an_unknown_persisted_language():
+    config_dir = tempfile.mkdtemp()
+    with open(os.path.join(config_dir, "config.json"), "w", encoding="utf-8") as handle:
+        json.dump({"ui_language": "kl"}, handle)
+    make_job(config_dir=config_dir)
+    assert i18n.get_locale() in i18n.SUPPORTED
+
+
+# ---------------------------------------------------------------------------
 # Branchement des libelles
 # ---------------------------------------------------------------------------
 
@@ -319,6 +373,15 @@ def test_every_referenced_key_exists_in_the_catalog(relative_path):
 def test_context_menu_keys_are_translated():
     for key in ("menu.summarize", "menu.reformulate", "menu.correct", "menu.translate"):
         assert set(i18n.CATALOG[key]) == set(i18n.SUPPORTED)
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_calc_fallback_prompts_follow_the_locale(code):
+    job = make_job()
+    i18n.set_locale(code)
+    prompts = job._fallback_calc_prompts()
+    assert len(prompts) == 10
+    assert prompts == [i18n.CATALOG[f"calc.suggest.{position}"][code] for position in range(1, 11)]
 
 
 def test_edit_suggestion_keys_are_distinct_across_locales():
@@ -369,6 +432,87 @@ def test_no_key_is_left_identical_between_french_and_english_by_accident():
 
 
 # ---------------------------------------------------------------------------
+# Page de retour navigateur (callback OAuth)
+# ---------------------------------------------------------------------------
+
+
+def _render_callback_html():
+    match = re.search(r'html = (f""".*?""")', _read("src/mirai/entrypoint.py"), re.S)
+    assert match, "callback HTML f-string not found in entrypoint.py"
+    globals_for_eval = {"_t": i18n.t, "_i18n_get_locale": i18n.get_locale}
+    return eval(match.group(1), globals_for_eval)  # noqa: S307 - source du depot
+
+
+_CALLBACK_KEYS = (
+    "callback.title",
+    "callback.heading",
+    "callback.badge",
+    "callback.close_tab",
+    "callback.if_stuck",
+    "callback.no_action",
+)
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_callback_page_is_rendered_in_the_current_locale(code):
+    i18n.set_locale(code)
+    html = _render_callback_html()
+    assert f'<html lang="{code}">' in html
+    for key in _CALLBACK_KEYS:
+        assert i18n.t(key) in html, key
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_callback_page_keeps_its_css_intact(code):
+    i18n.set_locale(code)
+    html = _render_callback_html()
+    assert "body { font-family: Arial, sans-serif;" in html
+    assert ".card { background: #fff;" in html
+    assert "}}" not in html
+
+
+def test_callback_locale_switch_changes_the_page():
+    i18n.set_locale("fr")
+    french = _render_callback_html()
+    i18n.set_locale("zh")
+    chinese = _render_callback_html()
+    assert french != chinese
+    assert i18n.CATALOG["callback.badge"]["zh"] in chinese
+
+
+# ---------------------------------------------------------------------------
+# oxt/Addons.xcu (libelles statiques, hors Python)
+# ---------------------------------------------------------------------------
+
+
+def test_addons_xcu_is_valid_xml():
+    ET.parse(os.path.join(_REPO_ROOT, "oxt", "Addons.xcu"))
+
+
+def test_addons_xcu_declares_every_locale():
+    content = _read("oxt/Addons.xcu")
+    assert content.count("xml:lang=") == 5 * len(_ADDON_KEYS)
+    for code in i18n.SUPPORTED:
+        assert f'xml:lang="{code}"' in content
+
+
+def test_addons_xcu_labels_match_the_catalog():
+    content = _read("oxt/Addons.xcu")
+    missing = [
+        (key, code)
+        for key in _ADDON_KEYS
+        for code, value in i18n.CATALOG[key].items()
+        if value not in content
+    ]
+    assert missing == []
+
+
+def test_addons_xcu_has_no_bogus_locale_tag():
+    # Les libelles etaient etiquetes `en-US` alors qu'ils etaient en francais.
+    assert "en-US" not in _read("oxt/Addons.xcu")
+
+
+# ---------------------------------------------------------------------------
 # Langue des réponses du LLM
 #
 # Les prompts métier restent en français (décision de conception), mais chaque
@@ -377,6 +521,29 @@ def test_no_key_is_left_identical_between_french_and_english_by_accident():
 # langue (traduction, correction, continuation, remplacement dans le document)
 # priment sur cette directive, qui le dit explicitement.
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_llm_language_directive_follows_locale(code):
+    job = make_job()
+    i18n.set_locale(code)
+    request = job.make_api_request("ping", "", 10)
+    messages = json.loads(request.data)["messages"]
+    system = messages[0]["content"]
+    assert i18n.t("llm.answer_language") in system
+
+
+def test_llm_language_directive_switches_with_the_locale():
+    job = make_job()
+    i18n.set_locale("fr")
+    request = job.make_api_request("ping", "", 10)
+    french = json.loads(request.data)["messages"][0]["content"]
+    i18n.set_locale("zh")
+    request = job.make_api_request("ping", "", 10)
+    chinese = json.loads(request.data)["messages"][0]["content"]
+    assert i18n.CATALOG["llm.answer_language"]["fr"] in french
+    assert i18n.CATALOG["llm.answer_language"]["zh"] in chinese
+    assert french != chinese
 
 
 def test_core_text_pipeline_carries_the_directive():
@@ -391,3 +558,24 @@ def test_core_text_pipeline_carries_the_directive():
 
 def prompts_system(presets):
     return presets._system("consigne spécifique")
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "src/mirai/entrypoint.py",
+        "src/mirai/menu_actions/calc.py",
+        "src/mirai/core/prompts.py",
+    ),
+)
+def test_llm_language_directive_is_wired(relative_path):
+    assert '_t("llm.answer_language")' in _read(relative_path)
+
+
+def test_no_absolute_french_only_rule_remains():
+    # La palette d'éditions imposait « LANGUE OBLIGATOIRE : français » : ces
+    # suggestions sont des éléments d'interface et doivent suivre la locale.
+    for relative_path in ("src/mirai/entrypoint.py", "src/mirai/core/prompts.py"):
+        source = _read(relative_path)
+        assert "LANGUE OBLIGATOIRE" not in source
+        assert "JAMAIS répondre en anglais" not in source

@@ -1,14 +1,15 @@
 """Prompts système du moteur (français) + protocole d'outils du mode JSON."""
 
+from ..i18n import t as _t
+
 # Système hérité de make_api_request — conservé pour l'iso-fonctionnalité des
-# presets pipeline (texte brut, même langue, /no_thinking pour Qwen3).
+# presets pipeline (texte brut, /no_thinking pour Qwen3). La règle de langue
+# (llm.answer_language) est ajoutée à l'exécution par core.presets._system()
+# pour suivre la langue choisie dans l'interface.
 LEGACY_TEXT_SYSTEM = (
     "/no_thinking\n"
     "Renvoie uniquement du texte brut. N'utilise pas de markdown, de blocs de "
-    "code ni de symboles de formatage comme **, *, _, ou #. RÈGLE ABSOLUE : tu "
-    "DOIS répondre dans la MÊME LANGUE que le texte fourni par l'utilisateur. "
-    "Si le texte est en français, réponds en français. Si le texte est en "
-    "anglais, réponds en anglais. Ne change jamais la langue."
+    "code ni de symboles de formatage comme **, *, _, ou #."
 )
 
 JSON_TOOL_PROTOCOL = (
@@ -34,8 +35,8 @@ def build_system(app, registry, mode, preset_extra=""):
         "Tu es MIrAI, l'assistant intégré à LibreOffice "
         + _APP_LABELS.get(app, app) + " du ministère de l'Intérieur. "
         "Tu aides l'utilisateur à travailler sur SON document, via les outils "
-        "fournis. Réponds toujours dans la langue de l'utilisateur (français "
-        "par défaut). Tes réponses finales sont en texte brut, sans markdown.",
+        "fournis. Tes réponses finales sont en texte brut, sans markdown. "
+        + _t("llm.answer_language") + " "
         "Règles : lis le contexte nécessaire avec les outils de lecture avant "
         "de modifier quoi que ce soit ; fais des modifications minimales et "
         "précises ; si la demande est ambiguë, pose ta question en réponse "

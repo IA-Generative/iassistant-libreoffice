@@ -3,6 +3,7 @@
 import re
 
 from ..formatting import insert_formatted
+from ..i18n import t as _t
 from .shared import apply_settings_result
 
 _RE_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -111,7 +112,8 @@ def _extend_selection(job, text, selection, text_range, controller=None, model=N
         directive = (
             "Continue DIRECTEMENT le texte fourni par l'utilisateur. "
             "Écris uniquement la suite naturelle, sans question, sans reformulation, "
-            "sans introduction."
+            "sans introduction. "
+            "Écris dans la même langue que le texte fourni."
         )
         system_prompt = (directive + " " + configured_sp) if configured_sp else directive
 
@@ -228,8 +230,7 @@ RÉSUMÉ :
         system_prompt = (
             "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
             "en utilisant le minimum de mots nécessaire tout en préservant "
-            "les informations clés. Tu réponds TOUJOURS dans la même langue "
-            "que le texte fourni."
+            "les informations clés."
         )
         max_tokens = int(job.get_config("summarize_selection_max_tokens", 15000))
         request = job.make_api_request(prompt, system_prompt, max_tokens)
@@ -291,9 +292,8 @@ VERSION REFORMULÉE :
 
         system_prompt = (
             "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
-            "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
-            "la même langue que le texte fourni. Tu utilises des phrases courtes "
-            "et des mots courants."
+            "dans un langage clair et simple accessible à tous. Tu utilises "
+            "des phrases courtes et des mots courants."
         )
         configured_sp = str(job.get_config("simplify_selection_system_prompt", "") or "").strip()
         if configured_sp:
