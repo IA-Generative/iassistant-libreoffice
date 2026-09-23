@@ -715,6 +715,19 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     assert "UpdateInstallFailed" not in _events(job)
 
 
+def test_directed_close_deferred_carries_version_and_campaign():
+    """UpdateCloseDeferred de la route dirigée doit porter la version et la
+    campagne, comme la variante native — sans quoi l'entonnoir ne relie pas une
+    fermeture reportée à sa campagne."""
+    job = _accepting_job()
+    job._run_install_on_main_thread = MagicMock(return_value=True)
+    job._close_after_inprocess_update = MagicMock(return_value=False)
+    job._perform_update(dict(DIRECTIVE))
+    deferred = [c.args[1] for c in job._send_telemetry.call_args_list
+                if c.args[0] == "UpdateCloseDeferred"]
+    assert deferred == [{"route": "directed", "version_after": TARGET, "campaign_id": "7"}]
+
+
 def test_install_in_flight_skips_legacy_worker_path():
     """addExtension encore en cours sur le main thread → pas de repli
     thePackageManagerFactory depuis le worker (double install)."""
