@@ -41,6 +41,8 @@ _CLOSE_RETRY_SECONDS = 120
 _CLOSE_RETRY_INTERVAL_SECONDS = 3
 _CLOSE_ATTEMPT_TIMEOUT_SECONDS = 10
 _SLOW_PROBE_LOG_MS = 1000
+# Niveaux remontés depuis src/mirai/ pour trouver description.xml (racine du paquet)
+_PACKAGE_ROOT_SEARCH_LEVELS = 4
 _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
 _PROMPT_POLL_SECONDS = 1
@@ -2778,8 +2780,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         enregistrées. La sonde tourne sur le thread PRINCIPAL (accès UNO) ;
         best-effort : sonde indisponible, Desktop absent ou composant muet →
         Faux, l'appelant retombe sur son heuristique."""
-        ctx = self.ctx
-        smgr = self.ctx.getServiceManager()
+        try:
+            ctx = self.ctx
+            smgr = ctx.getServiceManager()
+        except Exception as exc:
+            log_to_file(f"_has_modified_documents: contexte indisponible ({exc})")
+            return False
         found = {"modified": False}
 
         def _probe():
@@ -2806,8 +2812,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Informe l'utilisateur que la mise à jour installée s'activera au
         prochain démarrage : la boîte précédente lui a promis une fermeture qui
         n'a pas eu lieu. Sur le thread principal, best-effort, jamais bloquant."""
-        ctx = self.ctx
-        smgr = self.ctx.getServiceManager()
+        try:
+            ctx = self.ctx
+            smgr = ctx.getServiceManager()
+        except Exception as exc:
+            log_to_file(f"_notify_update_activates_at_restart: contexte indisponible ({exc})")
+            return
 
         def _show():
             desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
@@ -3064,8 +3074,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         - version active == target → rapport « installed » au DM + télémétrie,
           purge de pending_update (OXT stagé, scripts, état), retrait du target
           de l'anti-boucle _update_launch_blocked_cls ;
-        - `at_startup` et étape installed_* dont la cible n'est pas active →
-          l'installation a été annulée (rollback de LibreOffice) : rapport
+        - `at_startup` et étape installed_* dont la cible n'est pas active,
+          confirmé par deux lectures espacées du registre → l'installation a
+          été annulée (rollback de LibreOffice) : rapport
           « failed » au DM + télémétrie, purge. En session (`at_startup` faux)
           le registre garde l'ancienne version jusqu'au redémarrage : on ne
           conclut rien ;
@@ -3087,7 +3098,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 pass
             return
         target = str(state.get("target_version", ""))
+        stage = str(state.get("stage") or "")
+        pending_restart = stage in ("installed_native", "installed_inprocess")
         current = str(self._get_extension_version() or "")
+        if at_startup and pending_restart and target and current and current != target:
+            # Juste après le démarrage, le registre peut encore se consolider :
+            # seconde lecture espacée avant de conclure à un échec.
+            time.sleep(_NATIVE_POLL_SECONDS)
+            current = str(self._get_extension_version() or "")
         if target and current == target:
             log_to_file(f"_reconcile_update_state: update to {target} confirmed active")
             try:
@@ -3107,8 +3125,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 pass
             MainJob._update_launch_blocked_cls.discard(target)
             self._purge_pending_update_dir()
-        elif at_startup and target and current and \
-                str(state.get("stage") or "") in ("installed_native", "installed_inprocess"):
+        elif at_startup and pending_restart and target and current:
             log_to_file(
                 f"_reconcile_update_state: {target} installée mais inactive au redémarrage "
                 f"(version active {current}), échec rapporté")
@@ -3259,20 +3276,25 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         module jusqu'à la racine du paquet — le dossier qui contient
         description.xml — puis de deux niveaux (<paquet>.oxt → <lu…> → cache).
         Repli sur la profondeur historique (cinq niveaux) si aucun
-        description.xml n'est trouvé au-dessus."""
+        description.xml n'est trouvé dans les niveaux inspectés. Calculé une
+        fois par instance."""
+        cached = getattr(self, "_package_cache_dir_value", None)
+        if cached:
+            return cached
         here = os.path.dirname(os.path.abspath(__file__))
-        while True:
+        result = None
+        for _ in range(_PACKAGE_ROOT_SEARCH_LEVELS):
             if os.path.isfile(os.path.join(here, "description.xml")):
-                return os.path.dirname(os.path.dirname(here))
-            parent = os.path.dirname(here)
-            if parent == here:
+                result = os.path.dirname(os.path.dirname(here))
                 break
-            here = parent
-        log_to_file("_package_cache_dir: description.xml introuvable, repli sur la profondeur fixe")
-        fallback = os.path.abspath(__file__)
-        for _ in range(5):
-            fallback = os.path.dirname(fallback)
-        return fallback
+            here = os.path.dirname(here)
+        if result is None:
+            log_to_file("_package_cache_dir: description.xml introuvable, repli sur la profondeur fixe")
+            result = os.path.abspath(__file__)
+            for _ in range(5):
+                result = os.path.dirname(result)
+        self._package_cache_dir_value = result
+        return result
 
     def _cached_package_versions(self):
         """Entrées (dossier <lu…>, version) de NOTRE extension présentes dans le

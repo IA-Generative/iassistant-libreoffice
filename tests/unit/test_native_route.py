@@ -972,3 +972,15 @@ def test_schedule_update_defers_new_directive_while_previous_install_pending_res
     assert state["target_version"] == TARGET
     assert state["stage"] == "installed_native"
     assert state["campaign_id"] == 6
+
+
+# ── Les aides de fermeture survivent à un contexte UNO disposé ──────────────
+
+def test_close_helpers_survive_disposed_context():
+    """Contexte disposé pendant la boucle de fermeture : la sonde répond Faux
+    et la boîte d'information s'abstient, sans exception remontée jusqu'à
+    _perform_update (qui rapporterait un échec à tort)."""
+    job = _job()
+    job.ctx.getServiceManager.side_effect = RuntimeError("disposed")
+    assert job._has_modified_documents() is False
+    job._notify_update_activates_at_restart()
