@@ -40,6 +40,7 @@ _NATIVE_MAX_ATTEMPTS = 2
 _CLOSE_RETRY_SECONDS = 120
 _CLOSE_RETRY_INTERVAL_SECONDS = 3
 _CLOSE_ATTEMPT_TIMEOUT_SECONDS = 10
+_SLOW_PROBE_LOG_MS = 1000
 _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
 _PROMPT_POLL_SECONDS = 1
@@ -1943,7 +1944,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # Refus ou report mémorisé (route native ou dirigée) : ne pas reproposer
         # ni retélécharger à chaque rafraîchissement de config avant l'échéance.
         state = self._load_update_state()
-        if target_version and str(state.get("target_version", "")) == target_version:
+        if target_version and str(state.get("target_version", "")).strip() == target_version:
             try:
                 until = float(state.get("postponed_until") or 0)
             except (TypeError, ValueError):
@@ -2549,10 +2550,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
           1. **thePackageManagerFactory** obtained via `ctx.getValueByName` — a plain
              UNO method call, **no import** → works off the main thread. Its
-             `getPackageManager("user").addPackage(...)` deploys the OXT. (Historique :
-             la sonde terrain n'obtenait jamais le nom inexistant theExtensionManager ;
-             avec le vrai singleton ExtensionManager, ce repli n'a plus de raison
-             d'être et ne sert qu'en dernier recours.)
+             `getPackageManager("user").addPackage(...)` deploys the OXT. Repli de
+             dernier recours seulement : la voie normale est l'installation sur le
+             thread principal (_run_install_on_main_thread).
           2. The **ExtensionManager singleton pre-bound on the MAIN thread** at module
              load (`_EXT_MGR_SINGLETON`) → `addExtension`, as a fallback.
 
@@ -3255,12 +3255,24 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _package_cache_dir(self):
         """Dossier du cache des paquets utilisateur
-        (<profil>/user/uno_packages/cache/uno_packages), déduit de l'emplacement
-        de ce module : <cache>/<lu…>/<paquet>.oxt/src/mirai/entrypoint.py."""
-        here = os.path.abspath(__file__)
+        (<profil>/user/uno_packages/cache/uno_packages) : on remonte depuis ce
+        module jusqu'à la racine du paquet — le dossier qui contient
+        description.xml — puis de deux niveaux (<paquet>.oxt → <lu…> → cache).
+        Repli sur la profondeur historique (cinq niveaux) si aucun
+        description.xml n'est trouvé au-dessus."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        while True:
+            if os.path.isfile(os.path.join(here, "description.xml")):
+                return os.path.dirname(os.path.dirname(here))
+            parent = os.path.dirname(here)
+            if parent == here:
+                break
+            here = parent
+        log_to_file("_package_cache_dir: description.xml introuvable, repli sur la profondeur fixe")
+        fallback = os.path.abspath(__file__)
         for _ in range(5):
-            here = os.path.dirname(here)
-        return here
+            fallback = os.path.dirname(fallback)
+        return fallback
 
     def _cached_package_versions(self):
         """Entrées (dossier <lu…>, version) de NOTRE extension présentes dans le
@@ -3273,7 +3285,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         antérieure sur la même cible. Best-effort, jamais d'exception."""
         entries = set()
         try:
-            import re
             cache = self._package_cache_dir()
             for lu in os.listdir(cache):
                 lu_dir = os.path.join(cache, lu)
@@ -3357,8 +3368,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             probe_ms = int((time.time() - probe_start) * 1000)
             hits = hits + 1 if seen == target_version and target_version else 0
             # Journal de diagnostic : valeur vue à chaque changement (et à la
-            # première lecture), ou lecture anormalement lente (>1 s).
-            if seen != last_seen or probe_ms > 1000:
+            # première lecture), ou lecture anormalement lente.
+            if seen != last_seen or probe_ms > _SLOW_PROBE_LOG_MS:
                 log_to_file(
                     f"_perform_native_update: poll #{polls} installed={seen or '-'} "
                     f"cache={sorted(self._versions_of(cached)) or '-'} target={target_version} "

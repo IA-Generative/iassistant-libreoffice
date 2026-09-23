@@ -877,6 +877,31 @@ def _fake_cache(versions):
     return cache
 
 
+def test_package_cache_dir_anchors_on_description_xml(monkeypatch):
+    """Le dossier scruté est déduit de la racine du paquet (le dossier qui
+    contient description.xml), pas d'un compteur de niveaux : une réorganisation
+    de src/mirai/ ne doit pas déplacer silencieusement la sonde."""
+    cache = _mkdtemp()
+    pkg = os.path.join(cache, "lu42.tmp_", "mirai-libreoffice.oxt")
+    os.makedirs(os.path.join(pkg, "python", "src", "mirai"))
+    open(os.path.join(pkg, "description.xml"), "w").close()
+    monkeypatch.setattr(entrypoint, "__file__",
+                        os.path.join(pkg, "python", "src", "mirai", "entrypoint.py"))
+    job = make_job(config_dir=_mkdtemp())
+    assert job._package_cache_dir() == cache
+
+
+def test_package_cache_dir_falls_back_to_fixed_depth_without_description_xml(monkeypatch):
+    """Aucun description.xml au-dessus (tests, arborescence inattendue) :
+    comportement historique, cinq niveaux."""
+    root = _mkdtemp()
+    deep = os.path.join(root, "cache", "lu42.tmp_", "mirai.oxt", "src", "mirai")
+    os.makedirs(deep)
+    monkeypatch.setattr(entrypoint, "__file__", os.path.join(deep, "entrypoint.py"))
+    job = make_job(config_dir=_mkdtemp())
+    assert job._package_cache_dir() == os.path.join(root, "cache")
+
+
 def test_cached_package_versions_lists_our_identifier_only():
     job = _job()
     job._package_cache_dir = lambda: _fake_cache([CURRENT, TARGET])
