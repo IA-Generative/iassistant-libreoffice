@@ -49,11 +49,33 @@ def _cleanup_config_cache():
             pass
 
 
+_LOCALE_ENV_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
+
+
+def _pin_locale(monkeypatch):
+    # Les libellés de l'IHM sont résolus à la construction du widget, et
+    # `MainJob.__init__` re-résout la langue à chaque instanciation. Sans
+    # verrou, le rendu suivrait la locale du poste (LC_ALL, LANG, …) et les
+    # assertions françaises échoueraient sur un environnement pt_BR ou en_US.
+    # On neutralise donc l'environnement pour retomber sur le français, puis on
+    # force la langue du module (les tests qui veulent une autre langue la
+    # posent eux-mêmes après ce fixture).
+    for name in _LOCALE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    try:
+        from src.mirai import i18n
+    except Exception:
+        return
+    i18n.set_locale(i18n.DEFAULT_LOCALE)
+
+
 @pytest.fixture(autouse=True)
-def _isolate_mainjob_state():
+def _isolate_mainjob_state(monkeypatch):
     _reset_mainjob_flags()
+    _pin_locale(monkeypatch)
     _cleanup_config_cache()
     yield
+    _pin_locale(monkeypatch)
     _reset_mainjob_flags()
     _cleanup_phantom_dirs()
     _cleanup_config_cache()

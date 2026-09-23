@@ -25,7 +25,9 @@ USAGE
 }
 
 log() { printf '%s\n' "$*"; }
-warn() { printf 'WARNING: %s\n' "$*"; }
+# Sur stderr : `resolve_config_path` est capturé par substitution de commande,
+# un avertissement sur stdout se retrouverait collé dans le chemin du fichier.
+warn() { printf 'WARNING: %s\n' "$*" >&2; }
 err() { printf 'ERROR: %s\n' "$*" >&2; }
 
 require_cmd() {
