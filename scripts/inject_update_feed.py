@@ -10,7 +10,7 @@ update.xml servi par le DM, télécharge et installe l'OXT entièrement in-proce
 L'URL du feed est dérivée du profil bootstrap embarqué (config.default.json du
 staging) : chaque bootstrap_url donne un <src> — LibreOffice les essaie dans
 l'ordre (failover natif, même sémantique que le multi-bootstrap du plugin).
-Convention de chemin servie par le DM (device-management#23) :
+Convention de chemin servie par le DM (device-management#4) :
 
     <bootstrap>/catalog/mirai-libreoffice/update.xml
 

@@ -174,7 +174,7 @@ Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe
 - `MIRAI_SELFTEST_UPDATE_BLOCKED=1` force la boîte « mise à jour bloquée » via *À propos ▸ Vérifier les mises à jour*, sans déployer de MAJ _(#7)_.
 - Le dialogue *À propos* expose aussi un bouton **« Ouvrir dossier »** (même ouverture native que ci-dessus) pour tester localement, Mac inclus.
 
-> **Suivi du mécanisme de MAJ** : issue-parapluie **#9** · install in-process **#4** (singleton `.get` **#15**) · download failover **#16** · bouton « Ouvrir le dossier » **#7**/**#12** · option native `<update-information>` **#5** (flux format LibreOffice côté DM : IA-Generative/device-management#23) · cache binaire DM : IA-Generative/device-management#24.
+> **Suivi du mécanisme de MAJ** : issue-parapluie **#9** · install in-process **#4** (singleton `.get` **#15**) · download failover **#16** · bouton « Ouvrir le dossier » **#7**/**#12** · option native `<update-information>` **#5** (flux format LibreOffice côté DM : IA-Generative/device-management#4) · cache binaire DM : IA-Generative/device-management#24.
 
 ### Suivi et contrôle
 
