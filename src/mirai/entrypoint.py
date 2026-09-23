@@ -43,6 +43,11 @@ _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
 _MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
 _MAIN_THREAD_VETOED = "vetoed"
+# Erreurs de PLANIFICATION de _run_on_main_thread (le thread principal n'a pas
+# pris le callback), par opposition à une exception remontée par l'action.
+_MAIN_THREAD_CALLBACK_UNAVAILABLE = "main-thread callback unavailable"
+_MAIN_THREAD_ASYNC_UNAVAILABLE = "AsyncCallback unavailable"
+_MAIN_THREAD_SCHEDULE_FAILED = "schedule failed: "
 _CLOSE_USER_REFUSAL_SECONDS = 1.0
 
 # Interfaces UNO pré-bindées au chargement du module (= thread principal), pour le
@@ -2612,7 +2617,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         (0.0 si elle n'a pas tourné)."""
         if _MainThreadCallback is None:
             self._last_main_thread_action_s = 0.0
-            return False, "main-thread callback unavailable"
+            return False, _MAIN_THREAD_CALLBACK_UNAVAILABLE
         holder = {"ok": False, "err": "", "cancelled": False, "started": False, "action_s": 0.0}
         done = threading.Event()
 
@@ -2637,12 +2642,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 "com.sun.star.awt.AsyncCallback", self.ctx)
             if async_cb is None:
                 self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
-                return False, "AsyncCallback unavailable"
+                return False, _MAIN_THREAD_ASYNC_UNAVAILABLE
             async_cb.addCallback(_MainThreadCallback(_run), None)
         except Exception as exc:
             log_to_file(f"{label}: schedule failed: {exc}")
             self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
-            return False, f"schedule failed: {exc}"
+            return False, _MAIN_THREAD_SCHEDULE_FAILED + str(exc)
         if not done.wait(timeout):
             holder["cancelled"] = True
             if holder["started"]:
@@ -2771,9 +2776,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         si le thread principal est occupé (timeout) : on retente périodiquement
         jusqu'à acceptation ou expiration du délai. Un veto qui a mis du temps à
         arriver est traité comme un refus humain (« Enregistrer ? » → Annuler) et
-        respecté sans nouvel essai. SIGTERM n'intervient que si le thread principal
-        est injoignable (callback/AsyncCallback indisponible) — jamais pour un simple
-        veto ou une occupation temporaire.
+        respecté sans nouvel essai. SIGTERM n'intervient que si la PLANIFICATION sur
+        le thread principal échoue (callback ou AsyncCallback indisponible,
+        addCallback en échec) : le thread principal est alors injoignable. Une
+        exception remontée par l'action (Desktop indisponible, service en cours de
+        disposition) prouve au contraire qu'il répond — on rend la main sans tuer le
+        processus, la mise à jour s'activera au prochain démarrage.
 
         Retourne True si la fermeture a été acceptée, False sinon (veto persistant,
         refus humain, ou SIGTERM déclenché).
@@ -2838,10 +2846,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     continue
                 log_to_file("_close_after_inprocess_update: veto persistant, abandon — la MAJ s'active au prochain démarrage")
                 return False
-            # Le thread principal est injoignable (callback/AsyncCallback indisponible,
-            # planification impossible) : seul cas où SIGTERM reste justifié.
-            log_to_file(f"_close_after_inprocess_update: main thread unreachable ({err}), SIGTERM fallback")
-            self._terminate_on_main_thread()
+            if err in (_MAIN_THREAD_CALLBACK_UNAVAILABLE, _MAIN_THREAD_ASYNC_UNAVAILABLE) \
+                    or str(err).startswith(_MAIN_THREAD_SCHEDULE_FAILED):
+                # Le thread principal est injoignable (planification impossible) :
+                # seul cas où SIGTERM reste justifié.
+                log_to_file(f"_close_after_inprocess_update: main thread unreachable ({err}), SIGTERM fallback")
+                self._terminate_on_main_thread()
+                return False
+            # Exception de l'action : le thread principal répond, aucune raison de
+            # tuer le processus (documents non enregistrés).
+            log_to_file(f"_close_after_inprocess_update: fermeture impossible ({err}), abandon — la MAJ s'active au prochain démarrage")
             return False
 
     def _terminate_on_main_thread(self):

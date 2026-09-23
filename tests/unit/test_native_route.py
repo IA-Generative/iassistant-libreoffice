@@ -587,9 +587,34 @@ def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch)
 def test_close_after_inprocess_update_sigterm_only_when_unreachable():
     job, _dialog, _async_cb = _job_with_services()
     job._terminate_on_main_thread = MagicMock()
-    job._run_on_main_thread = MagicMock(return_value=(False, "AsyncCallback unavailable"))
+    job._run_on_main_thread = MagicMock(
+        return_value=(False, entrypoint._MAIN_THREAD_ASYNC_UNAVAILABLE))
     assert job._close_after_inprocess_update() is False
     job._terminate_on_main_thread.assert_called_once()
+
+
+def test_close_after_inprocess_update_sigterm_when_scheduling_fails():
+    """addCallback en échec : le thread principal est injoignable, SIGTERM reste
+    la seule sortie."""
+    job, _dialog, _async_cb = _job_with_services()
+    job._terminate_on_main_thread = MagicMock()
+    job._run_on_main_thread = MagicMock(
+        return_value=(False, entrypoint._MAIN_THREAD_SCHEDULE_FAILED + "boom"))
+    assert job._close_after_inprocess_update() is False
+    job._terminate_on_main_thread.assert_called_once()
+
+
+def test_close_after_inprocess_update_no_sigterm_on_action_error(monkeypatch):
+    """Le Desktop se dérobe (service en cours de disposition) alors que le thread
+    principal a bien exécuté le callback : tuer le processus à coups de SIGTERM
+    perdrait les documents non enregistrés — on rend la main, la MAJ s'activera
+    au prochain démarrage."""
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    job, desktop = _close_job([])
+    desktop.terminate.side_effect = RuntimeError("Desktop disposé")
+    assert job._close_after_inprocess_update() is False
+    assert desktop.terminate.call_count == 1
+    job._terminate_on_main_thread.assert_not_called()
 
 
 def test_schedule_update_skips_target_installed_pending_restart():
