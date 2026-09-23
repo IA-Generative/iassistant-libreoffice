@@ -2304,7 +2304,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 })
                 # In-process (ExtensionManager sur le main thread) : la seule voie
                 # automatique par défaut — aucun processus enfant (WinError 5-immune).
-                if self._install_and_restart_in_process(getattr(self, "_pending_install_oxt", "")):
+                if self._install_and_restart_in_process(
+                        getattr(self, "_pending_install_oxt", ""), target_version, campaign_id):
                     log_to_file("_perform_update: installed in-process, closing for restart")
                     self._save_update_state(directive, "installed_inprocess")
                     # « installed » (rapport DM) n'arrive qu'à la réconciliation,
@@ -2710,7 +2711,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         log_to_file(f"_run_install_on_main_thread: install failed: {err}")
         return False
 
-    def _install_and_restart_in_process(self, oxt_path):
+    def _install_and_restart_in_process(self, oxt_path, version_after="", campaign_id=None):
         """Install the update via LibreOffice's own deployment API — entirely
         inside the soffice process — then close LibreOffice cleanly.
 
@@ -2761,7 +2762,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # Close LibreOffice cleanly so the user reopens it with the new version
             # active. We deliberately do NOT re-exec.
             if not self._close_after_inprocess_update():
-                self._send_telemetry("UpdateCloseDeferred", {"route": "directed"})
+                self._send_telemetry("UpdateCloseDeferred", {
+                    "route": "directed",
+                    "version_after": version_after,
+                    "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                })
             return True
         except Exception as exc:
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
