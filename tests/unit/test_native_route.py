@@ -544,6 +544,34 @@ def test_close_after_inprocess_update_respects_user_refusal(monkeypatch):
     assert desktop.terminate.call_count == 1
 
 
+def test_close_after_inprocess_update_ignores_scheduling_latency(monkeypatch):
+    """Thread principal lent à prendre le callback, mais veto instantané dans
+    terminate() : ce n'est PAS un refus humain → on réessaie et on aboutit."""
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(entrypoint, "_CLOSE_USER_REFUSAL_SECONDS", 0.05)
+    job, _dialog, async_cb = _job_with_services(run_callback=False)
+    async_cb.addCallback.side_effect = (
+        lambda cb, data: threading.Timer(0.2, cb.notify, args=(data,)).start())
+    smgr = job.ctx.getServiceManager.return_value
+    desktop = MagicMock(name="Desktop")
+    desktop.terminate.side_effect = [False, True]
+    previous = smgr.createInstanceWithContext.side_effect
+    smgr.createInstanceWithContext.side_effect = (
+        lambda name, ctx: desktop if name == "com.sun.star.frame.Desktop" else previous(name, ctx))
+    job._terminate_on_main_thread = MagicMock()
+    assert job._close_after_inprocess_update() is True
+    assert desktop.terminate.call_count == 2
+    job._terminate_on_main_thread.assert_not_called()
+
+
+def test_run_on_main_thread_exposes_action_duration():
+    job, dialog, _async_cb = _job_with_services()
+    dialog.trigger.side_effect = lambda _evt: time.sleep(0.05)
+    ok, _err = job._run_on_main_thread(lambda: dialog.trigger("SHOW_UPDATE_DIALOG"), 2, "t")
+    assert ok is True
+    assert job._last_main_thread_action_s >= 0.04
+
+
 def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch):
     """Callback jamais démarré (thread principal occupé) → on réessaie, JAMAIS de SIGTERM."""
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
