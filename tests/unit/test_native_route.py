@@ -5,6 +5,7 @@ fix/MAJ en repli ; refus mémorisé 24 h.
 
 Run:  pytest tests/unit/test_native_route.py -v
 """
+import itertools
 import json
 import os
 import tempfile
@@ -499,12 +500,36 @@ def test_trigger_counts_started_timeout_as_triggered():
         block.set()
 
 
-def _close_job(terminate_results):
-    """Desktop.terminate() renvoie successivement les valeurs données."""
+def _set_open_documents(desktop, modified_flags):
+    """Composants ouverts énumérés par le Desktop, avec leur drapeau
+    isModified() ; l'énumération est rejouable (une par sonde)."""
+    docs = []
+    for flag in modified_flags:
+        doc = MagicMock(name="Document")
+        doc.isModified.return_value = flag
+        docs.append(doc)
+    enumeration = desktop.getComponents.return_value.createEnumeration.return_value
+    enumeration.hasMoreElements.side_effect = itertools.cycle([True] * len(docs) + [False])
+    enumeration.nextElement.side_effect = itertools.cycle(docs) if docs else None
+
+
+def _message_texts(job):
+    toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
+    return [c.args[4] for c in toolkit.createMessageBox.call_args_list]
+
+
+def _deferred_messages(job):
+    return [t for t in _message_texts(job) if "prochain démarrage" in t]
+
+
+def _close_job(terminate_results, modified_documents=()):
+    """Desktop.terminate() renvoie successivement les valeurs données ;
+    `modified_documents` décrit les documents ouverts (modifiés ou non)."""
     job, _dialog, _async_cb = _job_with_services()
     smgr = job.ctx.getServiceManager.return_value
     desktop = MagicMock(name="Desktop")
     desktop.terminate.side_effect = list(terminate_results)
+    _set_open_documents(desktop, modified_documents)
     previous = smgr.createInstanceWithContext.side_effect
     smgr.createInstanceWithContext.side_effect = (
         lambda name, ctx: desktop if name == "com.sun.star.frame.Desktop" else previous(name, ctx))
@@ -518,6 +543,19 @@ def test_close_after_inprocess_update_retries_until_veto_clears(monkeypatch):
     assert job._close_after_inprocess_update() is True
     assert desktop.terminate.call_count == 3
     job._terminate_on_main_thread.assert_not_called()
+    assert _deferred_messages(job) == [], "fermeture aboutie : aucune boîte de report"
+
+
+def test_close_after_inprocess_update_treats_veto_with_modified_document_as_refusal(monkeypatch):
+    """Un document porte des modifications non enregistrées : le veto vient du
+    dialogue « Enregistrer les modifications ? », donc de l'utilisateur — une
+    seule tentative, et il est informé que la MAJ s'activera au redémarrage."""
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
+    job, desktop = _close_job([False, False, True], modified_documents=(False, True))
+    assert job._close_after_inprocess_update() is False
+    assert desktop.terminate.call_count == 1
+    assert len(_deferred_messages(job)) == 1
+    job._terminate_on_main_thread.assert_not_called()
 
 
 def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch):
@@ -527,6 +565,7 @@ def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch):
     assert job._close_after_inprocess_update() is False
     assert desktop.terminate.call_count >= 2
     job._terminate_on_main_thread.assert_not_called()
+    assert len(_deferred_messages(job)) == 1, "une seule boîte, à l'abandon"
 
 
 def test_close_after_inprocess_update_respects_user_refusal(monkeypatch):
@@ -555,6 +594,7 @@ def test_close_after_inprocess_update_ignores_scheduling_latency(monkeypatch):
     smgr = job.ctx.getServiceManager.return_value
     desktop = MagicMock(name="Desktop")
     desktop.terminate.side_effect = [False, True]
+    _set_open_documents(desktop, ())
     previous = smgr.createInstanceWithContext.side_effect
     smgr.createInstanceWithContext.side_effect = (
         lambda name, ctx: desktop if name == "com.sun.star.frame.Desktop" else previous(name, ctx))
