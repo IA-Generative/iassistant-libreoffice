@@ -15,6 +15,7 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
+from src.mirai import entrypoint
 from src.mirai.entrypoint import MainJob
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -250,11 +251,12 @@ def test_reconcile_keeps_fresh_pending_state():
     assert os.path.isfile(os.path.join(pend, "mirai_update.oxt"))
 
 
-def test_reconcile_reports_failed_at_startup_when_target_never_became_active():
+def test_reconcile_reports_failed_at_startup_when_target_never_became_active(monkeypatch):
     """Dossier de paquet laissé par une installation native annulée : l'étape dit
     installed_native, mais la cible n'est pas active au redémarrage. Le DM doit
     l'apprendre (failed) et l'état être purgé — sinon le poste ne retente rien
     pendant 14 jours et la campagne reste bloquée sur deferred."""
+    monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", 0.01)
     job, pend = _job_with_state({
         "campaign_id": 7, "target_version": "0.0.1.0.32",
         "version_before": "0.0.1.0.31", "stage": "installed_native",
@@ -268,6 +270,25 @@ def test_reconcile_reports_failed_at_startup_when_target_never_became_active():
     failed = [c for c in job._send_telemetry.call_args_list if c.args[0] == "UpdateInstallFailed"]
     assert len(failed) == 1
     assert failed[0].args[1]["route"] == "native"
+    assert not os.path.isdir(pend)
+
+
+def test_reconcile_at_startup_rechecks_registry_before_failing(monkeypatch):
+    """Juste après le démarrage, le registre peut encore se consolider : une
+    première lecture périmée ne doit pas produire un « failed » — la seconde
+    lecture confirme l'installation."""
+    monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", 0.01)
+    job, pend = _job_with_state({
+        "campaign_id": 7, "target_version": "0.0.1.0.32",
+        "version_before": "0.0.1.0.31", "stage": "installed_native",
+        "route": "native", "ts": time.time(),
+    }, current_version="0.0.1.0.31")
+    job._get_extension_version = MagicMock(side_effect=["0.0.1.0.31", "0.0.1.0.32"])
+
+    job._reconcile_update_state(at_startup=True)
+
+    job._report_update_status.assert_called_once_with(
+        7, "installed", "0.0.1.0.31", "0.0.1.0.32")
     assert not os.path.isdir(pend)
 
 
