@@ -28,7 +28,18 @@ Gestionnaire des extensions reste disponible au support, indépendamment du plug
 **Fermeture après installation (route 1).** La fermeture est retentée jusqu'à
 acceptation : LibreOffice la refuse (veto) tant que sa fenêtre de progression
 est ouverte ; il ne propose pas lui-même de redémarrer sur ce chemin (l'invite
-native n'existe qu'à la fermeture du Gestionnaire des extensions).
+native n'existe qu'à la fermeture du Gestionnaire des extensions). Deux vetos
+sont au contraire des **refus humains**, respectés sans nouvel essai : un veto
+alors qu'un document ouvert porte des modifications non enregistrées
+(`isModified()` sur les composants du Desktop, sondés sur le thread principal)
+— il vient du dialogue « Enregistrer les modifications ? » —, et un veto arrivé
+après plus d'une seconde passée dans `terminate()`. Chaque abandon affiche une
+boîte courte, « La mise à jour s'activera au prochain démarrage de
+LibreOffice. » : la boîte précédente promettait une fermeture qui n'a pas eu
+lieu. **SIGTERM** ne reste qu'un dernier recours quand le thread principal est
+*injoignable* (callback ou `AsyncCallback` indisponible, `addCallback` en
+échec) ; une exception remontée par l'action — Desktop indisponible, service en
+cours de disposition — prouve au contraire qu'il répond et n'y donne pas droit.
 
 **Refus et reports.** Un « Non » (route 2), une annulation ou une version ignorée dans
 le dialogue natif (route 1) posent `postponed_until` dans `pending_update/update_state.json` :
@@ -100,7 +111,10 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
 6. Après « Installer » dans le dialogue natif : observer la boîte « installée,
    LibreOffice va se fermer » du plugin pendant que le dialogue LibreOffice
    est encore ouvert, et vérifier si la fermeture est refusée
-   (`grep -E "terminate (accepted|vetoed)|veto persistant|refusée par l'utilisateur" ~/log.txt`).
+   (`grep -E "terminate (accepted|vetoed)|veto persistant|refusée par l'utilisateur|fermeture impossible" ~/log.txt`).
+   Variante à jouer : laisser un document modifié ouvert et répondre « Annuler »
+   à « Enregistrer les modifications ? » — un seul dialogue doit apparaître,
+   suivi de la boîte « s'activera au prochain démarrage » (ni réessai, ni SIGTERM).
 7. `grep "_native_feed_offers" ~/log.txt` sur le poste durci : `offers=True`
    prouve que la pile UCB de LibreOffice traverse proxy et TLS jusqu'au feed.
 8. Deux sauts natifs consécutifs N → N+1 → N+2 avec inspection de
@@ -122,6 +136,21 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
   la nouvelle version est **réellement active** (réconciliation au démarrage
   suivant, `_reconcile_update_state`), qui purge aussi `pending_update` et lève
   l'anti-boucle. Un état périmé (> 14 j) est purgé silencieusement.
+- **Installation qui n'a jamais pris effet, tranchée au démarrage** : une étape
+  `installed_native` / `installed_inprocess` dont la cible n'est pas active au
+  redémarrage (enregistrement annulé par LibreOffice, dossier de cache laissé
+  derrière) est rapportée `failed` au DM puis purgée — au lieu d'attendre la
+  purge « périmée » à 14 jours pendant lesquels le poste ne retentait rien. En
+  session, le registre garde l'ancienne version jusqu'au redémarrage : la même
+  réconciliation, lancée par le worker, n'en conclut rien.
+- **Une seule campagne en attente de redémarrage** : tant qu'une installation
+  attend son redémarrage, une nouvelle directive est ignorée (avec une ligne de
+  log) au lieu d'écraser l'état persistant — sinon la campagne installée ne
+  serait jamais rapportée `installed`.
+- **Une installation encore en cours sur le thread principal n'est pas un
+  échec** : l'étape `installed_inprocess` est persistée et la réconciliation
+  tranche au redémarrage ; ni rapport `failed`, ni cible bannie, ni boîte
+  manuelle — qui inviterait à une seconde installation concurrente.
 - **Pas de re-exec** : fermeture propre de LO (main thread), réouverture par
   l'utilisateur — comportement validé sur toutes les plateformes.
 
