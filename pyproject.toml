@@ -56,6 +56,10 @@ max-complexity = 10
 "src/mirai/menu_actions/*.py" = ["C901", "E501", "ARG", "B", "UP", "I"]
 "src/mirai/security_flow.py" = ["C901", "E501", "ARG", "B", "UP", "I"]
 "src/mirai/calc_prompt_function.py" = ["C901", "E501", "ARG", "B", "UP", "I", "E402"]
+# Le catalogue i18n est massivement constitué de littéraux de traduction : une
+# entrée par locale, alignée sur une seule ligne pour rester relisible, diffable
+# et comparable avec les fichiers .xcu. Découper ces chaînes nuirait à la lecture.
+"src/mirai/i18n.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration"]

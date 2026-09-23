@@ -18,6 +18,7 @@ install()
 
 from src.mirai.core.registry import ToolRegistry  # noqa: E402
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec  # noqa: E402
+from src.mirai.i18n import t as _t  # noqa: E402
 from src.mirai.ui.palette import TOOL_LABELS, _JournalObserver  # noqa: E402
 
 
@@ -123,7 +124,7 @@ def test_flag_resets_between_runs():
 # ── Libellés lisibles (issue #35) ────────────────────────────────────────────
 
 def test_replace_paragraphs_has_a_human_label():
-    assert TOOL_LABELS["writer_replace_paragraphs"] == "Réécriture des paragraphes"
+    assert _t(TOOL_LABELS["writer_replace_paragraphs"]) == "Réécriture des paragraphes"
 
 
 def test_every_registered_tool_has_a_label():

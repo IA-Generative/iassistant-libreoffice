@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.mirai.i18n import t as _t
 from tests.stubs.uno_stubs import install
 
 install()
@@ -432,7 +433,7 @@ def test_reasoning_has_its_own_tab(palette_module):
     assert palette_module.REASONING_PANE in names
     assert "reasoning_toggle" in names          # le raccourci reste
     assert f"tab_{palette_module.REASONING_PANE}" in names
-    assert ("reasoning", "Raisonnement") in palette_module.TABS
+    assert ("reasoning", "tab.reasoning") in palette_module.TABS
 
 
 def test_reasoning_tab_is_never_blank(palette_module):
@@ -851,7 +852,7 @@ def test_short_document_is_reported_without_calling_the_model(palette_module, mo
                        _client(_Reponse(), budgets=budgets), doc="Trois mots.")
     assert demarre is False
     assert budgets == []                  # aucun aller-retour réseau inutile
-    assert palette._analysis_text == palette_module.doc_analysis.TOO_SHORT
+    assert palette._analysis_text == _t("analysis.too_short")
 
 
 def test_no_analysis_outside_writer(palette_module, monkeypatch):
@@ -888,8 +889,8 @@ def test_wait_is_shown_in_the_status_line_like_a_run(palette_module, monkeypatch
                         lambda **kw: type("T", (), {"start": lambda _s: None})())
     assert palette.start_document_analysis() is True
     rendu = palette._progress.render()
-    assert palette_module.doc_analysis.PHASE in rendu
-    assert palette_module.doc_analysis.PHASE not in palette._models["suggestions"].Text
+    assert _t("analysis.phase") in rendu
+    assert _t("analysis.phase") not in palette._models["suggestions"].Text
 
 
 def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, monkeypatch):
