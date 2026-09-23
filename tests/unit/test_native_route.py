@@ -488,6 +488,21 @@ def test_run_on_main_thread_reports_timeout_after_start():
         block.set()
 
 
+def test_run_on_main_thread_late_callback_never_starts_the_action():
+    """Le callback est livré APRÈS l'expiration : l'action ne doit pas démarrer
+    (sinon deux flux d'installation concurrents), et l'issue vue par l'appelant
+    reste « timeout », jamais « timeout after start »."""
+    job, _dialog, async_cb = _job_with_services(run_callback=False)
+    captured = {}
+    async_cb.addCallback.side_effect = lambda cb, data: captured.setdefault("cb", cb)
+    ran = []
+    ok, err = job._run_on_main_thread(lambda: ran.append(1), 0.1, "test")
+    assert (ok, err) == (False, "timeout")
+    captured["cb"].notify(None)
+    assert ran == []
+    assert job._last_main_thread_action_s == 0.0
+
+
 def test_trigger_counts_started_timeout_as_triggered():
     """L'action a démarré mais dure : l'effet est en cours, on ne bascule PAS
     en route dirigée (deux flux d'installation concurrents sinon)."""

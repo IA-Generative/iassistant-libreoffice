@@ -2621,11 +2621,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return False, _MAIN_THREAD_CALLBACK_UNAVAILABLE
         holder = {"ok": False, "err": "", "cancelled": False, "started": False, "action_s": 0.0}
         done = threading.Event()
+        # Verrou partagé : sans lui, le callback peut lire cancelled à faux, être
+        # préempté avant de poser started, et le worker conclure « jamais démarré »
+        # juste avant que l'action s'exécute — deux flux d'installation concurrents.
+        guard = threading.Lock()
 
         def _run():
-            if holder["cancelled"]:
-                return
-            holder["started"] = True
+            with guard:
+                if holder["cancelled"]:
+                    return
+                holder["started"] = True
             action_start = None
             try:
                 action_start = time.time()
@@ -2650,8 +2655,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
             return False, _MAIN_THREAD_SCHEDULE_FAILED + str(exc)
         if not done.wait(timeout):
-            holder["cancelled"] = True
-            if holder["started"]:
+            with guard:
+                holder["cancelled"] = True
+                started = holder["started"]
+            if started:
                 log_to_file(f"{label}: timeout, action still running on main thread")
                 self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
                 return False, _MAIN_THREAD_TIMEOUT_AFTER_START
