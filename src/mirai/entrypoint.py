@@ -39,6 +39,7 @@ _NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
 _NATIVE_MAX_ATTEMPTS = 2
 _CLOSE_RETRY_SECONDS = 120
 _CLOSE_RETRY_INTERVAL_SECONDS = 3
+_CLOSE_ATTEMPT_TIMEOUT_SECONDS = 10
 _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
 _MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
@@ -2759,6 +2760,64 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
             return False
 
+    def _has_modified_documents(self):
+        """Vrai si au moins un document ouvert porte des modifications non
+        enregistrées. La sonde tourne sur le thread PRINCIPAL (accès UNO) ;
+        best-effort : sonde indisponible, Desktop absent ou composant muet →
+        Faux, l'appelant retombe sur son heuristique."""
+        ctx = self.ctx
+        smgr = self.ctx.getServiceManager()
+        found = {"modified": False}
+
+        def _probe():
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            components = desktop.getComponents() if desktop else None
+            enumeration = components.createEnumeration() if components else None
+            while enumeration is not None and enumeration.hasMoreElements():
+                component = enumeration.nextElement()
+                try:
+                    if component.isModified():
+                        found["modified"] = True
+                        return
+                except Exception:
+                    continue
+
+        ok, err = self._run_on_main_thread(
+            _probe, _CLOSE_ATTEMPT_TIMEOUT_SECONDS, "_has_modified_documents")
+        if not ok:
+            log_to_file(f"_has_modified_documents: sonde indisponible ({err})")
+            return False
+        return found["modified"]
+
+    def _notify_update_activates_at_restart(self):
+        """Informe l'utilisateur que la mise à jour installée s'activera au
+        prochain démarrage : la boîte précédente lui a promis une fermeture qui
+        n'a pas eu lieu. Sur le thread principal, best-effort, jamais bloquant."""
+        ctx = self.ctx
+        smgr = self.ctx.getServiceManager()
+
+        def _show():
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            frame = desktop.getCurrentFrame() if desktop else None
+            if frame is None:
+                return
+            toolkit = smgr.createInstance("com.sun.star.awt.Toolkit")
+            box = toolkit.createMessageBox(
+                frame.getContainerWindow(), 1, MSG_BUTTONS.BUTTONS_OK,
+                "MIrAI — Mise à jour",
+                "La mise à jour s'activera au prochain démarrage de LibreOffice.")
+            box.execute()
+            try:
+                box.dispose()
+            except Exception:
+                pass
+
+        try:
+            self._run_on_main_thread(
+                _show, _CLOSE_ATTEMPT_TIMEOUT_SECONDS, "_notify_update_activates_at_restart")
+        except Exception as exc:
+            log_to_file(f"_notify_update_activates_at_restart: {exc}")
+
     def _close_after_inprocess_update(self):
         """After an in-process install, CLOSE LibreOffice cleanly so the user reopens
         it with the new version active.
@@ -2775,8 +2834,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         fenêtres modales — la progression de la mise à jour — est encore ouverte, ou
         si le thread principal est occupé (timeout) : on retente périodiquement
         jusqu'à acceptation ou expiration du délai. Un veto qui a mis du temps à
-        arriver est traité comme un refus humain (« Enregistrer ? » → Annuler) et
-        respecté sans nouvel essai. SIGTERM n'intervient que si la PLANIFICATION sur
+        arriver, ou un veto alors qu'un document porte des modifications non
+        enregistrées, est traité comme un refus humain (« Enregistrer ? » →
+        Annuler) et respecté sans nouvel essai. Chaque abandon sans SIGTERM
+        informe l'utilisateur que la mise à jour s'activera au prochain démarrage
+        (la boîte précédente lui a promis une fermeture qui n'a pas eu lieu). SIGTERM n'intervient que si la PLANIFICATION sur
         le thread principal échoue (callback ou AsyncCallback indisponible,
         addCallback en échec) : le thread principal est alors injoignable. Une
         exception remontée par l'action (Desktop indisponible, service en cours de
@@ -2823,16 +2885,25 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         deadline = time.time() + _CLOSE_RETRY_SECONDS
         vetoed_logged = False
         while True:
-            ok, err = self._run_on_main_thread(_terminate, 10, "_close_after_inprocess_update")
+            ok, err = self._run_on_main_thread(
+                _terminate, _CLOSE_ATTEMPT_TIMEOUT_SECONDS, "_close_after_inprocess_update")
             action_s = getattr(self, "_last_main_thread_action_s", 0.0)
             if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
                 log_to_file("_close_after_inprocess_update: terminate accepted on main thread")
                 return True
+            if err == _MAIN_THREAD_VETOED and self._has_modified_documents():
+                # Un document a des modifications non enregistrées : le veto vient
+                # du dialogue « Enregistrer les modifications ? », donc de
+                # l'utilisateur. Réessayer, c'est le lui réimposer toutes les 3 s.
+                log_to_file("_close_after_inprocess_update: fermeture refusée par l'utilisateur (document modifié ouvert), abandon")
+                self._notify_update_activates_at_restart()
+                return False
             if err == _MAIN_THREAD_VETOED and action_s >= _CLOSE_USER_REFUSAL_SECONDS:
                 # Un veto après une action longue = réponse humaine (dialogue
                 # « Enregistrer ? ») ; la latence de planification sur le thread
                 # principal ne compte pas.
                 log_to_file(f"_close_after_inprocess_update: fermeture refusée par l'utilisateur ({action_s:.1f} s dans terminate()), abandon")
+                self._notify_update_activates_at_restart()
                 return False
             if err in (_MAIN_THREAD_VETOED, "timeout"):
                 # Veto immédiat = dialogue modal de LibreOffice encore ouvert (fenêtre de
@@ -2845,6 +2916,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     time.sleep(_CLOSE_RETRY_INTERVAL_SECONDS)
                     continue
                 log_to_file("_close_after_inprocess_update: veto persistant, abandon — la MAJ s'active au prochain démarrage")
+                self._notify_update_activates_at_restart()
                 return False
             if err in (_MAIN_THREAD_CALLBACK_UNAVAILABLE, _MAIN_THREAD_ASYNC_UNAVAILABLE) \
                     or str(err).startswith(_MAIN_THREAD_SCHEDULE_FAILED):
@@ -2856,6 +2928,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # Exception de l'action : le thread principal répond, aucune raison de
             # tuer le processus (documents non enregistrés).
             log_to_file(f"_close_after_inprocess_update: fermeture impossible ({err}), abandon — la MAJ s'active au prochain démarrage")
+            self._notify_update_activates_at_restart()
             return False
 
     def _terminate_on_main_thread(self):
