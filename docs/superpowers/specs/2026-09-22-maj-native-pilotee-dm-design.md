@@ -148,9 +148,10 @@ arguments nommés facultatifs et conserve les valeurs non fournies.
 `_update_launch_blocked_cls`, mise à jour en cours. Garde ajoutée : si l'état persistant
 porte la même `target_version` et `postponed_until` dans le futur, on saute, avec une
 ligne de log. Fini le retéléchargement et le re-prompt à chaque rafraîchissement de
-config. Le worker réconcilie d'abord une mise à jour précédente d'une autre cible
-(rapport `installed` si elle est active), puis une cible déjà installée en attente de
-redémarrage est ignorée.
+config. Le worker réconcilie d'abord l'état persistant existant, quelle que soit sa
+cible (rapport `installed` si elle est active), puis ignore la directive tant qu'une
+installation attend un redémarrage (étape `installed_native` / `installed_inprocess`) :
+écraser cet état perdrait définitivement le rapport `installed` de la campagne installée.
 
 **Attente commune, `_wait_before_prompting`.** Le code existant de fix/MAJ, factorisé :
 attente de la fin de l'assistant d'enrôlement (120 s max) puis délai de grâce de 30 s,
@@ -187,8 +188,11 @@ l'appel s'est exécuté sans exception avant le délai, faux sinon.
    (`getExtensionList`) ou dossier de paquet apparu dans le cache depuis l'instantané
    pris avant l'attente ; confirmée sur deux lectures consécutives. Puis état
    `installed_native`, télémétrie, fermeture retentée (veto de LibreOffice tant que sa
-   fenêtre de progression est ouverte ; refus humain respecté ; abandon après 120 s →
-   `UpdateCloseDeferred`, activation au prochain démarrage).
+   fenêtre de progression est ouverte ; refus humain respecté — veto avec document
+   modifié ou veto de plus d'une seconde ; abandon après 120 s → `UpdateCloseDeferred`,
+   boîte « s'activera au prochain démarrage », activation au prochain démarrage). SIGTERM
+   est réservé à un thread principal injoignable (erreur de planification), jamais à une
+   exception de l'action.
 5. Délai écoulé : l'utilisateur a annulé, ignoré ou fermé. État `postponed` avec
    `postponed_until = maintenant + 24 h`, télémétrie `UpdatePostponed`. Renvoie vrai.
 
@@ -200,9 +204,14 @@ appels UNO et des modules déjà chargés.
 **Flux dirigé.** Inchangé, à une exception : un « Non » enregistre `postponed` avec
 `postponed_until`, en plus de la télémétrie `UpdatePostponed` déjà émise.
 
-**Réconciliation au démarrage.** Inchangée : cible active → `installed` au DM,
-`ExtensionUpdated` confirmé, purge, levée de l'anti-boucle ; état périmé → purge.
-Ajout : l'attribut `route` lu dans l'état est joint à `ExtensionUpdated`.
+**Réconciliation au démarrage.** Cible active → `installed` au DM, `ExtensionUpdated`
+confirmé, purge, levée de l'anti-boucle ; état périmé → purge. L'attribut `route` lu dans
+l'état est joint à `ExtensionUpdated`. Ajout : au démarrage seulement, une étape
+`installed_*` dont la cible n'est pas active est rapportée `failed` (`installation non
+active au redémarrage`) avec télémétrie `UpdateInstallFailed`, puis purgée — l'appel
+`_reconcile_update_state(at_startup=True)` vient du timer de démarrage, celui du worker
+passe `False` et ne conclut rien. Une installation encore en cours sur le thread principal
+persiste `installed_inprocess` au lieu de rapporter un échec.
 
 ### 5.4 Télémétrie
 
