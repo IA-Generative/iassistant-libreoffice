@@ -2596,40 +2596,52 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         `timeout` s. Renvoie (ok, err). Après un timeout : si le callback n'a pas
         démarré il devient no-op (garde `cancelled`) ; s'il a démarré, `action()`
         tourne peut-être encore sur le thread principal et l'appelant ne doit pas
-        lancer un second flux (err == _MAIN_THREAD_TIMEOUT_AFTER_START)."""
+        lancer un second flux (err == _MAIN_THREAD_TIMEOUT_AFTER_START).
+        La durée de l'action elle-même est exposée dans `_last_main_thread_action_s`
+        (0.0 si elle n'a pas tourné)."""
         if _MainThreadCallback is None:
+            self._last_main_thread_action_s = 0.0
             return False, "main-thread callback unavailable"
-        holder = {"ok": False, "err": "", "cancelled": False, "started": False}
+        holder = {"ok": False, "err": "", "cancelled": False, "started": False, "action_s": 0.0}
         done = threading.Event()
 
         def _run():
             if holder["cancelled"]:
                 return
             holder["started"] = True
+            action_start = None
             try:
+                action_start = time.time()
                 action()
                 holder["ok"] = True
             except Exception as exc:
                 holder["err"] = str(exc)
             finally:
+                if action_start is not None:
+                    holder["action_s"] = time.time() - action_start
                 done.set()
 
         try:
             async_cb = self.ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.awt.AsyncCallback", self.ctx)
             if async_cb is None:
+                self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
                 return False, "AsyncCallback unavailable"
             async_cb.addCallback(_MainThreadCallback(_run), None)
         except Exception as exc:
             log_to_file(f"{label}: schedule failed: {exc}")
+            self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
             return False, f"schedule failed: {exc}"
         if not done.wait(timeout):
             holder["cancelled"] = True
             if holder["started"]:
                 log_to_file(f"{label}: timeout, action still running on main thread")
+                self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
                 return False, _MAIN_THREAD_TIMEOUT_AFTER_START
             log_to_file(f"{label}: timeout waiting for main thread")
+            self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
             return False, "timeout"
+        self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
         return holder["ok"], holder["err"]
 
     def _run_install_on_main_thread(self, oxt_url, props, cmd_env, timeout=90):
@@ -2792,16 +2804,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         deadline = time.time() + _CLOSE_RETRY_SECONDS
         vetoed_logged = False
         while True:
-            attempt_start = time.time()
             ok, err = self._run_on_main_thread(_terminate, 10, "_close_after_inprocess_update")
-            attempt_s = time.time() - attempt_start
+            action_s = getattr(self, "_last_main_thread_action_s", 0.0)
             if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
                 log_to_file("_close_after_inprocess_update: terminate accepted on main thread")
                 return True
-            if err == _MAIN_THREAD_VETOED and attempt_s >= _CLOSE_USER_REFUSAL_SECONDS:
-                # Un veto qui a pris du temps est une réponse humaine (« Enregistrer ? »
-                # → Annuler) : on la respecte, pas de harcèlement.
-                log_to_file(f"_close_after_inprocess_update: fermeture refusée par l'utilisateur ({attempt_s:.1f} s), abandon")
+            if err == _MAIN_THREAD_VETOED and action_s >= _CLOSE_USER_REFUSAL_SECONDS:
+                # Un veto après une action longue = réponse humaine (dialogue
+                # « Enregistrer ? ») ; la latence de planification sur le thread
+                # principal ne compte pas.
+                log_to_file(f"_close_after_inprocess_update: fermeture refusée par l'utilisateur ({action_s:.1f} s dans terminate()), abandon")
                 return False
             if err in (_MAIN_THREAD_VETOED, "timeout"):
                 # Veto immédiat = dialogue modal de LibreOffice encore ouvert (fenêtre de
