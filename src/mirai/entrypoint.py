@@ -1954,14 +1954,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 )
                 return
 
-        # Déjà installée, en attente de redémarrage (fermeture refusée ou
-        # abandonnée) : ne pas re-proposer — la réconciliation au prochain
-        # démarrage rapportera « installed ».
-        if target_version and str(state.get("target_version", "")).strip() == target_version \
-                and state.get("stage") in ("installed_native", "installed_inprocess"):
-            log_to_file(f"Update skipped: {target_version} already installed, pending restart")
-            return
-
         with MainJob._update_lock_cls:
             if MainJob._update_in_progress_cls:
                 log_to_file("Update already in progress, skipping duplicate schedule")
@@ -1976,17 +1968,25 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
-                # Réconcilier d'abord une mise à jour précédente déjà active (la
-                # directive suivante peut arriver avant le timer de réconciliation
-                # et écraserait l'état persistant). Hors du chemin de fetch config,
+                # Réconcilier d'abord la mise à jour précédente (la directive
+                # suivante peut arriver avant le timer de réconciliation et
+                # écraserait l'état persistant). Hors du chemin de fetch config,
                 # sous le verrou « en cours » : ni blocage, ni doublon.
-                previous = self._load_update_state()
-                previous_target = str(previous.get("target_version", "")).strip() if previous else ""
-                if previous_target and previous_target != target_version:
+                if self._load_update_state():
                     try:
-                        self._reconcile_update_state()
+                        self._reconcile_update_state(at_startup=False)
                     except Exception as exc:
                         log_to_file(f"_schedule_update: reconciliation failed: {exc}")
+                    previous = self._load_update_state()
+                    if previous.get("stage") in ("installed_native", "installed_inprocess"):
+                        # Une installation attend déjà un redémarrage : en session,
+                        # écraser son état perdrait définitivement son rapport
+                        # « installed » au DM.
+                        log_to_file(
+                            f"Update skipped: mise à jour {previous.get('target_version')} installée, "
+                            f"en attente de redémarrage : directive {target_version} ignorée "
+                            "jusqu'au redémarrage")
+                        return
                 self._perform_update(directive)
             finally:
                 with MainJob._update_lock_cls:
@@ -3045,12 +3045,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as exc:
             log_to_file(f"_purge_pending_update_dir: {exc}")
 
-    def _reconcile_update_state(self):
-        """Au démarrage : clôt la mise à jour précédente de façon idempotente.
+    def _reconcile_update_state(self, at_startup=False):
+        """Clôt la mise à jour précédente de façon idempotente.
 
         - version active == target → rapport « installed » au DM + télémétrie,
           purge de pending_update (OXT stagé, scripts, état), retrait du target
           de l'anti-boucle _update_launch_blocked_cls ;
+        - `at_startup` et étape installed_* dont la cible n'est pas active →
+          l'installation a été annulée (rollback de LibreOffice) : rapport
+          « failed » au DM + télémétrie, purge. En session (`at_startup` faux)
+          le registre garde l'ancienne version jusqu'au redémarrage : on ne
+          conclut rien ;
         - état illisible ou périmé (> 14 jours) → purge silencieuse ;
         - sinon (mise à jour encore en attente) → no-op, l'état est conservé.
         """
@@ -3089,6 +3094,27 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 pass
             MainJob._update_launch_blocked_cls.discard(target)
             self._purge_pending_update_dir()
+        elif at_startup and target and current and \
+                str(state.get("stage") or "") in ("installed_native", "installed_inprocess"):
+            log_to_file(
+                f"_reconcile_update_state: {target} installée mais inactive au redémarrage "
+                f"(version active {current}), échec rapporté")
+            try:
+                self._report_update_status(
+                    state.get("campaign_id"), "failed",
+                    str(state.get("version_before", "")), current,
+                    "installation non active au redémarrage")
+            except Exception as exc:
+                log_to_file(f"_reconcile_update_state: status report failed: {exc}")
+            try:
+                self._send_telemetry("UpdateInstallFailed", {
+                    "version_after": target,
+                    "campaign_id": str(state.get("campaign_id") or ""),
+                    "route": str(state.get("route") or ""),
+                })
+            except Exception:
+                pass
+            self._purge_pending_update_dir()
         else:
             age = time.time() - float(state.get("ts", 0) or 0)
             if age > 14 * 24 * 3600:
@@ -3103,7 +3129,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _safe_reconcile():
             try:
-                self._reconcile_update_state()
+                self._reconcile_update_state(at_startup=True)
             except Exception as exc:
                 log_to_file(f"_reconcile_update_state: {exc}")
 

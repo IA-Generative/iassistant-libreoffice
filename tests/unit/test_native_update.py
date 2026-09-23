@@ -250,6 +250,44 @@ def test_reconcile_keeps_fresh_pending_state():
     assert os.path.isfile(os.path.join(pend, "mirai_update.oxt"))
 
 
+def test_reconcile_reports_failed_at_startup_when_target_never_became_active():
+    """Dossier de paquet laissé par une installation native annulée : l'étape dit
+    installed_native, mais la cible n'est pas active au redémarrage. Le DM doit
+    l'apprendre (failed) et l'état être purgé — sinon le poste ne retente rien
+    pendant 14 jours et la campagne reste bloquée sur deferred."""
+    job, pend = _job_with_state({
+        "campaign_id": 7, "target_version": "0.0.1.0.32",
+        "version_before": "0.0.1.0.31", "stage": "installed_native",
+        "route": "native", "ts": time.time(),
+    }, current_version="0.0.1.0.31")
+
+    job._reconcile_update_state(at_startup=True)
+
+    job._report_update_status.assert_called_once_with(
+        7, "failed", "0.0.1.0.31", "0.0.1.0.31", "installation non active au redémarrage")
+    failed = [c for c in job._send_telemetry.call_args_list if c.args[0] == "UpdateInstallFailed"]
+    assert len(failed) == 1
+    assert failed[0].args[1]["route"] == "native"
+    assert not os.path.isdir(pend)
+
+
+def test_reconcile_keeps_installed_state_in_session():
+    """En session, LibreOffice garde l'ancien paquet enregistré jusqu'au
+    redémarrage : la réconciliation du worker ne conclut rien sur une étape
+    installed_*, elle ne rapporte surtout pas un échec."""
+    job, pend = _job_with_state({
+        "campaign_id": 7, "target_version": "0.0.1.0.32",
+        "version_before": "0.0.1.0.31", "stage": "installed_native",
+        "route": "native", "ts": time.time(),
+    }, current_version="0.0.1.0.31")
+
+    job._reconcile_update_state()
+
+    job._report_update_status.assert_not_called()
+    job._send_telemetry.assert_not_called()
+    assert os.path.isfile(os.path.join(pend, "update_state.json"))
+
+
 def test_reconcile_purges_stale_state():
     """État périmé (> 14 jours) → purge silencieuse, aucun rapport."""
     job, pend = _job_with_state({

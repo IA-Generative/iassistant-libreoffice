@@ -847,7 +847,9 @@ def test_native_poll_ignores_target_folder_present_before_dialog():
 
 def test_schedule_update_reconciles_previous_target_before_new_directive():
     """Cas du banc : la directive suivante arrive avant le timer de
-    réconciliation ; la campagne précédente doit être rapportée installed."""
+    réconciliation. La campagne précédente est active (registre à jour après
+    redémarrage) : elle doit être rapportée installed et purgée, puis la
+    nouvelle directive s'exécuter."""
     job = _job(current_version=CURRENT)
     job._save_update_state({"campaign_id": 6, "target_version": CURRENT}, "installed_native", route="native")
     done = threading.Event()
@@ -856,3 +858,19 @@ def test_schedule_update_reconciles_previous_target_before_new_directive():
     assert done.wait(2)
     installed_calls = [c for c in job._report_update_status.call_args_list if c.args[0] == 6 and c.args[1] == "installed"]
     assert installed_calls, "la campagne précédente doit être rapportée installed avant la nouvelle directive"
+    assert not os.path.isfile(job._update_state_path()), "l'état réconcilié doit être purgé"
+
+
+def test_schedule_update_defers_new_directive_while_previous_install_pending_restart():
+    """Cible X installée, fermeture refusée, l'utilisateur continue de travailler :
+    en session le registre reste sur l'ancienne version. Une directive Y ne doit
+    ni s'exécuter ni écraser l'état de X — sinon la campagne X ne serait jamais
+    rapportée installed."""
+    job = _job(current_version=CURRENT)
+    job._save_update_state({"campaign_id": 6, "target_version": TARGET}, "installed_native", route="native")
+    assert _schedule_and_wait(
+        job, {"action": "update", "target_version": "0.0.1.0.33", "campaign_id": 7}) is False
+    state = _state(job)
+    assert state["target_version"] == TARGET
+    assert state["stage"] == "installed_native"
+    assert state["campaign_id"] == 6
