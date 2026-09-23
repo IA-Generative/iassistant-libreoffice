@@ -42,6 +42,7 @@ _CLOSE_RETRY_INTERVAL_SECONDS = 3
 _CLOSE_ATTEMPT_TIMEOUT_SECONDS = 10
 _PROMPT_WIZARD_WAIT_SECONDS = 120
 _PROMPT_GRACE_SECONDS = 30
+_PROMPT_POLL_SECONDS = 1
 _MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
 _MAIN_THREAD_VETOED = "vetoed"
 # Erreurs de PLANIFICATION de _run_on_main_thread (le thread principal n'a pas
@@ -3236,7 +3237,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             with MainJob._enrollment_wizard_lock_cls:
                 if not MainJob._enrollment_wizard_active_cls:
                     return
-            time.sleep(1)
+            time.sleep(_PROMPT_POLL_SECONDS)
 
     def _native_attempts_for(self, target_version):
         """Tentatives natives déjà faites pour cette cible (état persistant) ;
@@ -3297,7 +3298,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _versions_of(entries):
         return {v for (_d, v) in entries}
 
-    def _perform_native_update(self, directive, wait_seconds=None, poll_seconds=None):
+    def _perform_native_update(self, directive):
         """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
 
         Renvoie True si le dialogue a été montré et l'issue traitée — installée
@@ -3316,8 +3317,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         consécutives, et uniquement pour un dossier apparu depuis l'instantané
         pris avant l'attente et l'ouverture du dialogue.
         """
-        wait_seconds = _NATIVE_INSTALL_WAIT_SECONDS if wait_seconds is None else wait_seconds
-        poll_seconds = _NATIVE_POLL_SECONDS if poll_seconds is None else poll_seconds
         target_version = str(directive.get("target_version", "")).strip()
         campaign_id = directive.get("campaign_id")
         campaign_attr = str(campaign_id) if campaign_id is not None else ""
@@ -3342,12 +3341,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "urgency": urgency,
         })
 
-        deadline = time.time() + wait_seconds
+        deadline = time.time() + _NATIVE_INSTALL_WAIT_SECONDS
         last_seen = None
         polls = 0
         hits = 0
         while time.time() < deadline:
-            time.sleep(poll_seconds)
+            time.sleep(_NATIVE_POLL_SECONDS)
             polls += 1
             probe_start = time.time()
             seen = str(self._get_extension_version() or "")

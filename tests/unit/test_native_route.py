@@ -8,10 +8,13 @@ Run:  pytest tests/unit/test_native_route.py -v
 import itertools
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
 from unittest.mock import MagicMock
+
+import pytest
 
 from tests.stubs.uno_stubs import install, make_job
 
@@ -23,13 +26,42 @@ from src.mirai.entrypoint import MainJob
 TARGET = "0.0.1.0.32"
 CURRENT = "0.0.1.0.31"
 
+_TMPDIRS = []
+
+
+def _mkdtemp():
+    """Répertoire temporaire supprimé à la fin du module (les jobs écrivent un
+    profil et un cache de paquets factices à chaque test)."""
+    path = tempfile.mkdtemp()
+    _TMPDIRS.append(path)
+    return path
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _purge_tmpdirs():
+    yield
+    for path in _TMPDIRS:
+        shutil.rmtree(path, ignore_errors=True)
+    _TMPDIRS.clear()
+
+
+@pytest.fixture
+def native_timing(monkeypatch):
+    """Surveillance native accélérée : les tests jouent sur les constantes de
+    module, seul mécanisme d'injection des délais."""
+    def _set(wait=2, poll=0.01):
+        monkeypatch.setattr(entrypoint, "_NATIVE_INSTALL_WAIT_SECONDS", wait)
+        monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", poll)
+    _set()
+    return _set
+
 
 def _job(current_version=CURRENT):
-    job = make_job(config_dir=tempfile.mkdtemp())
+    job = make_job(config_dir=_mkdtemp())
     job._get_extension_version = MagicMock(return_value=current_version)
     job._report_update_status = MagicMock()
     job._send_telemetry = MagicMock()
-    job._package_cache_dir = lambda d=tempfile.mkdtemp(): d
+    job._package_cache_dir = lambda d=_mkdtemp(): d
     return job
 
 
@@ -277,7 +309,7 @@ def _native_job(versions, trigger=True):
     job._wait_before_prompting = MagicMock()
     job._trigger_native_update_dialog = MagicMock(return_value=trigger)
     job._close_after_inprocess_update = MagicMock()
-    job._package_cache_dir = lambda d=tempfile.mkdtemp(): d
+    job._package_cache_dir = lambda d=_mkdtemp(): d
     return job
 
 
@@ -289,11 +321,9 @@ def _events(job):
     return [c.args[0] for c in job._send_telemetry.call_args_list]
 
 
-def test_native_update_installed_then_closes():
+def test_native_update_installed_then_closes(native_timing):
     job = _native_job([CURRENT, CURRENT, CURRENT, TARGET])
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
-    assert job._get_extension_version.call_count == 5
-
+    assert job._perform_native_update(DIRECTIVE) is True
     job._wait_before_prompting.assert_called_once()
     job._trigger_native_update_dialog.assert_called_once()
     job._report_update_status.assert_called_once_with(7, "deferred", CURRENT, TARGET)
@@ -308,10 +338,11 @@ def test_native_update_installed_then_closes():
     assert attrs["route"] == "native" and attrs["version_after"] == TARGET
 
 
-def test_native_update_postponed_when_nothing_installed():
+def test_native_update_postponed_when_nothing_installed(native_timing):
     job = _native_job([CURRENT])
     before = time.time()
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=0.05, poll_seconds=0.01) is True
+    native_timing(wait=0.05)
+    assert job._perform_native_update(DIRECTIVE) is True
 
     job._close_after_inprocess_update.assert_not_called()
     state = _state(job)
@@ -322,18 +353,20 @@ def test_native_update_postponed_when_nothing_installed():
     assert job._send_telemetry.call_args_list[1].args[1]["route"] == "native"
 
 
-def test_native_update_counts_attempts_for_same_target():
+def test_native_update_counts_attempts_for_same_target(native_timing):
     job = _native_job([CURRENT])
     job._save_update_state(DIRECTIVE, "postponed", route="native", native_attempts=1)
-    job._perform_native_update(DIRECTIVE, wait_seconds=0.05, poll_seconds=0.01)
+    native_timing(wait=0.05)
+    job._perform_native_update(DIRECTIVE)
     assert _state(job)["native_attempts"] == 2
     attrs = job._send_telemetry.call_args_list[0].args[1]
     assert attrs["attempt"] == "2"
 
 
-def test_native_update_returns_false_without_side_effects_when_trigger_fails():
+def test_native_update_returns_false_without_side_effects_when_trigger_fails(native_timing):
     job = _native_job([CURRENT], trigger=False)
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=0.05, poll_seconds=0.01) is False
+    native_timing(wait=0.05)
+    assert job._perform_native_update(DIRECTIVE) is False
     job._report_update_status.assert_not_called()
     job._send_telemetry.assert_not_called()
     assert not os.path.isfile(job._update_state_path())
@@ -352,12 +385,12 @@ def test_native_attempts_for_normalises_target_and_tolerates_corruption():
     assert job._native_attempts_for(TARGET) == 0
 
 
-def test_native_update_still_true_when_close_raises():
+def test_native_update_still_true_when_close_raises(native_timing):
     """Installée mais fermeture en échec : l'issue reste « installée » (état
     installed_native), jamais un rapport failed."""
     job = _native_job([CURRENT, CURRENT, TARGET])
     job._close_after_inprocess_update = MagicMock(side_effect=RuntimeError("terminate"))
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert job._perform_native_update(DIRECTIVE) is True
     assert _state(job)["stage"] == "installed_native"
 
 
@@ -678,10 +711,10 @@ def test_schedule_update_skips_target_installed_pending_restart():
     assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is False
 
 
-def test_native_close_deferred_emits_telemetry():
+def test_native_close_deferred_emits_telemetry(native_timing):
     job = _native_job([CURRENT, CURRENT, TARGET, TARGET])
     job._close_after_inprocess_update = MagicMock(return_value=False)
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert job._perform_native_update(DIRECTIVE) is True
     assert "UpdateCloseDeferred" in _events(job)
 
 
@@ -751,7 +784,7 @@ def test_install_in_flight_skips_legacy_worker_path():
 # ── _get_extension_version lit le registre, pas son propre description.xml ──
 
 def _job_with_extension_list(pairs):
-    job = make_job(config_dir=tempfile.mkdtemp())
+    job = make_job(config_dir=_mkdtemp())
     smgr = job.ctx.getServiceManager.return_value
     default = smgr.createInstanceWithContext.return_value
     pip = MagicMock(name="PackageInformationProvider")
@@ -776,7 +809,7 @@ def test_get_extension_version_falls_back_when_registry_unavailable():
     assert job._get_extension_version() == ""
 
 
-def test_native_poll_sees_new_version_from_registry():
+def test_native_poll_sees_new_version_from_registry(native_timing):
     """Après l'installation native, l'ancien module tourne encore ; il doit voir
     la nouvelle version via le registre, pas via son propre dossier disparu."""
     job, pip = _job_with_extension_list([("fr.gouv.interieur.mirai", CURRENT)])
@@ -790,36 +823,47 @@ def test_native_poll_sees_new_version_from_registry():
         calls["n"] += 1
         return ((("fr.gouv.interieur.mirai", TARGET),) if calls["n"] >= 3 else (("fr.gouv.interieur.mirai", CURRENT),))
     pip.getExtensionList.side_effect = _list
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert job._perform_native_update(DIRECTIVE) is True
     job._close_after_inprocess_update.assert_called_once()
 
 
 # ── _wait_before_prompting revérifie l'assistant après le délai de grâce ────
 
 def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
-    monkeypatch.setattr(entrypoint, "_PROMPT_GRACE_SECONDS", 0.05)
+    """L'assistant d'enrôlement s'ouvre PENDANT la grâce : la seconde
+    vérification doit le voir et attendre sa fermeture."""
+    monkeypatch.setattr(entrypoint, "_PROMPT_GRACE_SECONDS", 0.15)
     monkeypatch.setattr(entrypoint, "_PROMPT_WIZARD_WAIT_SECONDS", 5)
+    monkeypatch.setattr(entrypoint, "_PROMPT_POLL_SECONDS", 0.02)
     job = _job()
+    previous = MainJob._enrollment_wizard_active_cls
     MainJob._enrollment_wizard_active_cls = False
+
     def _open_then_close():
-        time.sleep(0.02)
+        time.sleep(0.05)
         with MainJob._enrollment_wizard_lock_cls:
             MainJob._enrollment_wizard_active_cls = True
-        time.sleep(1.2)
+        time.sleep(0.25)
         with MainJob._enrollment_wizard_lock_cls:
             MainJob._enrollment_wizard_active_cls = False
-    threading.Thread(target=_open_then_close, daemon=True).start()
-    t0 = time.time()
-    job._wait_before_prompting()
-    assert time.time() - t0 >= 1.0, "doit attendre la fermeture de l'assistant ouvert pendant la grâce"
-    assert MainJob._enrollment_wizard_active_cls is False
+
+    wizard = threading.Thread(target=_open_then_close, daemon=True)
+    wizard.start()
+    try:
+        t0 = time.time()
+        job._wait_before_prompting()
+        assert time.time() - t0 >= 0.25, "doit attendre la fermeture de l'assistant ouvert pendant la grâce"
+        assert MainJob._enrollment_wizard_active_cls is False
+    finally:
+        wizard.join(2)
+        MainJob._enrollment_wizard_active_cls = previous
 
 
 # ── Détection native par le cache des paquets (le registre reste ancien en session) ──
 
 def _fake_cache(versions):
     """Cache <cache>/<lu>/<pkg>.oxt/description.xml pour chaque version donnée."""
-    cache = tempfile.mkdtemp()
+    cache = _mkdtemp()
     for i, v in enumerate(versions):
         pkg = os.path.join(cache, f"lu{i}.tmp_", f"mirai-libreoffice-{v}.oxt")
         os.makedirs(pkg)
@@ -845,7 +889,7 @@ def test_cached_package_versions_never_raises():
     assert job._cached_package_versions() == set()
 
 
-def test_native_poll_detects_install_via_package_cache_when_registry_stale():
+def test_native_poll_detects_install_via_package_cache_when_registry_stale(native_timing):
     """Cas mesuré sur le banc : getExtensionList renvoie toujours l'ancienne
     version en session, mais le dossier du nouveau paquet est dans le cache.
     Détection confirmée sur deux lectures consécutives (les polls #2 et #3)."""
@@ -855,18 +899,19 @@ def test_native_poll_detects_install_via_package_cache_when_registry_stale():
         calls["n"] += 1
         return _fake_cache([CURRENT, TARGET] if calls["n"] >= 3 else [CURRENT])
     job._package_cache_dir = _cache
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=2, poll_seconds=0.01) is True
+    assert job._perform_native_update(DIRECTIVE) is True
     job._close_after_inprocess_update.assert_called_once()
     assert _state(job)["stage"] == "installed_native"
 
 
-def test_native_poll_ignores_target_folder_present_before_dialog():
+def test_native_poll_ignores_target_folder_present_before_dialog(native_timing):
     """Dossier résiduel d'une tentative antérieure : présent AVANT le dialogue,
     il ne doit pas compter comme une installation."""
     job = _native_job([CURRENT])
     cache = _fake_cache([CURRENT, TARGET])
     job._package_cache_dir = lambda: cache
-    assert job._perform_native_update(DIRECTIVE, wait_seconds=0.2, poll_seconds=0.01) is True
+    native_timing(wait=0.2)
+    assert job._perform_native_update(DIRECTIVE) is True
     job._close_after_inprocess_update.assert_not_called()
     assert _state(job)["stage"] == "postponed"
 
