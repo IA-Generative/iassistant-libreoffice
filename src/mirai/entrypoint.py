@@ -2309,6 +2309,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         "route": "directed",
                     })
                     return
+                # addExtension n'a pas rendu la main dans le budget du thread
+                # principal : l'installation est peut-être en train d'aboutir.
+                # Ni échec rapporté, ni cible bannie, ni message manuel (qui
+                # inviterait à une seconde installation concurrente) — la
+                # réconciliation au prochain démarrage tranche.
+                if getattr(self, "_main_thread_install_in_flight", False):
+                    log_to_file(
+                        "_perform_update: installation encore en cours sur le thread principal, "
+                        "issue tranchée à la réconciliation")
+                    self._save_update_state(directive, "installed_inprocess", route="directed")
+                    return
                 # Script de secours : uniquement si explicitement réactivé
                 # (MIRAI_UPDATE_ALLOW_SCRIPT=1). Sinon, dégradation directe vers
                 # le message manuel validé GPO (bouton « Ouvrir le dossier »).

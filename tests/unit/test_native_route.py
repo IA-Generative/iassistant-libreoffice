@@ -605,6 +605,36 @@ def test_native_close_deferred_emits_telemetry():
     assert "UpdateCloseDeferred" in _events(job)
 
 
+def _accepting_job():
+    """Route dirigée, l'utilisateur accepte le redémarrage (msgbox → YES = 2)."""
+    job = _routing_job(feed_offers=False)
+    toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
+    toolkit.createMessageBox.return_value.execute.return_value = 2
+    return job
+
+
+def test_install_in_flight_is_not_reported_as_a_failure():
+    """addExtension encore en vol sur le thread principal : ni rapport failed, ni
+    bannissement de la cible, ni boîte « mise à jour bloquée » — l'étape
+    installed_inprocess laisse la réconciliation trancher au redémarrage."""
+    MainJob._update_launch_blocked_cls.discard(TARGET)
+    job = _accepting_job()
+    job._notify_update_blocked = MagicMock()
+
+    def _install(_path, *_args, **_kwargs):
+        job._main_thread_install_in_flight = True
+        return False
+
+    job._install_and_restart_in_process = _install
+    job._perform_update(dict(DIRECTIVE))
+
+    assert _state(job)["stage"] == "installed_inprocess"
+    job._notify_update_blocked.assert_not_called()
+    assert not [c for c in job._report_update_status.call_args_list if c.args[1] == "failed"]
+    assert TARGET not in MainJob._update_launch_blocked_cls
+    assert "UpdateInstallFailed" not in _events(job)
+
+
 def test_install_in_flight_skips_legacy_worker_path():
     """addExtension encore en cours sur le main thread → pas de repli
     thePackageManagerFactory depuis le worker (double install)."""
