@@ -2,7 +2,7 @@
 
 Réfs : issue plugin [#5](https://github.com/IA-Generative/AssistantMiraiLibreOffice/issues/5)
 (brancher le mécanisme natif), issue plugin [#9](https://github.com/IA-Generative/AssistantMiraiLibreOffice/issues/9)
-(fiabilité de bout en bout), feed côté DM : IA-Generative/device-management#23.
+(fiabilité de bout en bout), feed côté DM : IA-Generative/device-management#4.
 
 ## Vue d'ensemble — trois routes, un seul point d'installation
 
@@ -63,7 +63,7 @@ la cible n'est pas reproposée avant 24 h, et rien n'est retéléchargé entre-t
 - Profil offline (`enabled: false`) : aucun bloc — le bouton natif répond
   « aucune mise à jour ».
 
-## Contrat du feed `update.xml` (à servir par le DM — device-management#23)
+## Contrat du feed `update.xml` (à servir par le DM — device-management#4)
 
 `GET <bootstrap>/catalog/mirai-libreoffice/update.xml` — anonyme, `Content-Type`
 indifférent (`text/xml` recommandé). Namespace **obligatoire**
@@ -168,7 +168,7 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
   télémétrie : `feed.ok`, `feed.announced_version`, `feed.error`. C'est la
   validation à l'échelle de la flotte de la viabilité de la route native sur
   postes durcis, sans aucune action utilisateur — et l'alarme si le feed DM
-  (device-management#23) est absent ou mal formé.
+  (device-management#4) est absent ou mal formé.
 
 ## Vérifier la sémantique deferred→installed contre le DM (sans le modifier)
 

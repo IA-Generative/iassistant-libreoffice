@@ -25,7 +25,7 @@ except Exception:
 _EXTENSION_IDENTIFIER = "fr.gouv.interieur.mirai"
 
 # Feed natif LibreOffice (<update-information>) servi par le DM
-# (device-management#23). Le chemin doit rester aligné avec
+# (device-management#4). Le chemin doit rester aligné avec
 # scripts/inject_update_feed.py (FEED_PATH) qui le bake dans description.xml.
 _UPDATE_FEED_PATH = "/catalog/mirai-libreoffice/update.xml"
 _UPDATE_FEED_NS = "http://openoffice.org/extensions/update/2006"
@@ -783,7 +783,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         # Diagnostic passif du feed natif : valide proxy/TLS/GPO de la pile HTTP
         # de LibreOffice sur la flotte et détecte un feed DM absent
-        # (device-management#23) avant d'appuyer le déploiement large dessus.
+        # (device-management#4) avant d'appuyer le déploiement large dessus.
         try:
             self._schedule_native_feed_check()
         except Exception as e:
@@ -3434,7 +3434,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # pas celle du plugin. Ce check headless valide donc, sans aucune action
     # utilisateur et à l'échelle de la flotte, que la route native est viable
     # sur les postes durcis — et détecte un feed DM absent ou mal formé
-    # (device-management#23) AVANT d'appuyer le déploiement large dessus.
+    # (device-management#4) AVANT d'appuyer le déploiement large dessus.
 
     def _update_feed_urls(self):
         """URLs du feed natif, dérivées des bootstrap configurés (failover d'abord).
