@@ -178,6 +178,7 @@ import hashlib
 import threading
 import socket
 from .formatting import insert_formatted
+from . import feed_rewrite
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .security_flow import (
@@ -674,6 +675,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # Diagnostic passif du feed natif : une seule fois par process
     # (voir _schedule_native_feed_check / _check_native_feed).
     _feed_check_started_cls = False
+    # Réécriture de l'adresse du feed dans description.xml (device-management#40) :
+    # planifiée une fois par process au démarrage ; verrou partagé avec les
+    # réécritures déclenchées par /config.
+    _feed_rewrite_started_cls = False
+    _feed_rewrite_lock_cls = threading.Lock()
+    _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
+    _feed_rewrite_last_result_cls = None    # (résultat, version) du dernier appel
     _context_menu_refs_cls = []
     _context_menu_controller_ids_cls = set()
     _context_menu_schedule_started_cls = False
@@ -788,6 +796,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._schedule_native_feed_check()
         except Exception as e:
             log_to_file(f"Failed to schedule native feed check: {str(e)}")
+
+        # Adresse du feed natif = ?version=<version installée> tant qu'aucune
+        # directive ne dit autre chose : un nouvel OXT arrive avec l'adresse nue
+        # du build (version générale), à reprendre avant toute vérification.
+        try:
+            self._schedule_feed_rewrite()
+        except Exception as e:
+            log_to_file(f"Failed to schedule feed rewrite: {str(e)}")
 
         # Proxy consistency check removed — proxy is configured via
         # bootstrap or the Settings dialog, no startup prompt needed.
@@ -1040,6 +1056,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "UpdateInstalledPendingRestart": "update",
         "UpdateInstallFailed": "update",
         "NativeFeedCheck": "update",
+        "FeedRewrite": "update",
         "UpdateNativeDialogShown": "update",
         "UpdateCloseDeferred": "update",
         "ExtendSelection": "extend",
@@ -1094,6 +1111,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "UpdateCloseDeferred",
         "ExtensionUpdated",
         "NativeFeedCheck",
+        "FeedRewrite",
     }
 
     def _send_telemetry(self, span_name, attributes=None):
@@ -1714,6 +1732,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                 self._features_cache = features
                                 log_to_file(f"Feature flags updated: {list(features.keys())}")
                             update_directive = config_data.get("update")
+                            # Feed natif : avant toute décision (y compris « déjà
+                            # à la cible » et les reports), l'adresse doit refléter
+                            # la cible de CE poste, sinon LibreOffice verrait la
+                            # version générale au prochain « Vérifier ».
+                            self._rewrite_feed_for_directive(update_directive)
                             if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
                                 target_ver = str(update_directive.get("target_version", "")).strip()
                                 current_ver = str(self._get_extension_version() or "").strip()
@@ -1971,6 +1994,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
+                # L'adresse du feed doit viser la cible AVANT _native_feed_offers :
+                # isUpdateAvailable relit description.xml.
+                self._rewrite_feed_for_directive(directive)
                 # Réconcilier d'abord la mise à jour précédente (la directive
                 # suivante peut arriver avant le timer de réconciliation et
                 # écraserait l'état persistant). Hors du chemin de fetch config,
@@ -3435,12 +3461,94 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _update_feed_urls(self):
         """URLs du feed natif, dérivées des bootstrap configurés (failover d'abord).
-        Même convention que le bake au build (scripts/inject_update_feed.py)."""
-        return [
+        Même convention que le bake au build (scripts/inject_update_feed.py),
+        avec le ?version= que la réécriture pose sur description.xml."""
+        urls = [
             base.rstrip("/") + _UPDATE_FEED_PATH
             for base in (self._failover_ordered_urls() or [])
             if isinstance(base, str) and base.strip()
         ]
+        version = str(MainJob._feed_rewrite_last_cls or self._get_extension_version() or "").strip()
+        return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
+
+    # ── Réécriture de l'adresse du feed natif (device-management#40) ──
+    # Le DM ne sert sur l'adresse nue que la « version générale ». Le plugin écrit
+    # dans le description.xml de SON installation `?version=<cible>` (directive
+    # update) ou `?version=<installée>` (sinon) : LibreOffice relit ce fichier à
+    # chaque vérification, et chaque poste ne voit que sa propre cible.
+
+    def _package_root_dir(self):
+        """Racine du paquet installé (dossier contenant description.xml), ou None."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        for _ in range(_PACKAGE_ROOT_SEARCH_LEVELS):
+            if os.path.isfile(os.path.join(here, "description.xml")):
+                return here
+            here = os.path.dirname(here)
+        return None
+
+    def _feed_target_for(self, directive):
+        """Version à inscrire dans l'adresse du feed : la cible d'une directive
+        `update`, sinon la version installée. Un rollback garde la version
+        installée : LibreOffice ne propose jamais une version plus ancienne, et
+        l'adresse ne doit pas non plus reproposer celle qu'on retire."""
+        if isinstance(directive, dict) and directive.get("action") == "update":
+            target = str(directive.get("target_version") or "").strip()
+            if target:
+                return target
+        return str(self._get_extension_version() or "").strip()
+
+    def _rewrite_feed_for_directive(self, directive):
+        try:
+            self._rewrite_feed_url(self._feed_target_for(directive))
+        except Exception as exc:
+            log_to_file(f"_rewrite_feed_url: {exc}")
+
+    def _rewrite_feed_url(self, version):
+        """Pose ?version=<version> sur l'adresse du feed du description.xml
+        installé. Sans effet si le bloc est absent (profil offline) ou si rien ne
+        change ; installation non inscriptible (couche partagée) → journalisé,
+        la route dirigée reste le repli (_native_feed_offers ne verra pas la
+        cible). Renvoie le résultat de feed_rewrite."""
+        if not version:
+            return feed_rewrite.ERROR
+        root = self._package_root_dir()
+        if not root:
+            log_to_file("_rewrite_feed_url: description.xml introuvable")
+            return feed_rewrite.ERROR
+        path = os.path.join(root, "description.xml")
+        with MainJob._feed_rewrite_lock_cls:
+            result, detail = feed_rewrite.rewrite_description_file(path, version)
+            # Une télémétrie par changement d'état, pas à chaque lecture de /config.
+            changed = (result, version) != MainJob._feed_rewrite_last_result_cls
+            MainJob._feed_rewrite_last_result_cls = (result, version)
+            if result in (feed_rewrite.WRITTEN, feed_rewrite.UNCHANGED):
+                MainJob._feed_rewrite_last_cls = version
+        if result != feed_rewrite.UNCHANGED:
+            log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
+        if changed and result != feed_rewrite.UNCHANGED:
+            self._send_telemetry("FeedRewrite", {
+                "feed.target": str(version),
+                "feed.result": result,
+                "feed.error": str(detail)[:200],
+            })
+        return result
+
+    def _schedule_feed_rewrite(self):
+        """Réécriture au démarrage, une fois par process, avant le diagnostic
+        du feed (45 s) et avant toute directive : cible = version installée."""
+        if MainJob._feed_rewrite_started_cls:
+            return
+        MainJob._feed_rewrite_started_cls = True
+
+        def _safe_rewrite():
+            try:
+                self._rewrite_feed_url(str(self._get_extension_version() or "").strip())
+            except Exception as exc:
+                log_to_file(f"_rewrite_feed_url (démarrage): {exc}")
+
+        timer = threading.Timer(2.0, _safe_rewrite)
+        timer.daemon = True
+        timer.start()
 
     def _check_native_feed(self):
         """Interroge le feed via com.sun.star.deployment.UpdateInformationProvider

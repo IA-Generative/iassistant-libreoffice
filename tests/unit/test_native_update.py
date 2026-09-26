@@ -364,8 +364,8 @@ def test_update_feed_urls_follow_failover_order():
     convention de chemin que le bake au build."""
     job = _job_for_feed_check(["https://dm-b.example/", "https://dm-a.example"])
     assert job._update_feed_urls() == [
-        "https://dm-b.example/catalog/mirai-libreoffice/update.xml",
-        "https://dm-a.example/catalog/mirai-libreoffice/update.xml",
+        "https://dm-b.example/catalog/mirai-libreoffice/update.xml?version=0.0.1.0.31",
+        "https://dm-a.example/catalog/mirai-libreoffice/update.xml?version=0.0.1.0.31",
     ]
 
 
@@ -386,7 +386,9 @@ def test_check_native_feed_reports_announced_version():
     assert job._check_native_feed() == "0.0.1.0.32"
 
     args = provider.getUpdateInformation.call_args.args
-    assert args[0] == ("https://dm.example/catalog/mirai-libreoffice/update.xml",)
+    # ?version= : même adresse que celle réécrite dans description.xml
+    # (device-management#40), ici la version installée faute de directive.
+    assert args[0] == ("https://dm.example/catalog/mirai-libreoffice/update.xml?version=0.0.1.0.31",)
     assert args[1] == "fr.gouv.interieur.mirai"
     attrs = job._send_telemetry.call_args.args[1]
     assert job._send_telemetry.call_args.args[0] == "NativeFeedCheck"
