@@ -89,7 +89,56 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
   (anonymement). Plusieurs `<src>` possibles (miroirs, essayés dans l'ordre).
 - Optionnel : `<release-notes><src xlink:href="…" lang="fr"/></release-notes>`.
 
+## Réécriture de l'adresse du feed (device-management#40)
+
+Le DM ne sert plus, sur l'adresse nue du feed, que la **version générale** du
+plugin (celle destinée à tout le parc) ; publier une version ne la diffuse plus.
+Pour que la route native suive la cohorte, le plugin réécrit l'adresse dans le
+`description.xml` de **son installation** (`src/mirai/feed_rewrite.py`) :
+
+| Situation | Adresse écrite |
+|---|---|
+| Directive `update` vers X (même si déjà à X, même en report) | `…/update.xml?version=X` |
+| Aucune directive, ou directive `rollback` | `…/update.xml?version=<version installée>` |
+
+LibreOffice relit ce fichier à **chaque** vérification (code source LibreOffice :
+`getUpdateInformationURLs` → lecture de `<dossier>/description.xml`). Le feed ne
+confirme que la version demandée : chaque poste ne voit que sa propre cible, ni le
+bouton « Vérifier les mises à jour » ni la vérification hebdomadaire ne diffusent
+un canary au reste du parc.
+
+- **Quand** : 2 s après le démarrage (avant le diagnostic à 45 s), à chaque
+  lecture de `/config` avant toute décision, et en tête du worker de mise à jour
+  (donc avant `_native_feed_offers`).
+- **Comment** : seul le paramètre `version` de chaque `<src>` change (ordre,
+  autres paramètres et override `MIRAI_UPDATE_FEED_URL` conservés), écriture
+  atomique et seulement si le contenu change ; bloc absent (profil offline) →
+  rien n'est créé.
+- **Installation partagée** (dossier non inscriptible) : résultat `unwritable`,
+  journalisé ; `_native_feed_offers` ne voit pas la cible et la route dirigée
+  prend le relais.
+- **Après une mise à jour** : le nouvel OXT arrive avec l'adresse nue du build
+  (version générale) ; elle est reprise au démarrage suivant.
+- **Télémétrie** `FeedRewrite` (une par changement d'état) : `feed.target`,
+  `feed.result` (`written` / `unchanged` / `absent` / `unwritable` / `error`),
+  `feed.error`. `NativeFeedCheck` interroge la même adresse.
+
 ## Vérification sur poste (checklist qualif)
+
+0. **Réécriture de l'adresse (#40)**, à faire en premier :
+   - après démarrage, ouvrir le `description.xml` installé
+     (`<profil>/user/uno_packages/cache/uno_packages/<lu…>/<…>.oxt/`) : chaque
+     `<src>` finit par `?version=<version installée>` ;
+     `grep "_rewrite_feed_url" ~/log.txt` → `written` puis plus rien tant que la
+     cible ne change pas ;
+   - sans directive, **Vérifier les mises à jour** ne propose rien, même si une
+     version plus récente est publiée sur le DM ;
+   - avec une directive vers N+1 (campagne visant ce poste), le fichier passe à
+     `?version=N+1` et la mise à jour native est proposée ; un poste hors
+     campagne ne voit toujours rien ;
+   - antivirus / EDR : aucune alerte sur l'écriture du fichier ;
+   - installation en couche partagée (si utilisée sur le parc) :
+     `feed.result=unwritable` et bascule en route dirigée.
 
 1. Installer une version N, publier N+1 côté DM (feed à jour).
 2. Outils → Gestionnaire des extensions → **Vérifier les mises à jour** :
