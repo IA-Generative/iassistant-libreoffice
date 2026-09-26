@@ -261,3 +261,93 @@ def test_diagnostic_feed_urls_carry_the_same_version(installed):
 def test_feed_rewrite_is_registered_as_technical_telemetry():
     assert MainJob._ACTION_NAMES["FeedRewrite"] == "update"
     assert "FeedRewrite" in MainJob._TECHNICAL_EVENTS
+
+
+# ── Corrections de la revue qualité ──────────────────────────────────────
+
+def test_a_commented_block_is_never_rewritten_instead_of_the_real_one():
+    text = DESCRIPTION.replace(
+        "<identifier", "<!-- <update-information><src xlink:href=\"https://old\"/></update-information> -->\n  <identifier")
+    out = feed_rewrite.rewrite_feed_version(text, "1.0")
+    assert "https://old\"" in out, "le commentaire reste intact"
+    assert _hrefs(out.split("-->", 1)[1])[0] == BASE_1 + "?version=1.0"
+
+
+def test_two_real_blocks_are_refused():
+    text = DESCRIPTION.replace("</description>", "<update-information><src xlink:href=\"https://x\"/></update-information></description>")
+    with pytest.raises(ValueError):
+        feed_rewrite.rewrite_feed_version(text, "1.0")
+    _folder, path = _write(text)
+    assert feed_rewrite.rewrite_description_file(path, "1.0")[0] == feed_rewrite.ERROR
+
+
+def test_file_mode_and_crlf_are_preserved():
+    folder, path = _write(DESCRIPTION)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(DESCRIPTION.replace("\n", "\r\n"))
+    os.chmod(path, 0o644)
+    assert feed_rewrite.rewrite_description_file(path, "1.0")[0] == feed_rewrite.WRITTEN
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o644
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    assert b"\r\n" in raw and b"\n\n" not in raw.replace(b"\r\n", b"")
+
+
+def test_startup_rewrite_does_not_overwrite_a_directive_target(installed):
+    """Le fetch de /config peut aboutir avant le Timer de démarrage (2 s) :
+    la cible posée par la directive ne doit pas être écrasée."""
+    job = _job()
+    MainJob._feed_rewrite_started_cls = False
+    job._rewrite_feed_for_directive({"action": "update", "target_version": "0.0.1.0.32"})
+    fired = []
+
+    class _Timer:
+        def __init__(self, delay, fn):
+            fired.append(fn)
+            self.daemon = True
+
+        def start(self):
+            pass
+
+    import threading as _threading
+    original = _threading.Timer
+    _threading.Timer = _Timer
+    try:
+        job._schedule_feed_rewrite()
+    finally:
+        _threading.Timer = original
+        MainJob._feed_rewrite_started_cls = False
+    fired[0]()
+    assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.32"
+
+
+def test_native_dialog_reasserts_the_target_just_before_opening(installed):
+    job = _job()
+    job._rewrite_feed_for_directive(None)               # quelqu'un a remis l'installée
+    seen = {}
+    job._native_attempts_for = MagicMock(return_value=0)
+    job._cached_package_versions = MagicMock(return_value=[])
+    job._wait_before_prompting = MagicMock()
+
+    def _trigger():
+        seen["href"] = _hrefs(_read(installed))[0]
+        return False
+    job._trigger_native_update_dialog = _trigger
+    job._save_update_state = MagicMock()
+    job._report_update_status = MagicMock()
+    job._perform_native_update({"action": "update", "target_version": "0.0.1.0.32",
+                                "campaign_id": 1})
+    assert seen["href"] == BASE_1 + "?version=0.0.1.0.32"
+
+
+def test_deferred_directive_keeps_the_installed_version():
+    job = _job()
+    assert job._feed_target_for({"action": "update", "target_version": "9", "urgency": "deferred"}) == "0.0.1.0.31"
+    assert job._feed_target_for({"action": "update", "target_version": "9", "urgency": "critical"}) == "9"
+
+
+def test_diagnostic_uses_the_bare_address_until_a_rewrite_succeeded():
+    job = _job()
+    job._failover_ordered_urls = MagicMock(return_value=["https://dm-1.example/"])
+    MainJob._feed_rewrite_last_cls = None
+    assert job._update_feed_urls() == [BASE_1]

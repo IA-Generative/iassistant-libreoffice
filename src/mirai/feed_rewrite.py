@@ -16,6 +16,7 @@ Module sans dépendance UNO : testable seul, appelé par entrypoint.py.
 import html
 import os
 import re
+import stat
 import tempfile
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -27,7 +28,8 @@ ABSENT = "absent"          # pas de bloc <update-information> (profil offline)
 UNWRITABLE = "unwritable"  # installation en couche partagée, droits insuffisants
 ERROR = "error"
 
-_BLOCK_RE = re.compile(r"<update-information>.*?</update-information>", re.S)
+_BLOCK_RE = re.compile(r"<update-information\s*>.*?</update-information\s*>", re.S)
+_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HREF_RE = re.compile(r'(xlink:href\s*=\s*)(["\'])(.*?)\2', re.S)
 
 
@@ -47,18 +49,26 @@ def rewrite_feed_version(xml_text, version):
 
     Réécrit le texte plutôt que l'arbre : ElementTree renommerait les préfixes
     de namespace (ns0:) et le prologue, et le build relit <version value=…> par
-    motif. Le résultat est validé comme XML bien formé.
+    motif. Le résultat est validé comme XML bien formé. Hypothèse : le bloc est
+    celui qu'écrit scripts/inject_update_feed.py (un seul, sans préfixe) ; un
+    bloc en commentaire est ignoré, plusieurs blocs → ValueError.
     """
-    match = _BLOCK_RE.search(xml_text)
-    if not match:
+    # Les commentaires sont masqués (mêmes positions) pour ne jamais réécrire un
+    # bloc commenté à la place du vrai.
+    masked = _COMMENT_RE.sub(lambda m: " " * len(m.group(0)), xml_text)
+    blocks = list(_BLOCK_RE.finditer(masked))
+    if not blocks:
         return None
+    if len(blocks) > 1:
+        raise ValueError("plusieurs blocs <update-information>")
+    match = blocks[0]
 
     def _href(m):
         url = html.unescape(m.group(3))
         escaped = html.escape(with_version(url, version), quote=True)
         return f"{m.group(1)}{m.group(2)}{escaped}{m.group(2)}"
 
-    block = _HREF_RE.sub(_href, match.group(0))
+    block = _HREF_RE.sub(_href, xml_text[match.start():match.end()])
     new_text = xml_text[:match.start()] + block + xml_text[match.end():]
     ET.fromstring(new_text.encode("utf-8"))
     return new_text
@@ -80,13 +90,14 @@ def rewrite_description_file(path, version):
     os.replace) : LibreOffice ne lit jamais un fichier à moitié écrit.
     """
     try:
-        with open(path, encoding="utf-8") as fh:
+        # newline="" : fins de ligne conservées telles quelles (CRLF compris).
+        with open(path, encoding="utf-8", newline="") as fh:
             current = fh.read()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return ERROR, f"lecture: {exc}"
     try:
         updated = rewrite_feed_version(current, version)
-    except ET.ParseError as exc:
+    except (ET.ParseError, ValueError) as exc:
         return ERROR, f"xml: {exc}"
     if updated is None:
         return ABSENT, ""
@@ -97,11 +108,13 @@ def rewrite_description_file(path, version):
         return UNWRITABLE, folder
     tmp = None
     try:
+        mode = stat.S_IMODE(os.stat(path).st_mode)
         fd, tmp = tempfile.mkstemp(prefix=".description.", suffix=".tmp", dir=folder)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(updated)
             fh.flush()
             os.fsync(fh.fileno())
+        os.chmod(tmp, mode)            # mkstemp crée en 0600 : garder les droits d'origine
         os.replace(tmp, path)
         tmp = None
         return WRITTEN, ""

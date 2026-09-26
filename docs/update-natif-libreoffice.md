@@ -98,8 +98,8 @@ Pour que la route native suive la cohorte, le plugin réécrit l'adresse dans le
 
 | Situation | Adresse écrite |
 |---|---|
-| Directive `update` vers X (même si déjà à X, même en report) | `…/update.xml?version=X` |
-| Aucune directive, ou directive `rollback` | `…/update.xml?version=<version installée>` |
+| Directive `update` vers X (même si déjà à X, même en report), sauf urgence `deferred` | `…/update.xml?version=X` |
+| Aucune directive, directive `rollback` ou `deferred` | `…/update.xml?version=<version installée>` |
 
 LibreOffice relit ce fichier à **chaque** vérification (code source LibreOffice :
 `getUpdateInformationURLs` → lecture de `<dossier>/description.xml`). Le feed ne
@@ -107,13 +107,15 @@ confirme que la version demandée : chaque poste ne voit que sa propre cible, ni
 bouton « Vérifier les mises à jour » ni la vérification hebdomadaire ne diffusent
 un canary au reste du parc.
 
-- **Quand** : 2 s après le démarrage (avant le diagnostic à 45 s), à chaque
-  lecture de `/config` avant toute décision, et en tête du worker de mise à jour
-  (donc avant `_native_feed_offers`).
+- **Quand** : 2 s après le démarrage (avant le diagnostic à 45 s, et sans
+  écraser une directive déjà lue), à chaque lecture de `/config` avant toute
+  décision, en tête du worker de mise à jour (donc avant `_native_feed_offers`),
+  et juste avant d'ouvrir le dialogue natif.
 - **Comment** : seul le paramètre `version` de chaque `<src>` change (ordre,
   autres paramètres et override `MIRAI_UPDATE_FEED_URL` conservés), écriture
-  atomique et seulement si le contenu change ; bloc absent (profil offline) →
-  rien n'est créé.
+  atomique et seulement si le contenu change, droits et fins de ligne du fichier
+  conservés ; bloc absent (profil offline) → rien n'est créé ; bloc en
+  commentaire ignoré, plusieurs blocs → `error`.
 - **Installation partagée** (dossier non inscriptible) : résultat `unwritable`,
   journalisé ; `_native_feed_offers` ne voit pas la cible et la route dirigée
   prend le relais.

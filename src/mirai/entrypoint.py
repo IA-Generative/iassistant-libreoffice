@@ -3305,13 +3305,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         cached = getattr(self, "_package_cache_dir_value", None)
         if cached:
             return cached
-        here = os.path.dirname(os.path.abspath(__file__))
-        result = None
-        for _ in range(_PACKAGE_ROOT_SEARCH_LEVELS):
-            if os.path.isfile(os.path.join(here, "description.xml")):
-                result = os.path.dirname(os.path.dirname(here))
-                break
-            here = os.path.dirname(here)
+        root = self._package_root_dir()
+        result = os.path.dirname(os.path.dirname(root)) if root else None
         if result is None:
             log_to_file("_package_cache_dir: description.xml introuvable, repli sur la profondeur fixe")
             result = os.path.abspath(__file__)
@@ -3383,6 +3378,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         cached_before = self._cached_package_versions()
         self._wait_before_prompting()
+        # Ré-inscrire la cible juste avant d'ouvrir le dialogue : LibreOffice relit
+        # description.xml à ce moment, et une autre écriture (démarrage, directive
+        # suivante) a pu passer pendant l'attente (device-management#40).
+        self._rewrite_feed_url(target_version)
         log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
         if not self._trigger_native_update_dialog():
             return False
@@ -3468,7 +3467,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             for base in (self._failover_ordered_urls() or [])
             if isinstance(base, str) and base.strip()
         ]
-        version = str(MainJob._feed_rewrite_last_cls or self._get_extension_version() or "").strip()
+        # Seulement si la réécriture a réussi : sinon (offline, installation non
+        # inscriptible) LibreOffice lit l'adresse nue, le diagnostic aussi.
+        version = str(MainJob._feed_rewrite_last_cls or "").strip()
         return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
 
     # ── Réécriture de l'adresse du feed natif (device-management#40) ──
@@ -3490,8 +3491,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Version à inscrire dans l'adresse du feed : la cible d'une directive
         `update`, sinon la version installée. Un rollback garde la version
         installée : LibreOffice ne propose jamais une version plus ancienne, et
-        l'adresse ne doit pas non plus reproposer celle qu'on retire."""
-        if isinstance(directive, dict) and directive.get("action") == "update":
+        l'adresse ne doit pas non plus reproposer celle qu'on retire. Une
+        directive `deferred` aussi : elle ne doit pas déranger l'utilisateur, or
+        la vérification périodique de LibreOffice notifierait la cible (la route
+        dirigée l'installe au redémarrage)."""
+        if (isinstance(directive, dict) and directive.get("action") == "update"
+                and directive.get("urgency") != "deferred"):
             target = str(directive.get("target_version") or "").strip()
             if target:
                 return target
@@ -3542,6 +3547,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _safe_rewrite():
             try:
+                # Une directive lue entre-temps a déjà posé la bonne adresse : ne
+                # pas l'écraser avec la version installée.
+                with MainJob._feed_rewrite_lock_cls:
+                    already = MainJob._feed_rewrite_last_result_cls is not None
+                if already:
+                    return
                 self._rewrite_feed_url(str(self._get_extension_version() or "").strip())
             except Exception as exc:
                 log_to_file(f"_rewrite_feed_url (démarrage): {exc}")
