@@ -202,9 +202,11 @@ def test_telemetry_is_sent_once_per_change_not_per_config_fetch(installed):
     assert job._send_telemetry.call_count == 1
 
 
-def test_fetch_config_rewrites_before_deciding_anything(installed):
+@pytest.mark.parametrize("target", ["0.0.1.0.31", "0.0.1.0.32"])
+def test_fetch_config_rewrites_before_deciding_anything(installed, target):
     """La réécriture a lieu même quand le poste est déjà à la cible (la branche
-    « déjà à la version cible » ne planifie rien)."""
+    « déjà à la version cible » ne planifie rien), et avant de planifier la mise
+    à jour : _native_feed_offers relit description.xml."""
     job = _job()
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
         "bootstrap_url": "http://localhost:9999", "config_path": "/config/lo/config.json",
@@ -214,32 +216,14 @@ def test_fetch_config_rewrites_before_deciding_anything(installed):
     job._get_lo_version = MagicMock(return_value="24.8.0")
     job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
     job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
+    seen = []
+    job._schedule_update = MagicMock(side_effect=lambda d: seen.append(_hrefs(_read(installed))[0]))
     directive = _make_update_directive()
-    directive["target_version"] = "0.0.1.0.31"          # déjà installée
+    directive["target_version"] = target
     job._urlopen = MagicMock(return_value=_json_response(_enriched_v2(features={}, update=directive)))
     job._fetch_config(force=True)
-    assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.31"
-    job._schedule_update.assert_not_called()
-
-
-def test_worker_rewrites_before_probing_the_native_feed(installed, monkeypatch):
-    """_native_feed_offers relit description.xml : l'adresse doit viser la cible avant."""
-    job = _job()
-    seen = {}
-    job._load_update_state = MagicMock(return_value={})
-
-    def _perform(directive):
-        seen["href"] = _hrefs(_read(installed))[0]
-    job._perform_update = _perform
-    MainJob._update_in_progress_cls = False
-    job._schedule_update({"action": "update", "target_version": "0.0.1.0.32", "urgency": "normal"})
-    for _ in range(200):
-        if "href" in seen:
-            break
-        import time
-        time.sleep(0.01)
-    assert seen["href"] == BASE_1 + "?version=0.0.1.0.32"
+    assert _hrefs(_read(installed))[0] == BASE_1 + f"?version={target}"
+    assert seen == ([] if target == "0.0.1.0.31" else [BASE_1 + "?version=0.0.1.0.32"])
 
 
 def test_no_package_root_is_harmless(monkeypatch):

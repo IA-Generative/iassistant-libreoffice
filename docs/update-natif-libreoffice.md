@@ -109,8 +109,8 @@ un canary au reste du parc.
 
 - **Quand** : 2 s après le démarrage (avant le diagnostic à 45 s, et sans
   écraser une directive déjà lue), à chaque lecture de `/config` avant toute
-  décision, en tête du worker de mise à jour (donc avant `_native_feed_offers`),
-  et juste avant d'ouvrir le dialogue natif.
+  décision (donc avant `_native_feed_offers`), et juste avant d'ouvrir le
+  dialogue natif.
 - **Comment** : seul le paramètre `version` de chaque `<src>` change (ordre,
   autres paramètres et override `MIRAI_UPDATE_FEED_URL` conservés), écriture
   atomique et seulement si le contenu change, droits et fins de ligne du fichier

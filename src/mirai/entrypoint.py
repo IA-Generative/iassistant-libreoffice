@@ -1994,9 +1994,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
-                # L'adresse du feed doit viser la cible AVANT _native_feed_offers :
-                # isUpdateAvailable relit description.xml.
-                self._rewrite_feed_for_directive(directive)
                 # Réconcilier d'abord la mise à jour précédente (la directive
                 # suivante peut arriver avant le timer de réconciliation et
                 # écraserait l'état persistant). Hors du chemin de fetch config,
