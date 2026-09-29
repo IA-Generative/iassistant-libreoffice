@@ -98,8 +98,8 @@ Pour que la route native suive la cohorte, le plugin réécrit l'adresse dans le
 
 | Situation | Adresse écrite |
 |---|---|
-| Directive `update` vers X (même si déjà à X, même en report), sauf urgence `deferred` | `…/update.xml?version=X` |
-| Aucune directive, directive `rollback` ou `deferred` | `…/update.xml?version=<version installée>` |
+| Directive `update` vers X (même si déjà à X, même en report) | `…/update.xml?version=X` |
+| Aucune directive, ou directive `rollback` | `…/update.xml?version=<version installée>` |
 
 LibreOffice relit ce fichier à **chaque** vérification (code source LibreOffice :
 `getUpdateInformationURLs` → lecture de `<dossier>/description.xml`). Le feed ne

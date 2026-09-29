@@ -306,12 +306,6 @@ def test_startup_rewrite_does_not_overwrite_a_directive_written_during_its_versi
     assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.32"
 
 
-def test_deferred_directive_keeps_the_installed_version():
-    job = _job()
-    assert job._feed_target_for({"action": "update", "target_version": "9", "urgency": "deferred"}) == "0.0.1.0.31"
-    assert job._feed_target_for({"action": "update", "target_version": "9", "urgency": "critical"}) == "9"
-
-
 def test_diagnostic_uses_the_bare_address_until_a_rewrite_succeeded():
     job = _job()
     job._failover_ordered_urls = MagicMock(return_value=["https://dm-1.example/"])

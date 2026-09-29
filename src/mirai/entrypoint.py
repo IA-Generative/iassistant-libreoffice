@@ -3484,12 +3484,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Version à inscrire dans l'adresse du feed : la cible d'une directive
         `update`, sinon la version installée. Un rollback garde la version
         installée : LibreOffice ne propose jamais une version plus ancienne, et
-        l'adresse ne doit pas non plus reproposer celle qu'on retire. Une
-        directive `deferred` aussi : elle ne doit pas déranger l'utilisateur, or
-        la vérification périodique de LibreOffice notifierait la cible (la route
-        dirigée l'installe au redémarrage)."""
-        if (isinstance(directive, dict) and directive.get("action") == "update"
-                and directive.get("urgency") != "deferred"):
+        l'adresse ne doit pas non plus reproposer celle qu'on retire."""
+        if isinstance(directive, dict) and directive.get("action") == "update":
             target = str(directive.get("target_version") or "").strip()
             if target:
                 return target
