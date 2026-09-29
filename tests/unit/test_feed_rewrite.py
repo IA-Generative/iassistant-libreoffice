@@ -321,6 +321,22 @@ def test_startup_rewrite_does_not_overwrite_a_directive_target(installed):
     assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.32"
 
 
+def test_startup_rewrite_does_not_overwrite_a_directive_written_during_its_version_lookup(
+        installed, monkeypatch):
+    job = _job()
+    fired = []
+    monkeypatch.setattr(entrypoint.threading, "Timer", lambda delay, fn: fired.append(fn) or MagicMock())
+    monkeypatch.setattr(MainJob, "_feed_rewrite_started_cls", False)
+    job._schedule_feed_rewrite()
+
+    def _version_lookup_while_config_lands():
+        _job()._rewrite_feed_for_directive({"action": "update", "target_version": "0.0.1.0.32"})
+        return "0.0.1.0.31"
+    job._get_extension_version = _version_lookup_while_config_lands
+    fired[0]()
+    assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.32"
+
+
 def test_native_dialog_reasserts_the_target_just_before_opening(installed):
     job = _job()
     job._rewrite_feed_for_directive(None)               # quelqu'un a remis l'installée

@@ -3508,12 +3508,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as exc:
             log_to_file(f"_rewrite_feed_url: {exc}")
 
-    def _rewrite_feed_url(self, version):
+    def _rewrite_feed_url(self, version, unless_already_set=False):
         """Pose ?version=<version> sur l'adresse du feed du description.xml
         installé. Sans effet si le bloc est absent (profil offline) ou si rien ne
         change ; installation non inscriptible (couche partagée) → journalisé,
         la route dirigée reste le repli (_native_feed_offers ne verra pas la
-        cible). Renvoie le résultat de feed_rewrite."""
+        cible). Avec `unless_already_set`, n'écrit rien si une adresse a déjà été
+        posée dans ce process. Renvoie le résultat de feed_rewrite (None si rien
+        n'a été tenté)."""
         if not version:
             return feed_rewrite.ERROR
         root = self._package_root_dir()
@@ -3522,6 +3524,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return feed_rewrite.ERROR
         path = os.path.join(root, "description.xml")
         with MainJob._feed_rewrite_lock_cls:
+            if unless_already_set and MainJob._feed_rewrite_last_result_cls is not None:
+                return None
             result, detail = feed_rewrite.rewrite_description_file(path, version)
             # Une télémétrie par changement d'état, pas à chaque lecture de /config.
             changed = (result, version) != MainJob._feed_rewrite_last_result_cls
@@ -3549,11 +3553,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             try:
                 # Une directive lue entre-temps a déjà posé la bonne adresse : ne
                 # pas l'écraser avec la version installée.
-                with MainJob._feed_rewrite_lock_cls:
-                    already = MainJob._feed_rewrite_last_result_cls is not None
-                if already:
-                    return
-                self._rewrite_feed_url(str(self._get_extension_version() or "").strip())
+                self._rewrite_feed_url(str(self._get_extension_version() or "").strip(),
+                                       unless_already_set=True)
             except Exception as exc:
                 log_to_file(f"_rewrite_feed_url (démarrage): {exc}")
 
