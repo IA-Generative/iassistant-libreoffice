@@ -63,7 +63,7 @@ la cible n'est pas reproposée avant 24 h, et rien n'est retéléchargé entre-t
 - Profil offline (`enabled: false`) : aucun bloc — le bouton natif répond
   « aucune mise à jour ».
 
-## Contrat du feed `update.xml` (à servir par le DM — device-management#4)
+## Contrat du feed `update.xml` (servi par le DM)
 
 `GET <bootstrap>/catalog/mirai-libreoffice/update.xml` — anonyme, `Content-Type`
 indifférent (`text/xml` recommandé). Namespace **obligatoire**
@@ -123,7 +123,7 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
    volontaire deux fois pour voir la bascule en route dirigée à la troisième
    directive.
 
-## Fiabilité route 2, dirigée (issue #9) — décisions implémentées
+## Fiabilité route 2, dirigée
 
 - **Install sur le main thread via `ExtensionManager.addExtension`**, sans
   remove-avant-add : le remplacement même-identifiant est atomique
@@ -168,11 +168,11 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
   télémétrie : `feed.ok`, `feed.announced_version`, `feed.error`. C'est la
   validation à l'échelle de la flotte de la viabilité de la route native sur
   postes durcis, sans aucune action utilisateur — et l'alarme si le feed DM
-  (device-management#4) est absent ou mal formé.
+  est absent ou mal formé.
 
 ## Vérifier la sémantique deferred→installed contre le DM (sans le modifier)
 
-Le plugin rapporte désormais `deferred` au staging puis `installed` après
+Le plugin rapporte `deferred` au staging puis `installed` après
 redémarrage. Pour vérifier que les campagnes DM digèrent ce cycle en deux
 temps (progression correcte, pas d'expiration entre les phases) :
 
@@ -184,6 +184,7 @@ python3 tests/simulation/deploy_simulator.py \
 ```
 
 Le rapport affiche le progrès de campagne avant/après, compte les devices
-`stuck_in_deferred` (cycle cassé) et `--single-phase` permet de comparer avec
-l'ancien comportement. `/update/status` exige les relay-credentials
-(VULN-007) : sans `--relay-client`/`--relay-key`, un DM sécurisé répond 401.
+`stuck_in_deferred` (cycle cassé) et `--single-phase` simule un plugin qui
+rapporte `installed` dès le staging. `/update/status` exige les
+relay-credentials : sans `--relay-client`/`--relay-key`, un DM sécurisé répond
+401.

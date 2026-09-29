@@ -219,7 +219,7 @@ def test_lo08_update_not_retriggered_if_in_progress():
 def test_lo09_perform_update_checksum_ok_stages():
     """checksum OK → l'artefact est stagé (statut 'deferred' rapporté — le
     rapport « installed » n'arrive qu'à la réconciliation post-redémarrage,
-    quand la nouvelle version est réellement active, cf. issue #9). L'install
+    quand la nouvelle version est réellement active). L'install
     réelle est différée au restart-accept — PAS exécutée au staging (sinon on
     double-installerait et clobbererait l'instance en cours)."""
     job = make_job()

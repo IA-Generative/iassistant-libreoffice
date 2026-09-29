@@ -24,14 +24,14 @@ except Exception:
 # prior registration before re-installing in-process (avoids duplicate components).
 _EXTENSION_IDENTIFIER = "fr.gouv.interieur.mirai"
 
-# Feed natif LibreOffice (<update-information>) servi par le DM
-# (device-management#4). Le chemin doit rester aligné avec
-# scripts/inject_update_feed.py (FEED_PATH) qui le bake dans description.xml.
+# Feed natif LibreOffice (<update-information>) servi par le DM. Le chemin doit
+# rester aligné avec scripts/inject_update_feed.py (FEED_PATH), qui le bake dans
+# description.xml.
 _UPDATE_FEED_PATH = "/catalog/mirai-libreoffice/update.xml"
 _UPDATE_FEED_NS = "http://openoffice.org/extensions/update/2006"
 
-# Route native pilotée (spec 2026-09-22) : refus mémorisé, attente de
-# l'installation par LibreOffice, bornes du déclenchement.
+# Route native pilotée : refus mémorisé, attente de l'installation par
+# LibreOffice, bornes du déclenchement.
 _UPDATE_POSTPONE_SECONDS = 24 * 3600
 _NATIVE_INSTALL_WAIT_SECONDS = 900
 _NATIVE_POLL_SECONDS = 5
@@ -782,8 +782,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"Failed to schedule update reconciliation: {str(e)}")
 
         # Diagnostic passif du feed natif : valide proxy/TLS/GPO de la pile HTTP
-        # de LibreOffice sur la flotte et détecte un feed DM absent
-        # (device-management#4) avant d'appuyer le déploiement large dessus.
+        # de LibreOffice sur la flotte et détecte un feed DM absent avant
+        # d'appuyer le déploiement large dessus.
         try:
             self._schedule_native_feed_check()
         except Exception as e:
@@ -1032,9 +1032,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     _ACTION_NAMES = {
         "ExtensionLoaded": "launch",
         "ExtensionUpdated": "update",
-        # Étapes du flux de MAJ (issue #9) — permettent de mesurer le taux de
-        # succès PAR ÉTAPE sur la flotte (staged → accepted → installed confirmé),
-        # au lieu d'un unique événement ambigu.
+        # Étapes du flux de MAJ : mesurent le taux de succès PAR ÉTAPE sur la
+        # flotte (staged → accepted → installed confirmé).
         "UpdateStaged": "update",
         "UpdateAccepted": "update",
         "UpdatePostponed": "update",
@@ -1084,7 +1083,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "ProxyTest",
         "ConfigWaitAtTrigger",
         "ActionUnhandled",
-        # Flux de mise à jour (issue #9) : télémétrie technique de flotte,
+        # Flux de mise à jour : télémétrie technique de flotte,
         # envoyée même avant la liaison utilisateur.
         "UpdateStaged",
         "UpdateAccepted",
@@ -2033,7 +2032,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         tmp_path = None
         try:
-            # Route native d'abord (spec 2026-09-22) : jamais pour une directive
+            # Route native d'abord : jamais pour une directive
             # différée (elle ne dérange pas l'utilisateur) ni un rollback (LO ne
             # propose que des versions plus récentes) ; bornée en tentatives.
             if action == "update" and urgency != "deferred":
@@ -2118,7 +2117,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # Script d'installation de secours (.bat/.sh) : spawne un processus
             # enfant → refusé sur postes durcis (WinError 5, AppLocker / Defender
             # ASR), et son cycle unopkg remove/add est un vecteur de corruption du
-            # registre (issue #9). DÉSACTIVÉ par défaut ; réactivable explicitement
+            # registre. DÉSACTIVÉ par défaut ; réactivable explicitement
             # via MIRAI_UPDATE_ALLOW_SCRIPT=1 (postes non durcis, diagnostic).
             if os.environ.get("MIRAI_UPDATE_ALLOW_SCRIPT") == "1":
                 try:
@@ -2249,8 +2248,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # « deferred » = artefact prêt, installation à suivre (acceptation
             # utilisateur + redémarrage). « installed » n'est rapporté qu'une fois
             # la nouvelle version réellement active (_reconcile_update_state au
-            # démarrage suivant) — l'ancien rapport « installed » dès le staging
-            # comptait comme réussies des installations jamais abouties.
+            # démarrage suivant) : rapporter « installed » dès le staging
+            # compterait comme réussies des installations jamais abouties.
             self._report_update_status(campaign_id, "deferred", version_before, target_version)
 
             self._wait_before_prompting()
@@ -2679,10 +2678,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         de LibreOffice) exécute pour une installation manuelle — la voie validée
         sur le terrain comme fiable. Le main thread garde la base d'extensions et
         registrymodifications.xcu cohérents ; les cycles removePackage/addPackage
-        répétés depuis le thread worker sont ce qui corrompait le registre
-        (issue #9). Pas de remove-avant-add : addExtension remplace atomiquement
-        une extension de même identifiant (VersionException approuvée par le
-        handler silencieux). Aucun processus enfant (immunisé WinError 5).
+        répétés depuis le thread worker corrompent le registre. Pas de
+        remove-avant-add : addExtension remplace atomiquement une extension de
+        même identifiant (VersionException approuvée par le handler silencieux).
+        Aucun processus enfant (immunisé WinError 5).
 
         Retourne True sur succès confirmé ; False sur échec ou timeout (l'appelant
         dégrade). Après un timeout, le callback éventuel devient no-op (garde
@@ -2989,7 +2988,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             except Exception as e:
                 log_to_file(f"_terminate_on_main_thread: terminate error: {e}")
 
-    # ── Update state & post-restart reconciliation (issue #9) ────────────
     # Le résultat réel d'une mise à jour n'est connu qu'au redémarrage suivant
     # (l'installation remplace l'extension qui exécute ce code). On persiste
     # donc l'état de campagne à côté de l'artefact stagé, et au démarrage on
@@ -3167,12 +3165,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
-    # ── Route native pilotée (spec 2026-09-22, issue #9) ─────────────────
-    # Le DM décide (directive update), LibreOffice installe (dialogue « Mise à
-    # jour des extensions »). Le plugin ne télécharge rien : il vérifie que le
-    # feed <update-information> de l'extension installée annonce exactement la
-    # cible, ouvre le dialogue natif sur le thread principal, puis surveille la
-    # version installée et ferme LibreOffice proprement.
+    # Route native pilotée : le DM décide (directive update), LibreOffice
+    # installe (dialogue « Mise à jour des extensions »). Le plugin ne télécharge
+    # rien : il vérifie que le feed <update-information> de l'extension installée
+    # annonce exactement la cible, ouvre le dialogue natif sur le thread
+    # principal, puis surveille la version installée et ferme LibreOffice
+    # proprement.
 
     def _native_feed_offers(self, target_version):
         """Vrai si le feed de l'extension INSTALLÉE annonce exactement
@@ -3429,12 +3427,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         })
         return True
 
-    # ── Diagnostic passif du feed natif (<update-information>, issue #5) ──
-    # LibreOffice récupère le feed avec SA pile HTTP (proxy/TLS/GPO propres),
-    # pas celle du plugin. Ce check headless valide donc, sans aucune action
-    # utilisateur et à l'échelle de la flotte, que la route native est viable
-    # sur les postes durcis — et détecte un feed DM absent ou mal formé
-    # (device-management#4) AVANT d'appuyer le déploiement large dessus.
+    # Diagnostic passif du feed natif : LibreOffice récupère le feed avec SA pile
+    # HTTP (proxy/TLS/GPO propres), pas celle du plugin. Ce check headless valide
+    # donc, sans aucune action utilisateur et à l'échelle de la flotte, que la
+    # route native est viable sur les postes durcis — et détecte un feed DM
+    # absent ou mal formé AVANT d'appuyer le déploiement large dessus.
 
     def _update_feed_urls(self):
         """URLs du feed natif, dérivées des bootstrap configurés (failover d'abord).

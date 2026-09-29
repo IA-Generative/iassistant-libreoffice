@@ -102,7 +102,7 @@ def test_embedded_config_is_transport_only(oxt_path):
 
 
 def test_description_has_native_update_feed(oxt_path):
-    """MAJ native LibreOffice (issue #5) : un profil online doit embarquer le
+    """MAJ native LibreOffice : un profil online doit embarquer le
     bloc <update-information> pointant sur le feed du DM (un <src> par
     bootstrap_url — failover natif)."""
     with zipfile.ZipFile(oxt_path) as z:
