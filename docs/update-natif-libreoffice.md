@@ -116,7 +116,9 @@ un canary au reste du parc.
   conservés ; bloc absent (profil offline) → rien n'est créé.
 - **Installation partagée** (dossier non inscriptible) : résultat `unwritable`,
   journalisé ; `_native_feed_offers` ne voit pas la cible et la route dirigée
-  prend le relais.
+  prend le relais. Sous Windows, un fichier verrouillé à cet instant (antivirus,
+  EDR, lecture par LibreOffice) donne aussi `unwritable` : un `written` à une
+  lecture de `/config` suivante signale un verrou passager.
 - **Après une mise à jour** : le nouvel OXT arrive avec l'adresse nue du build
   (version générale) ; elle est reprise au démarrage suivant.
 - **Télémétrie** `FeedRewrite` (une par changement d'état) : `feed.target`,
@@ -136,7 +138,8 @@ un canary au reste du parc.
    - avec une directive vers N+1 (campagne visant ce poste), le fichier passe à
      `?version=N+1` et la mise à jour native est proposée ; un poste hors
      campagne ne voit toujours rien ;
-   - antivirus / EDR : aucune alerte sur l'écriture du fichier ;
+   - antivirus / EDR : aucune alerte sur l'écriture du fichier ; un
+     `unwritable` suivi d'un `written` est un verrou passager ;
    - installation en couche partagée (si utilisée sur le parc) :
      `feed.result=unwritable` et bascule en route dirigée.
 
