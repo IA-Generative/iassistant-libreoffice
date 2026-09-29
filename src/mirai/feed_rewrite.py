@@ -66,14 +66,6 @@ def rewrite_feed_version(xml_text, version):
     return new_text
 
 
-def feed_urls(xml_text):
-    """Adresses <src> du bloc <update-information>, dans l'ordre (failover)."""
-    match = _BLOCK_RE.search(xml_text or "")
-    if not match:
-        return []
-    return [html.unescape(m.group(3)) for m in _HREF_RE.finditer(match.group(0))]
-
-
 def rewrite_description_file(path, version):
     """Réécrit `path` si nécessaire ; renvoie (résultat, détail).
 

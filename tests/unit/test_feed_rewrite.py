@@ -28,7 +28,8 @@ from tests.unit.test_update_features import (  # noqa: E402
     _make_update_directive,
 )
 
-NS = {"d": "http://openoffice.org/extensions/update/2006"}
+SRC_TAG = "{http://openoffice.org/extensions/description/2006}src"
+XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 BASE_1 = "https://dm-1.example/catalog/mirai-libreoffice/update.xml"
 BASE_2 = "https://dm-2.example/bootstrap/catalog/mirai-libreoffice/update.xml"
 
@@ -56,7 +57,7 @@ def _purge_tmpdirs():
 
 
 def _hrefs(text):
-    return feed_rewrite.feed_urls(text)
+    return [src.get(XLINK_HREF) for src in ET.fromstring(text.encode()).iter(SRC_TAG)]
 
 
 # ── Module pur ───────────────────────────────────────────────────────────
