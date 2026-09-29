@@ -203,6 +203,17 @@ def test_telemetry_is_sent_once_per_change_not_per_config_fetch(installed):
     assert job._send_telemetry.call_count == 1
 
 
+def test_a_persistent_result_is_logged_once(installed, monkeypatch):
+    with open(installed, "w", encoding="utf-8") as fh:
+        fh.write(DESCRIPTION.split("<update-information>")[0] + "</description>\n")
+    logged = MagicMock()
+    monkeypatch.setattr(entrypoint, "log_to_file", logged)
+    job = _job()
+    for _ in range(3):
+        job._rewrite_feed_for_directive(None)
+    assert sum("_rewrite_feed_url: absent" in c.args[0] for c in logged.call_args_list) == 1
+
+
 @pytest.mark.parametrize("target", ["0.0.1.0.31", "0.0.1.0.32"])
 def test_fetch_config_rewrites_before_deciding_anything(installed, target):
     """La réécriture a lieu même quand le poste est déjà à la cible (la branche

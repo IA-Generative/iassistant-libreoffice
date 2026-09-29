@@ -3516,14 +3516,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if unless_already_set and MainJob._feed_rewrite_last_result_cls is not None:
                 return None
             result, detail = feed_rewrite.rewrite_description_file(path, version)
-            # Une télémétrie par changement d'état, pas à chaque lecture de /config.
+            # Journal et télémétrie une fois par changement d'état, pas à chaque
+            # lecture de /config.
             changed = (result, version) != MainJob._feed_rewrite_last_result_cls
             MainJob._feed_rewrite_last_result_cls = (result, version)
             if result in (feed_rewrite.WRITTEN, feed_rewrite.UNCHANGED):
                 MainJob._feed_rewrite_last_cls = version
-        if result != feed_rewrite.UNCHANGED:
-            log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
         if changed and result != feed_rewrite.UNCHANGED:
+            log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
             self._send_telemetry("FeedRewrite", {
                 "feed.target": str(version),
                 "feed.result": result,
