@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Injecte le bloc <update-information> dans description.xml au moment du build.
 
-Branche le mécanisme NATIF de mise à jour d'extensions de LibreOffice (issue #5) :
+Branche le mécanisme NATIF de mise à jour d'extensions de LibreOffice :
 avec ce bloc, le bouton « Vérifier les mises à jour » du Gestionnaire des
 extensions (et la vérification périodique de LO, si activée) interroge le feed
 update.xml servi par le DM, télécharge et installe l'OXT entièrement in-process
@@ -10,7 +10,7 @@ update.xml servi par le DM, télécharge et installe l'OXT entièrement in-proce
 L'URL du feed est dérivée du profil bootstrap embarqué (config.default.json du
 staging) : chaque bootstrap_url donne un <src> — LibreOffice les essaie dans
 l'ordre (failover natif, même sémantique que le multi-bootstrap du plugin).
-Convention de chemin servie par le DM (device-management#4) :
+Convention de chemin servie par le DM :
 
     <bootstrap>/catalog/mirai-libreoffice/update.xml
 

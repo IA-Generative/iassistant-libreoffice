@@ -14,18 +14,17 @@ Usage:
 Each simulated device:
   1. GET /config/libreoffice/config.json → receives (or not) an update directive
   2. If directive → simulates download (HEAD on artifact_url)
-  3. Reports /update/status like the REAL plugin (>= fix/MAJ) does, in TWO
+  3. Reports /update/status like the real plugin does, in TWO
      phases: "deferred" at staging time, then — after a simulated restart
-     delay — "installed" (truthful reporting, cf. plugin issue #9). Use
-     --single-phase to reproduce the legacy pre-fix/MAJ behaviour
-     (immediate "installed").
+     delay — "installed" (truthful reporting). Use --single-phase to
+     reproduce the legacy behaviour (immediate "installed").
 
-But du mode two-phase : vérifier — SANS toucher au DM — que la nouvelle
+But du mode two-phase : vérifier — SANS toucher au DM — que la
 sémantique deferred→installed est bien digérée par les campagnes (progression,
 pas d'expiration prématurée entre les deux phases). Fournir --admin-token pour
 afficher /api/campaigns/{id}/progress avant et après la vague.
 
-/update/status exige des relay-credentials (DM VULN-007) : passer
+/update/status exige des relay-credentials : passer
 --relay-client / --relay-key, sinon un DM sécurisé répond 401 et la campagne
 n'enregistre rien.
 
@@ -62,7 +61,7 @@ def _post_status(
     user_agent: str,
     relay_headers: dict,
 ):
-    """POST /update/status comme le plugin (relay-headers inclus, VULN-007)."""
+    """POST /update/status comme le plugin (relay-headers inclus)."""
     payload = {
         "campaign_id": campaign_id,
         "client_uuid": client_uuid,
@@ -161,7 +160,7 @@ def _simulate_device(
         result["status"] = status
         return result
 
-    # Step 5: Report status — like the real plugin (>= fix/MAJ): "deferred" at
+    # Step 5: Report status — like the real plugin: "deferred" at
     # staging, then "installed" only after the (simulated) restart, when the new
     # version is actually active. --single-phase reproduces the legacy behaviour.
     try:
@@ -219,14 +218,14 @@ def main():
     parser.add_argument("--plugin-version", default="0.9.0", help="Simulated current plugin version")
     parser.add_argument("--output", default=None, help="Output JSON report file path")
     parser.add_argument("--single-phase", action="store_true",
-                        help="Legacy pre-fix/MAJ: report 'installed' immediately "
+                        help="Legacy: report 'installed' immediately "
                              "(default is two-phase deferred→installed, like the real plugin)")
     parser.add_argument("--restart-delay", type=float, default=3.0,
                         help="Simulated seconds between 'deferred' and 'installed' (two-phase)")
     parser.add_argument("--relay-client", default="",
-                        help="X-Relay-Client for /update/status (required by secured DM, VULN-007)")
+                        help="X-Relay-Client for /update/status (required by secured DM)")
     parser.add_argument("--relay-key", default="",
-                        help="X-Relay-Key for /update/status (required by secured DM, VULN-007)")
+                        help="X-Relay-Key for /update/status (required by secured DM)")
     parser.add_argument("--admin-token", default="",
                         help="X-Admin-Token: if set, print /api/campaigns/{id}/progress before & after")
     args = parser.parse_args()

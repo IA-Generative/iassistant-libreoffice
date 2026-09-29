@@ -1,9 +1,6 @@
-"""Route native pilotée par le DM (spec 2026-09-22, issue #9) : le DM décide
-(directive), LibreOffice installe (dialogue « Mise à jour des extensions »,
-feed <update-information>), le plugin ferme proprement. Route dirigée de
-fix/MAJ en repli ; refus mémorisé 24 h.
-
-Run:  pytest tests/unit/test_native_route.py -v
+"""Route native pilotée par le DM : le DM décide (directive), LibreOffice
+installe (dialogue « Mise à jour des extensions », feed <update-information>),
+le plugin ferme proprement. Route dirigée en repli ; refus mémorisé 24 h.
 """
 import itertools
 import json
@@ -69,8 +66,6 @@ def _state(job):
     with open(job._update_state_path(), encoding="utf-8") as fh:
         return json.load(fh)
 
-
-# ── État persistant ──────────────────────────────────────────────────────
 
 def test_constants_match_spec():
     assert entrypoint._UPDATE_POSTPONE_SECONDS == 24 * 3600
@@ -141,8 +136,6 @@ def test_load_update_state_returns_empty_when_missing_or_corrupt():
     assert job._load_update_state() == {}
 
 
-# ── Cooldown : une cible refusée ou ignorée n'est pas reproposée avant 24 h ──
-
 def _schedule_and_wait(job, directive, seconds=2):
     done = threading.Event()
     job._perform_update = lambda d: done.set()
@@ -180,7 +173,6 @@ def test_schedule_update_tolerates_corrupt_postponed_until():
     assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is True
 
 
-# ── _native_feed_offers : PackageInformationProvider.isUpdateAvailable ────
 # C'est LibreOffice qui interroge le feed cuit dans l'extension INSTALLÉE, avec
 # sa pile HTTP. Vrai seulement si la version annoncée == cible de la directive.
 
@@ -230,7 +222,6 @@ def test_native_feed_offers_false_on_error_or_missing_provider():
     assert job2._native_feed_offers("") is False
 
 
-# ── _trigger_native_update_dialog : PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG") ──
 # L'appel exact de la bulle de notification de LibreOffice (updatecheck.cxx →
 # showExtensionDialog). Il met la vérification en file sur le thread de commandes
 # de LO et rend la main ; il doit partir du thread principal (AsyncCallback).
@@ -286,8 +277,8 @@ def test_trigger_late_callback_after_timeout_is_noop():
 
 def test_main_thread_install_resolves_the_real_extension_manager_singleton():
     """Le singleton UNO est com.sun.star.deployment.ExtensionManager ; le nom
-    theExtensionManager n'existe pas (getValueByName → None), ce qui faisait
-    toujours retomber l'install sur l'ancien chemin worker."""
+    theExtensionManager n'existe pas (getValueByName → None) : l'install
+    retomberait toujours sur le chemin worker."""
     job, _dialog, _async_cb = _job_with_services()
     mgr = MagicMock(name="ExtensionManager")
     def _by_name(path):
@@ -297,8 +288,6 @@ def test_main_thread_install_resolves_the_real_extension_manager_singleton():
     mgr.addExtension.assert_called_once()
     assert job._main_thread_install_in_flight is False
 
-
-# ── _perform_native_update : dialogue natif, surveillance, fermeture ─────
 
 def _native_job(versions, trigger=True):
     """versions : réponses successives de _get_extension_version — version_before,
@@ -394,8 +383,6 @@ def test_native_update_still_true_when_close_raises(native_timing):
     assert _state(job)["stage"] == "installed_native"
 
 
-# ── Choix de route dans _perform_update ──────────────────────────────────
-
 def _routing_job(feed_offers=True, native_result=True):
     job = _job()
     job._native_feed_offers = MagicMock(return_value=feed_offers)
@@ -460,8 +447,6 @@ def test_directed_route_postponed_sets_cooldown():
     assert "UpdatePostponed" in _events(job)
 
 
-# ── Télémétrie ───────────────────────────────────────────────────────────
-
 UPDATE_EVENTS = {
     "UpdateStaged", "UpdateAccepted", "UpdatePostponed", "UpdateInstalledPendingRestart",
     "UpdateInstallFailed", "UpdateNativeDialogShown", "ExtensionUpdated", "NativeFeedCheck",
@@ -488,8 +473,6 @@ def test_reconcile_joins_route_to_extension_updated():
     assert updated[0].args[1]["route"] == "native"
     assert updated[0].args[1]["confirmed"] == "true"
 
-
-# ── Timeout après démarrage : jamais de second flux ──────────────────────
 
 def _blocking_dialog_job(block):
     """Le callback main-thread est capturé et exécuté sur un thread qui bloque
@@ -781,8 +764,6 @@ def test_install_in_flight_skips_legacy_worker_path():
         os.remove(path)
 
 
-# ── _get_extension_version lit le registre, pas son propre description.xml ──
-
 def _job_with_extension_list(pairs):
     job = make_job(config_dir=_mkdtemp())
     smgr = job.ctx.getServiceManager.return_value
@@ -827,8 +808,6 @@ def test_native_poll_sees_new_version_from_registry(native_timing):
     job._close_after_inprocess_update.assert_called_once()
 
 
-# ── _wait_before_prompting revérifie l'assistant après le délai de grâce ────
-
 def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
     """L'assistant d'enrôlement s'ouvre PENDANT la grâce : la seconde
     vérification doit le voir et attendre sa fermeture."""
@@ -858,8 +837,6 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
         wizard.join(2)
         MainJob._enrollment_wizard_active_cls = previous
 
-
-# ── Détection native par le cache des paquets (le registre reste ancien en session) ──
 
 def _fake_cache(versions):
     """Cache <cache>/<lu>/<pkg>.oxt/description.xml pour chaque version donnée."""
@@ -915,8 +892,8 @@ def test_cached_package_versions_never_raises():
 
 
 def test_native_poll_detects_install_via_package_cache_when_registry_stale(native_timing):
-    """Cas mesuré sur le banc : getExtensionList renvoie toujours l'ancienne
-    version en session, mais le dossier du nouveau paquet est dans le cache.
+    """En session, getExtensionList renvoie toujours l'ancienne version, mais
+    le dossier du nouveau paquet est dans le cache.
     Détection confirmée sur deux lectures consécutives (les polls #2 et #3)."""
     job = _native_job([CURRENT])
     calls = {"n": 0}
@@ -940,8 +917,6 @@ def test_native_poll_ignores_target_folder_present_before_dialog(native_timing):
     job._close_after_inprocess_update.assert_not_called()
     assert _state(job)["stage"] == "postponed"
 
-
-# ── Réconciliation de la cible précédente avant une nouvelle directive ────
 
 def test_schedule_update_reconciles_previous_target_before_new_directive():
     """Cas du banc : la directive suivante arrive avant le timer de
@@ -973,8 +948,6 @@ def test_schedule_update_defers_new_directive_while_previous_install_pending_res
     assert state["stage"] == "installed_native"
     assert state["campaign_id"] == 6
 
-
-# ── Les aides de fermeture survivent à un contexte UNO disposé ──────────────
 
 def test_close_helpers_survive_disposed_context():
     """Contexte disposé pendant la boucle de fermeture : la sonde répond Faux

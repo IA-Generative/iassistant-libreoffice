@@ -1,8 +1,6 @@
-"""Mécanisme natif de MAJ (<update-information>, issue #5) + fiabilité de la
-voie in-process (issue #9) : install sur le MAIN thread via ExtensionManager,
-scripts cmd.exe désactivés par défaut, réconciliation post-redémarrage.
-
-Run:  pytest tests/unit/test_native_update.py -v
+"""Mécanisme natif de MAJ (<update-information>) + fiabilité de la voie
+in-process : install sur le MAIN thread via ExtensionManager, scripts cmd.exe
+désactivés par défaut, réconciliation post-redémarrage.
 """
 import importlib.util
 import json
@@ -19,8 +17,6 @@ from src.mirai import entrypoint
 from src.mirai.entrypoint import MainJob
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-# ── scripts/inject_update_feed.py (bake du feed au build) ────────────────
 
 _spec = importlib.util.spec_from_file_location(
     "inject_update_feed", os.path.join(ROOT, "scripts", "inject_update_feed.py"))
@@ -107,7 +103,6 @@ def test_inject_env_override_wins(monkeypatch):
     assert "dm.example" not in out
 
 
-# ── Install sur le MAIN thread (ExtensionManager.addExtension) ───────────
 # La voie du Gestionnaire des extensions — remplace atomiquement une extension
 # de même identifiant, PAS de remove-avant-add (le cycle removePackage/addPackage
 # worker est ce qui laissait des entrées fantômes dans registrymodifications.xcu).
@@ -203,8 +198,6 @@ def test_install_and_restart_falls_back_to_legacy_worker_path():
     finally:
         os.remove(path)
 
-
-# ── Réconciliation post-redémarrage (rapport « installed » véridique) ────
 
 def _job_with_state(state, current_version="0.0.1.0.31"):
     job = make_job(config_dir=tempfile.mkdtemp())
@@ -354,7 +347,6 @@ def test_save_update_state_roundtrip():
     assert state["ts"] > 0
 
 
-# ── Diagnostic passif du feed natif (NativeFeedCheck) ────────────────────
 # Le feed est récupéré par la pile HTTP de LibreOffice (UpdateInformationProvider,
 # la machinerie exacte du bouton « Vérifier les mises à jour ») : ce check
 # headless valide proxy/TLS/GPO sur la flotte sans action utilisateur.
@@ -428,8 +420,6 @@ def test_check_native_feed_skips_without_bootstrap():
     smgr.createInstanceWithContext.assert_not_called()
     job._send_telemetry.assert_not_called()
 
-
-# ── Rollback : même voie que l'update, réconciliation incluse ────────────
 
 def test_schedule_update_runs_for_rollback_action():
     """Une directive action=rollback démarre le worker comme un update."""
