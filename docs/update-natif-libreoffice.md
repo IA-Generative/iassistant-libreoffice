@@ -113,8 +113,7 @@ un canary au reste du parc.
 - **Comment** : seul le paramètre `version` de chaque `<src>` change (ordre,
   autres paramètres et override `MIRAI_UPDATE_FEED_URL` conservés), écriture
   atomique et seulement si le contenu change, droits et fins de ligne du fichier
-  conservés ; bloc absent (profil offline) → rien n'est créé ; bloc en
-  commentaire ignoré, plusieurs blocs → `error`.
+  conservés ; bloc absent (profil offline) → rien n'est créé.
 - **Installation partagée** (dossier non inscriptible) : résultat `unwritable`,
   journalisé ; `_native_feed_offers` ne voit pas la cible et la route dirigée
   prend le relais.

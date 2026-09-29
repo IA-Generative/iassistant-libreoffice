@@ -249,22 +249,6 @@ def test_feed_rewrite_is_registered_as_technical_telemetry():
 
 # ── Corrections de la revue qualité ──────────────────────────────────────
 
-def test_a_commented_block_is_never_rewritten_instead_of_the_real_one():
-    text = DESCRIPTION.replace(
-        "<identifier", "<!-- <update-information><src xlink:href=\"https://old\"/></update-information> -->\n  <identifier")
-    out = feed_rewrite.rewrite_feed_version(text, "1.0")
-    assert "https://old\"" in out, "le commentaire reste intact"
-    assert _hrefs(out.split("-->", 1)[1])[0] == BASE_1 + "?version=1.0"
-
-
-def test_two_real_blocks_are_refused():
-    text = DESCRIPTION.replace("</description>", "<update-information><src xlink:href=\"https://x\"/></update-information></description>")
-    with pytest.raises(ValueError):
-        feed_rewrite.rewrite_feed_version(text, "1.0")
-    _folder, path = _write(text)
-    assert feed_rewrite.rewrite_description_file(path, "1.0")[0] == feed_rewrite.ERROR
-
-
 def test_file_mode_and_crlf_are_preserved():
     folder, path = _write(DESCRIPTION)
     with open(path, "w", encoding="utf-8", newline="") as fh:

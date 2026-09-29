@@ -29,7 +29,6 @@ UNWRITABLE = "unwritable"  # installation en couche partagée, droits insuffisan
 ERROR = "error"
 
 _BLOCK_RE = re.compile(r"<update-information\s*>.*?</update-information\s*>", re.S)
-_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HREF_RE = re.compile(r'(xlink:href\s*=\s*)(["\'])(.*?)\2', re.S)
 
 
@@ -50,25 +49,18 @@ def rewrite_feed_version(xml_text, version):
     Réécrit le texte plutôt que l'arbre : ElementTree renommerait les préfixes
     de namespace (ns0:) et le prologue, et le build relit <version value=…> par
     motif. Le résultat est validé comme XML bien formé. Hypothèse : le bloc est
-    celui qu'écrit scripts/inject_update_feed.py (un seul, sans préfixe) ; un
-    bloc en commentaire est ignoré, plusieurs blocs → ValueError.
+    celui qu'écrit scripts/inject_update_feed.py (un seul, sans préfixe).
     """
-    # Les commentaires sont masqués (mêmes positions) pour ne jamais réécrire un
-    # bloc commenté à la place du vrai.
-    masked = _COMMENT_RE.sub(lambda m: " " * len(m.group(0)), xml_text)
-    blocks = list(_BLOCK_RE.finditer(masked))
-    if not blocks:
+    match = _BLOCK_RE.search(xml_text)
+    if not match:
         return None
-    if len(blocks) > 1:
-        raise ValueError("plusieurs blocs <update-information>")
-    match = blocks[0]
 
     def _href(m):
         url = html.unescape(m.group(3))
         escaped = html.escape(with_version(url, version), quote=True)
         return f"{m.group(1)}{m.group(2)}{escaped}{m.group(2)}"
 
-    block = _HREF_RE.sub(_href, xml_text[match.start():match.end()])
+    block = _HREF_RE.sub(_href, match.group(0))
     new_text = xml_text[:match.start()] + block + xml_text[match.end():]
     ET.fromstring(new_text.encode("utf-8"))
     return new_text
