@@ -3375,10 +3375,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         cached_before = self._cached_package_versions()
         self._wait_before_prompting()
-        # Ré-inscrire la cible juste avant d'ouvrir le dialogue : LibreOffice relit
-        # description.xml à ce moment, et une autre écriture (démarrage, directive
-        # suivante) a pu passer pendant l'attente (device-management#40).
-        self._rewrite_feed_url(target_version)
         log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
         if not self._trigger_native_update_dialog():
             return False

@@ -321,25 +321,6 @@ def test_startup_rewrite_does_not_overwrite_a_directive_written_during_its_versi
     assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.32"
 
 
-def test_native_dialog_reasserts_the_target_just_before_opening(installed):
-    job = _job()
-    job._rewrite_feed_for_directive(None)               # quelqu'un a remis l'installée
-    seen = {}
-    job._native_attempts_for = MagicMock(return_value=0)
-    job._cached_package_versions = MagicMock(return_value=[])
-    job._wait_before_prompting = MagicMock()
-
-    def _trigger():
-        seen["href"] = _hrefs(_read(installed))[0]
-        return False
-    job._trigger_native_update_dialog = _trigger
-    job._save_update_state = MagicMock()
-    job._report_update_status = MagicMock()
-    job._perform_native_update({"action": "update", "target_version": "0.0.1.0.32",
-                                "campaign_id": 1})
-    assert seen["href"] == BASE_1 + "?version=0.0.1.0.32"
-
-
 def test_deferred_directive_keeps_the_installed_version():
     job = _job()
     assert job._feed_target_for({"action": "update", "target_version": "9", "urgency": "deferred"}) == "0.0.1.0.31"
