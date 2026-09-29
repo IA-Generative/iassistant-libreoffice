@@ -1,10 +1,8 @@
-"""Réécriture de l'adresse du feed natif (device-management#40).
+"""Réécriture de l'adresse du feed natif.
 
 Le DM ne sert sur l'adresse nue du feed que la « version générale ». Le plugin
 écrit `?version=<cible>` dans le description.xml de son installation, que
 LibreOffice relit à chaque vérification : chaque poste ne voit que sa cible.
-
-Run:  pytest tests/unit/test_feed_rewrite.py -v
 """
 import os
 import shutil
@@ -59,8 +57,6 @@ def _purge_tmpdirs():
 def _hrefs(text):
     return [src.get(XLINK_HREF) for src in ET.fromstring(text.encode()).iter(SRC_TAG)]
 
-
-# ── Module pur ───────────────────────────────────────────────────────────
 
 def test_every_src_gets_the_version_in_order():
     out = feed_rewrite.rewrite_feed_version(DESCRIPTION, "0.0.1.0.32")
@@ -147,8 +143,6 @@ def test_missing_file_is_an_error():
     assert feed_rewrite.rewrite_description_file("/nonexistent/description.xml", "1")[0] == \
         feed_rewrite.ERROR
 
-
-# ── Branchement dans le plugin ───────────────────────────────────────────
 
 @pytest.fixture
 def installed(monkeypatch):
@@ -258,8 +252,6 @@ def test_feed_rewrite_is_registered_as_technical_telemetry():
     assert MainJob._ACTION_NAMES["FeedRewrite"] == "update"
     assert "FeedRewrite" in MainJob._TECHNICAL_EVENTS
 
-
-# ── Corrections de la revue qualité ──────────────────────────────────────
 
 def test_file_mode_and_crlf_are_preserved():
     folder, path = _write(DESCRIPTION)

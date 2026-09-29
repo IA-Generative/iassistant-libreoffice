@@ -3,8 +3,8 @@
 LibreOffice relit le description.xml de l'extension installée à CHAQUE
 vérification de mises à jour (desktop/source/deployment : getUpdateInformationURLs
 → getDescriptionInfoset → lecture de <dossier>/description.xml). Le DM ne sert
-sur l'adresse nue que la « version générale » (device-management#40) ; en y
-ajoutant `?version=<cible>`, le plugin obtient un feed qui ne confirme que SA
+sur l'adresse nue que la « version générale » ; en y ajoutant
+`?version=<cible>`, le plugin obtient un feed qui ne confirme que SA
 cible (directive de /config) ou sa version installée. Chaque poste ne voit
 ainsi que ce qui lui est destiné : ni le bouton « Vérifier les mises à jour »
 ni la vérification hebdomadaire de LibreOffice ne diffusent une version en
@@ -21,7 +21,6 @@ import tempfile
 import urllib.parse
 import xml.etree.ElementTree as ET
 
-# Résultats rendus à l'appelant (journal, télémétrie).
 WRITTEN = "written"
 UNCHANGED = "unchanged"
 ABSENT = "absent"          # pas de bloc <update-information> (profil offline)

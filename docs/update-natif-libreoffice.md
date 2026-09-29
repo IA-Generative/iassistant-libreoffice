@@ -89,10 +89,11 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
   (anonymement). Plusieurs `<src>` possibles (miroirs, essayés dans l'ordre).
 - Optionnel : `<release-notes><src xlink:href="…" lang="fr"/></release-notes>`.
 
-## Réécriture de l'adresse du feed (device-management#40)
+## Réécriture de l'adresse du feed
 
-Le DM ne sert plus, sur l'adresse nue du feed, que la **version générale** du
-plugin (celle destinée à tout le parc) ; publier une version ne la diffuse plus.
+Sur l'adresse nue du feed, le DM sert la **version générale** du plugin (celle
+destinée à tout le parc) ; `?version=X` ne confirme que X (404 si le DM ne peut
+pas la servir).
 Pour que la route native suive la cohorte, le plugin réécrit l'adresse dans le
 `description.xml` de **son installation** (`src/mirai/feed_rewrite.py`) :
 
@@ -127,7 +128,7 @@ un canary au reste du parc.
 
 ## Vérification sur poste (checklist qualif)
 
-0. **Réécriture de l'adresse (#40)**, à faire en premier :
+0. **Réécriture de l'adresse**, à faire en premier :
    - après démarrage, ouvrir le `description.xml` installé
      (`<profil>/user/uno_packages/cache/uno_packages/<lu…>/<…>.oxt/`) : chaque
      `<src>` finit par `?version=<version installée>` ;

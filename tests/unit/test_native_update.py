@@ -386,7 +386,7 @@ def test_check_native_feed_reports_announced_version():
     assert job._check_native_feed() == "0.0.1.0.32"
 
     args = provider.getUpdateInformation.call_args.args
-    # Adresse nue tant qu'aucune réécriture n'a réussi (device-management#40).
+    # Adresse nue tant qu'aucune réécriture n'a réussi.
     assert args[0] == ("https://dm.example/catalog/mirai-libreoffice/update.xml",)
     assert args[1] == "fr.gouv.interieur.mirai"
     attrs = job._send_telemetry.call_args.args[1]

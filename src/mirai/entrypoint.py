@@ -675,9 +675,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # Diagnostic passif du feed natif : une seule fois par process
     # (voir _schedule_native_feed_check / _check_native_feed).
     _feed_check_started_cls = False
-    # Réécriture de l'adresse du feed dans description.xml (device-management#40) :
-    # planifiée une fois par process au démarrage ; verrou partagé avec les
-    # réécritures déclenchées par /config.
+    # Réécriture de l'adresse du feed dans description.xml : planifiée une fois
+    # par process au démarrage ; verrou partagé avec les réécritures déclenchées
+    # par /config.
     _feed_rewrite_started_cls = False
     _feed_rewrite_lock_cls = threading.Lock()
     _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
@@ -3465,11 +3465,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         version = str(MainJob._feed_rewrite_last_cls or "").strip()
         return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
 
-    # ── Réécriture de l'adresse du feed natif (device-management#40) ──
-    # Le DM ne sert sur l'adresse nue que la « version générale ». Le plugin écrit
-    # dans le description.xml de SON installation `?version=<cible>` (directive
-    # update) ou `?version=<installée>` (sinon) : LibreOffice relit ce fichier à
-    # chaque vérification, et chaque poste ne voit que sa propre cible.
+    # Réécriture de l'adresse du feed natif : le DM ne sert sur l'adresse nue que
+    # la « version générale ». Le plugin écrit dans le description.xml de SON
+    # installation `?version=<cible>` (directive update) ou `?version=<installée>`
+    # (sinon) : LibreOffice relit ce fichier à chaque vérification, et chaque
+    # poste ne voit que sa propre cible.
 
     def _package_root_dir(self):
         """Racine du paquet installé (dossier contenant description.xml), ou None."""
