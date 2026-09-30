@@ -159,12 +159,13 @@ Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe
 
 1. Le plugin appelle `/config/{slug}/config.json` au démarrage et à chaque action
 2. Le DM compare la version du plugin avec la campagne active
-3. Si une mise à jour est disponible, le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé en ordre *last-good d'abord*, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
-4. Vérifie le checksum SHA-256
-5. **Installe la mise à jour**, avec repli en cascade :
-   1. **In-process** — `ExtensionManager.get(ctx)` (le **singleton** ; `createInstance` et `getValueByName` renvoient `None`) → `addExtension`, puis redémarrage natif (`OfficeRestartManager`). **Aucun processus enfant** → immunisé à la GPO « block Office child process » des postes durcis qui bloque `cmd.exe` (`[WinError 5]`). Chemin principal, garde le pilotage DM (cohortes / canary). _(#4, #15)_
-   2. Sinon, **script d'install** (`unopkg remove` → `unopkg add` via `.bat`, log `~/log.txt` préfixe `[UPDATE]`) — bloqué sur postes durcis.
-   3. Sinon, **boîte « mise à jour bloquée »** : mode opératoire manuel (Gestionnaire d'extensions) + bouton **« Ouvrir le dossier »** qui ouvre l'explorateur sur le fichier téléchargé en **natif** (`SystemShellExecute`, **sans `cmd.exe`** — validé sur poste durci). _(#7, #12)_
+3. Si une mise à jour est disponible, le plugin choisit la route. **Native** si le feed `<update-information>` de l'extension installée annonce exactement la version cible : LibreOffice télécharge alors l'OXT lui-même, avec sa pile HTTP, rien ne transite par le plugin. Sinon **dirigée** : le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé en ordre *last-good d'abord*, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
+4. Route dirigée : vérifie le checksum SHA-256. Route native : pas de hash, la confiance repose sur TLS vers le DM
+5. **Installe la mise à jour**, avec repli en cascade — un seul primitif, `addExtension` sur le thread principal :
+   1. **Route native pilotée** — si le feed `<update-information>` de l'extension installée annonce exactement la version cible, le plugin ouvre le dialogue natif « Mise à jour des extensions » (`PackageManagerDialog`, `SHOW_UPDATE_DIALOG`) : LibreOffice télécharge et installe lui-même, avec sa pile HTTP ; le plugin ferme ensuite LibreOffice proprement, en réessayant tant que la fenêtre de mise à jour est ouverte ; s'il doit y renoncer, la nouvelle version s'active au prochain démarrage. _(#5, #9)_
+   2. **Route dirigée** — sinon (amorçage, rollback, feed injoignable ou divergent) : téléchargement avec failover multi-bootstrap, sha256, `addExtension` in-process, fermeture propre. **Aucun processus enfant.** _(#4, #15, #16)_
+   3. Sinon, **boîte « mise à jour bloquée »** : mode opératoire manuel + bouton **« Ouvrir le dossier »** (natif, `SystemShellExecute`). _(#7, #12)_
+   Un refus n'est pas reproposé avant 24 h.
 6. Report du statut au DM via `/update/status` (relay-headers requis)
 
 **Protection anti-boucle** : `target_version` comparée à la version courante (directives identiques ignorées) ; un target dont l'install a été bloquée n'est plus reproposé.
@@ -173,7 +174,7 @@ Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe
 - `MIRAI_SELFTEST_UPDATE_BLOCKED=1` force la boîte « mise à jour bloquée » via *À propos ▸ Vérifier les mises à jour*, sans déployer de MAJ _(#7)_.
 - Le dialogue *À propos* expose aussi un bouton **« Ouvrir dossier »** (même ouverture native que ci-dessus) pour tester localement, Mac inclus.
 
-> **Suivi du mécanisme de MAJ** : issue-parapluie **#9** · install in-process **#4** (singleton `.get` **#15**) · download failover **#16** · bouton « Ouvrir le dossier » **#7**/**#12** · option native `<update-information>` **#5** (flux format LibreOffice côté DM : IA-Generative/device-management#23) · cache binaire DM : IA-Generative/device-management#24.
+> **Suivi du mécanisme de MAJ** : issue-parapluie **#9** · install in-process **#4** (singleton `.get` **#15**) · download failover **#16** · bouton « Ouvrir le dossier » **#7**/**#12** · option native `<update-information>` **#5** (flux format LibreOffice côté DM : IA-Generative/device-management#4) · cache binaire DM : IA-Generative/device-management#24.
 
 ### Suivi et contrôle
 

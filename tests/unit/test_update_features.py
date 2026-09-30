@@ -217,7 +217,9 @@ def test_lo08_update_not_retriggered_if_in_progress():
 # ── TC-LO-09 : _perform_update checksum OK → install ────────────────
 
 def test_lo09_perform_update_checksum_ok_stages():
-    """checksum OK → l'artefact est stagé (statut 'installed' rapporté). L'install
+    """checksum OK → l'artefact est stagé (statut 'deferred' rapporté — le
+    rapport « installed » n'arrive qu'à la réconciliation post-redémarrage,
+    quand la nouvelle version est réellement active). L'install
     réelle est différée au restart-accept — PAS exécutée au staging (sinon on
     double-installerait et clobbererait l'instance en cours)."""
     job = make_job()
@@ -242,7 +244,8 @@ def test_lo09_perform_update_checksum_ok_stages():
         job._perform_update(directive)
 
     statuses = [c.args[1] for c in job._report_update_status.call_args_list if len(c.args) > 1]
-    assert "installed" in statuses                 # stagé
+    assert "deferred" in statuses                  # stagé, install à suivre
+    assert "installed" not in statuses             # véridique : pas encore actif
     job._install_oxt_inprocess.assert_not_called()  # pas d'install au staging
     assert MainJob._update_in_progress_cls is False
 
@@ -341,7 +344,7 @@ def test_lo11_perform_update_releases_flag_on_exception():
 def test_lo12_get_extension_version_returns_version():
     job = make_job()
     mock_pip = MagicMock()
-    mock_pip.getExtensionVersion.return_value = "1.9.0"
+    mock_pip.getExtensionList.return_value = (("fr.gouv.interieur.mirai", "1.9.0"),)
     job.ctx.getServiceManager.return_value.createInstanceWithContext.return_value = mock_pip
 
     version = job._get_extension_version()

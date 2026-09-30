@@ -8,19 +8,120 @@ import urllib.error
 import ssl
 
 # Pre-bind the ExtensionManager singleton on the MAIN thread (module load =
-# extension registration). pyuno's `from com.sun.star… import …` hook is NOT
-# available on background threads ("No module named 'com'"), so the update worker
-# thread cannot import it itself — it reuses this reference. See
-# _install_oxt_inprocess (which prefers the import-free PackageManagerFactory and
-# uses this only as a fallback).
+# extension registration). The singleton is `ExtensionManager`
+# (com.sun.star.deployment.ExtensionManager) — there is no `theExtensionManager`.
+# pyuno's `from com.sun.star… import …` hook is NOT available on background
+# threads ("No module named 'com'"), so the update worker thread cannot import
+# it itself — it reuses this reference. See _install_oxt_inprocess (which
+# prefers the import-free PackageManagerFactory and uses this only as a
+# fallback).
 try:
-    from com.sun.star.deployment import theExtensionManager as _EXT_MGR_SINGLETON
+    from com.sun.star.deployment import ExtensionManager as _EXT_MGR_SINGLETON
 except Exception:
     _EXT_MGR_SINGLETON = None
 
 # Extension identifier (matches oxt/description.xml <identifier>). Used to remove a
 # prior registration before re-installing in-process (avoids duplicate components).
 _EXTENSION_IDENTIFIER = "fr.gouv.interieur.mirai"
+
+# Feed natif LibreOffice (<update-information>) servi par le DM. Le chemin doit
+# rester aligné avec scripts/inject_update_feed.py (FEED_PATH), qui le bake dans
+# description.xml.
+_UPDATE_FEED_PATH = "/catalog/mirai-libreoffice/update.xml"
+_UPDATE_FEED_NS = "http://openoffice.org/extensions/update/2006"
+
+# Route native pilotée : refus mémorisé, attente de l'installation par
+# LibreOffice, bornes du déclenchement.
+_UPDATE_POSTPONE_SECONDS = 24 * 3600
+_NATIVE_INSTALL_WAIT_SECONDS = 900
+_NATIVE_POLL_SECONDS = 5
+_NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
+_NATIVE_MAX_ATTEMPTS = 2
+_CLOSE_RETRY_SECONDS = 120
+_CLOSE_RETRY_INTERVAL_SECONDS = 3
+_CLOSE_ATTEMPT_TIMEOUT_SECONDS = 10
+_SLOW_PROBE_LOG_MS = 1000
+# Niveaux remontés depuis src/mirai/ pour trouver description.xml (racine du paquet)
+_PACKAGE_ROOT_SEARCH_LEVELS = 4
+_PROMPT_WIZARD_WAIT_SECONDS = 120
+_PROMPT_GRACE_SECONDS = 30
+_PROMPT_POLL_SECONDS = 1
+_MAIN_THREAD_TIMEOUT_AFTER_START = "timeout after start"
+_MAIN_THREAD_VETOED = "vetoed"
+# Erreurs de PLANIFICATION de _run_on_main_thread (le thread principal n'a pas
+# pris le callback), par opposition à une exception remontée par l'action.
+_MAIN_THREAD_CALLBACK_UNAVAILABLE = "main-thread callback unavailable"
+_MAIN_THREAD_ASYNC_UNAVAILABLE = "AsyncCallback unavailable"
+_MAIN_THREAD_SCHEDULE_FAILED = "schedule failed: "
+_CLOSE_USER_REFUSAL_SECONDS = 1.0
+
+# Interfaces UNO pré-bindées au chargement du module (= thread principal), pour le
+# même motif que _EXT_MGR_SINGLETON : le worker d'update ne peut pas faire de
+# `from com.sun.star… import …` lui-même ("No module named 'com'"). Elles servent
+# au marshaling vers le main thread (AsyncCallback) et au XCommandEnvironment
+# silencieux de l'installation in-process.
+try:
+    from com.sun.star.awt import XCallback as _XCALLBACK_IFACE
+except Exception:
+    _XCALLBACK_IFACE = None
+try:
+    from com.sun.star.ucb import XCommandEnvironment as _XCMDENV_IFACE
+    from com.sun.star.task import XInteractionHandler as _XINTERACTION_IFACE
+except Exception:
+    _XCMDENV_IFACE = None
+    _XINTERACTION_IFACE = None
+
+if _XCALLBACK_IFACE is not None:
+    class _MainThreadCallback(unohelper.Base, _XCALLBACK_IFACE):
+        """Exécute un callable sur le thread PRINCIPAL de LibreOffice, planifié via
+        com.sun.star.awt.AsyncCallback. Classe construite au chargement du module :
+        le worker d'update n'a qu'à l'instancier (aucun import UNO côté worker)."""
+
+        def __init__(self, fn):
+            self._fn = fn
+
+        def notify(self, _data):
+            try:
+                self._fn()
+            except Exception as exc:
+                log_to_file(f"_MainThreadCallback: callable raised: {exc}")
+else:
+    _MainThreadCallback = None
+
+if _XINTERACTION_IFACE is not None and _XCMDENV_IFACE is not None:
+    class _SilentInteractionHandler(unohelper.Base, _XINTERACTION_IFACE):
+        """Approuve les interactions de déploiement (VersionException lors du
+        remplacement d'une extension de même identifiant, licence déjà
+        supprimée, …) en sélectionnant une continuation « approve »."""
+
+        def handle(self, request):
+            try:
+                conts = request.getContinuations()
+            except Exception:
+                conts = ()
+            chosen = None
+            for cont in conts or ():
+                name = type(cont).__name__.lower()
+                if "approve" in name or "retry" in name or "resolved" in name:
+                    chosen = cont
+                    break
+            try:
+                (chosen or (conts[0] if conts else None)).select()
+            except Exception:
+                pass
+
+    class _SilentCommandEnv(unohelper.Base, _XCMDENV_IFACE):
+        def __init__(self, handler):
+            self._handler = handler
+
+        def getInteractionHandler(self):
+            return self._handler
+
+        def getProgressHandler(self):
+            return None
+else:
+    _SilentInteractionHandler = None
+    _SilentCommandEnv = None
 
 try:
     from com.sun.star.task import XJobExecutor, XJob
@@ -77,6 +178,7 @@ import hashlib
 import threading
 import socket
 from .formatting import insert_formatted
+from . import feed_rewrite
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .security_flow import (
@@ -567,6 +669,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # re-downloading / re-prompting the same update in a loop.
     _update_launch_blocked_cls = set()
     _update_lock_cls = threading.Lock()
+    # Réconciliation post-redémarrage de la MAJ précédente : une seule fois par
+    # process (voir _schedule_update_reconciliation / _reconcile_update_state).
+    _update_reconcile_started_cls = False
+    # Diagnostic passif du feed natif : une seule fois par process
+    # (voir _schedule_native_feed_check / _check_native_feed).
+    _feed_check_started_cls = False
+    # Réécriture de l'adresse du feed dans description.xml : planifiée une fois
+    # par process au démarrage ; verrou partagé avec les réécritures déclenchées
+    # par /config.
+    _feed_rewrite_started_cls = False
+    _feed_rewrite_lock_cls = threading.Lock()
+    _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
+    _feed_rewrite_last_result_cls = None    # (résultat, version) du dernier appel
     _context_menu_refs_cls = []
     _context_menu_controller_ids_cls = set()
     _context_menu_schedule_started_cls = False
@@ -666,6 +781,29 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._ensure_device_management_state_async()
         except Exception as e:
             log_to_file(f"Failed to initialize device management: {str(e)}")
+
+        # Clôt la mise à jour du cycle précédent (rapport « installed » véridique
+        # au DM une fois la nouvelle version active, purge de pending_update).
+        try:
+            self._schedule_update_reconciliation()
+        except Exception as e:
+            log_to_file(f"Failed to schedule update reconciliation: {str(e)}")
+
+        # Diagnostic passif du feed natif : valide proxy/TLS/GPO de la pile HTTP
+        # de LibreOffice sur la flotte et détecte un feed DM absent avant
+        # d'appuyer le déploiement large dessus.
+        try:
+            self._schedule_native_feed_check()
+        except Exception as e:
+            log_to_file(f"Failed to schedule native feed check: {str(e)}")
+
+        # Adresse du feed natif = ?version=<version installée> tant qu'aucune
+        # directive ne dit autre chose : un nouvel OXT arrive avec l'adresse nue
+        # du build (version générale), à reprendre avant toute vérification.
+        try:
+            self._schedule_feed_rewrite()
+        except Exception as e:
+            log_to_file(f"Failed to schedule feed rewrite: {str(e)}")
 
         # Proxy consistency check removed — proxy is configured via
         # bootstrap or the Settings dialog, no startup prompt needed.
@@ -910,6 +1048,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     _ACTION_NAMES = {
         "ExtensionLoaded": "launch",
         "ExtensionUpdated": "update",
+        # Étapes du flux de MAJ : mesurent le taux de succès PAR ÉTAPE sur la
+        # flotte (staged → accepted → installed confirmé).
+        "UpdateStaged": "update",
+        "UpdateAccepted": "update",
+        "UpdatePostponed": "update",
+        "UpdateInstalledPendingRestart": "update",
+        "UpdateInstallFailed": "update",
+        "NativeFeedCheck": "update",
+        "FeedRewrite": "update",
+        "UpdateNativeDialogShown": "update",
+        "UpdateCloseDeferred": "update",
         "ExtendSelection": "extend",
         "EditSelection": "edit",
         "ResizeSelection": "resize",
@@ -951,6 +1100,18 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "ProxyTest",
         "ConfigWaitAtTrigger",
         "ActionUnhandled",
+        # Flux de mise à jour : télémétrie technique de flotte,
+        # envoyée même avant la liaison utilisateur.
+        "UpdateStaged",
+        "UpdateAccepted",
+        "UpdatePostponed",
+        "UpdateInstalledPendingRestart",
+        "UpdateInstallFailed",
+        "UpdateNativeDialogShown",
+        "UpdateCloseDeferred",
+        "ExtensionUpdated",
+        "NativeFeedCheck",
+        "FeedRewrite",
     }
 
     def _send_telemetry(self, span_name, attributes=None):
@@ -1571,6 +1732,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                 self._features_cache = features
                                 log_to_file(f"Feature flags updated: {list(features.keys())}")
                             update_directive = config_data.get("update")
+                            # Feed natif : avant toute décision (y compris « déjà
+                            # à la cible » et les reports), l'adresse doit refléter
+                            # la cible de CE poste, sinon LibreOffice verrait la
+                            # version générale au prochain « Vérifier ».
+                            self._rewrite_feed_for_directive(update_directive)
                             if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
                                 target_ver = str(update_directive.get("target_version", "")).strip()
                                 current_ver = str(self._get_extension_version() or "").strip()
@@ -1724,17 +1890,30 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # ── Update & Feature Toggling (schema_version 2) ─────────────────
 
     def _get_extension_version(self):
-        """Return the installed version from description.xml in the .oxt package."""
+        """Version installée de l'extension, lue dans le REGISTRE des extensions
+        (PackageInformationProvider.getExtensionList : une paire [identifiant,
+        version] par extension ; on prend la première paire de notre
+        identifiant) — pas dans le description.xml du paquet courant : après
+        une mise à jour native, notre propre description.xml décrit encore
+        l'ancien paquet (LibreOffice le garde chargé jusqu'au redémarrage) :
+        lire le registre, jamais son propre dossier. Repli sur description.xml
+        (tests, LibreOffice dégradé)."""
         try:
             pip = self.ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.deployment.PackageInformationProvider", self.ctx
             )
             if pip:
-                version = pip.getExtensionVersion("fr.gouv.interieur.mirai")
-                if version:
-                    return str(version).strip()
-        except Exception:
-            pass
+                for pair in pip.getExtensionList() or ():
+                    try:
+                        ident, version = str(pair[0]), str(pair[1])
+                    except Exception:
+                        continue
+                    if ident == _EXTENSION_IDENTIFIER and version.strip():
+                        return version.strip()
+        except Exception as exc:
+            if not getattr(self, "_registry_read_failure_logged", False):
+                log_to_file(f"_get_extension_version: registry read failed: {exc}")
+                self._registry_read_failure_logged = True
         # Fallback: parse description.xml from the package directory
         try:
             pkg_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1778,12 +1957,28 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         urgency = directive.get("urgency", "normal")
 
         target_version = str(directive.get("target_version") or "").strip()
+
         if target_version and target_version in MainJob._update_launch_blocked_cls:
             log_to_file(
                 f"Update skipped: install of {target_version} was blocked by the "
                 "workstation policy earlier — manual install required, not re-prompting"
             )
             return
+
+        # Refus ou report mémorisé (route native ou dirigée) : ne pas reproposer
+        # ni retélécharger à chaque rafraîchissement de config avant l'échéance.
+        state = self._load_update_state()
+        if target_version and str(state.get("target_version", "")).strip() == target_version:
+            try:
+                until = float(state.get("postponed_until") or 0)
+            except (TypeError, ValueError):
+                until = 0.0
+            if until > time.time():
+                log_to_file(
+                    f"Update skipped: {target_version} postponed until "
+                    f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(until))}"
+                )
+                return
 
         with MainJob._update_lock_cls:
             if MainJob._update_in_progress_cls:
@@ -1799,6 +1994,25 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
+                # Réconcilier d'abord la mise à jour précédente (la directive
+                # suivante peut arriver avant le timer de réconciliation et
+                # écraserait l'état persistant). Hors du chemin de fetch config,
+                # sous le verrou « en cours » : ni blocage, ni doublon.
+                if self._load_update_state():
+                    try:
+                        self._reconcile_update_state(at_startup=False)
+                    except Exception as exc:
+                        log_to_file(f"_schedule_update: reconciliation failed: {exc}")
+                    previous = self._load_update_state()
+                    if previous.get("stage") in ("installed_native", "installed_inprocess"):
+                        # Une installation attend déjà un redémarrage : en session,
+                        # écraser son état perdrait définitivement son rapport
+                        # « installed » au DM.
+                        log_to_file(
+                            f"Update skipped: mise à jour {previous.get('target_version')} installée, "
+                            f"en attente de redémarrage : directive {target_version} ignorée "
+                            "jusqu'au redémarrage")
+                        return
                 self._perform_update(directive)
             finally:
                 with MainJob._update_lock_cls:
@@ -1841,6 +2055,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         tmp_path = None
         try:
+            # Route native d'abord : jamais pour une directive
+            # différée (elle ne dérange pas l'utilisateur) ni un rollback (LO ne
+            # propose que des versions plus récentes) ; bornée en tentatives.
+            if action == "update" and urgency != "deferred":
+                attempts = self._native_attempts_for(target_version)
+                if attempts < _NATIVE_MAX_ATTEMPTS and self._native_feed_offers(target_version):
+                    if self._perform_native_update(directive):
+                        return
+                    log_to_file("_perform_update: native route unavailable, falling back to directed route")
+
             # Download with failover across bootstrap DMs (2 passes), per-URL TLS.
             binary = None
             full_url = candidate_urls[0]
@@ -1887,15 +2111,40 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self._report_update_status(campaign_id, "deferred", version_before, "", "")
                 return
 
-            # Stage the artifact only: copy it to a stable path and prepare the
-            # fallback install script. The real install happens ONCE, in-process,
-            # when the user accepts the restart (see _install_and_restart_in_process).
-            # Installing here (from the update worker thread) AND at restart would
-            # double-install and can clobber the running instance.
-            installed = False
-            if not installed:
+            # Stage the artifact only: copy it to a stable path. The real install
+            # happens ONCE, in-process on the MAIN thread, when the user accepts
+            # the restart (see _install_and_restart_in_process). Installing here
+            # (from the update worker thread) AND at restart would double-install
+            # and can clobber the running instance.
+            try:
+                stable_dir = os.path.join(self._get_user_config_dir(), "pending_update")
+                os.makedirs(stable_dir, exist_ok=True)
+            except Exception:
+                stable_dir = os.path.dirname(tmp_path)
+            stable_oxt = os.path.join(stable_dir, "mirai_update.oxt")
+            import shutil
+            shutil.copy2(tmp_path, stable_oxt)
+            self._pending_install_oxt = stable_oxt
+            self._pending_install_script = ""
+            log_to_file(f"_perform_update: OXT copied to {stable_oxt}")
+            # Persiste l'état de campagne : la réconciliation au prochain
+            # démarrage rapporte l'issue RÉELLE au DM (_reconcile_update_state).
+            self._save_update_state(directive, "staged")
+            self._send_telemetry("UpdateStaged", {
+                "route": "directed",
+                "version_after": target_version,
+                "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                "urgency": urgency,
+            })
+
+            # Script d'installation de secours (.bat/.sh) : spawne un processus
+            # enfant → refusé sur postes durcis (WinError 5, AppLocker / Defender
+            # ASR), et son cycle unopkg remove/add est un vecteur de corruption du
+            # registre. DÉSACTIVÉ par défaut ; réactivable explicitement
+            # via MIRAI_UPDATE_ALLOW_SCRIPT=1 (postes non durcis, diagnostic).
+            if os.environ.get("MIRAI_UPDATE_ALLOW_SCRIPT") == "1":
                 try:
-                    import subprocess, platform
+                    import platform
                     sys_name = platform.system()  # Darwin, Windows, Linux
 
                     # Find unopkg
@@ -1930,18 +2179,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     if not unopkg:
                         raise FileNotFoundError("unopkg not found")
                     log_to_file(f"_perform_update: unopkg={unopkg} platform={sys_name}")
-
-                    # Copy OXT to a stable location (tmp_path may be cleaned when LO exits)
-                    try:
-                        stable_dir = os.path.join(self._get_user_config_dir(), "pending_update")
-                        os.makedirs(stable_dir, exist_ok=True)
-                    except Exception:
-                        stable_dir = os.path.dirname(tmp_path)
-                    stable_oxt = os.path.join(stable_dir, "mirai_update.oxt")
-                    import shutil
-                    shutil.copy2(tmp_path, stable_oxt)
-                    self._pending_install_oxt = stable_oxt
-                    log_to_file(f"_perform_update: OXT copied to {stable_oxt}")
 
                     # Stage the update: quit LO → wait → remove old → install new → relaunch
                     log_path = os.path.expanduser("~/log.txt")
@@ -2026,27 +2263,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                             sf.write(f'rm -f "{stable_oxt}" "{install_script}"\n')
                         os.chmod(install_script, 0o755)
                         self._pending_install_script = install_script
-                    installed = True
-                    log_to_file(f"_perform_update: install staged for version={target_version}")
+                    log_to_file("_perform_update: fallback install script staged (opt-in)")
                 except Exception as pkg_err:
-                    log_to_file(f"_perform_update: unopkg error: {pkg_err}")
-            if not installed:
-                self._report_update_status(campaign_id, "failed", version_before, "", "install failed")
-                return
+                    log_to_file(f"_perform_update: script staging failed (non-fatal): {pkg_err}")
 
-            # Report success
-            self._report_update_status(campaign_id, "installed", version_before, target_version)
+            log_to_file(f"_perform_update: install staged for version={target_version}")
+            # « deferred » = artefact prêt, installation à suivre (acceptation
+            # utilisateur + redémarrage). « installed » n'est rapporté qu'une fois
+            # la nouvelle version réellement active (_reconcile_update_state au
+            # démarrage suivant) : rapporter « installed » dès le staging
+            # compterait comme réussies des installations jamais abouties.
+            self._report_update_status(campaign_id, "deferred", version_before, target_version)
 
-            # Wait for enrollment wizard to finish and let user settle in
-            _wait_start = time.time()
-            _max_wait = 120  # max 2 min
-            while time.time() - _wait_start < _max_wait:
-                with MainJob._enrollment_wizard_lock_cls:
-                    if not MainJob._enrollment_wizard_active_cls:
-                        break
-                time.sleep(1)
-            # Extra grace period so the user isn't interrupted immediately
-            time.sleep(30)
+            self._wait_before_prompting()
             log_to_file("_perform_update: showing update dialog to user")
 
             # Ask user BEFORE launching the install script
@@ -2092,17 +2321,46 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             if user_wants_restart:
                 log_to_file("_perform_update: user accepted restart")
-                # Prefer the in-process deployment API + native restart. It works
-                # on locked-down postes where spawning the install script is denied
-                # (WinError 5 — AppLocker / Defender ASR). Fall back to the install
-                # script, then to the manual-install message.
-                if self._install_and_restart_in_process(getattr(self, "_pending_install_oxt", "")):
-                    log_to_file("_perform_update: installed in-process, restarting natively")
+                self._save_update_state(directive, "user_accepted", route="directed")
+                self._send_telemetry("UpdateAccepted", {
+                    "version_after": target_version,
+                    "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                    "urgency": urgency,
+                    "route": "directed",
+                })
+                # In-process (ExtensionManager sur le main thread) : la seule voie
+                # automatique par défaut — aucun processus enfant (WinError 5-immune).
+                if self._install_and_restart_in_process(
+                        getattr(self, "_pending_install_oxt", ""), target_version, campaign_id):
+                    log_to_file("_perform_update: installed in-process, closing for restart")
+                    self._save_update_state(directive, "installed_inprocess")
+                    # « installed » (rapport DM) n'arrive qu'à la réconciliation,
+                    # quand la nouvelle version est réellement active.
+                    self._send_telemetry("UpdateInstalledPendingRestart", {
+                        "version_after": target_version,
+                        "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                        "route": "directed",
+                    })
                     return
-                log_to_file("_perform_update: in-process install unavailable, using install script")
-                try:
-                    install_script = self._pending_install_script
-                    if install_script and os.path.isfile(install_script):
+                # addExtension n'a pas rendu la main dans le budget du thread
+                # principal : l'installation est peut-être en train d'aboutir.
+                # Ni échec rapporté, ni cible bannie, ni message manuel (qui
+                # inviterait à une seconde installation concurrente) — la
+                # réconciliation au prochain démarrage tranche.
+                if getattr(self, "_main_thread_install_in_flight", False):
+                    log_to_file(
+                        "_perform_update: installation encore en cours sur le thread principal, "
+                        "issue tranchée à la réconciliation")
+                    self._save_update_state(directive, "installed_inprocess", route="directed")
+                    return
+                # Script de secours : uniquement si explicitement réactivé
+                # (MIRAI_UPDATE_ALLOW_SCRIPT=1). Sinon, dégradation directe vers
+                # le message manuel validé GPO (bouton « Ouvrir le dossier »).
+                install_script = getattr(self, "_pending_install_script", "")
+                if install_script and os.path.isfile(install_script):
+                    log_to_file("_perform_update: in-process install failed, using opt-in install script")
+                    try:
+                        import subprocess
                         import platform as _pf
                         if _pf.system() == "Windows":
                             try:
@@ -2114,34 +2372,39 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         # terminate() must run on the main thread to avoid
                         # macOS autolayout crashes — schedule it via UNO timer
                         self._terminate_on_main_thread()
-                    else:
-                        log_to_file("_perform_update: install script not found, skipping")
-                except Exception as launch_err:
-                    log_to_file(f"_perform_update: failed to launch install script: {launch_err}")
-                    # A locked-down workstation policy (AppLocker / Defender ASR
-                    # "block child process") can deny spawning the install script
-                    # (WinError 5 — Access Denied). Record the target so we stop
-                    # re-downloading / re-prompting in a loop, and tell the user
-                    # once how to finish the update.
-                    if target_version:
-                        MainJob._update_launch_blocked_cls.add(target_version)
-                    try:
-                        self._report_update_status(
-                            campaign_id, "failed", version_before, target_version,
-                            f"install launch blocked: {launch_err}"
-                        )
-                    except Exception:
-                        pass
-                    self._notify_update_blocked(target_version, getattr(self, "_pending_install_script", ""))
+                        return
+                    except Exception as launch_err:
+                        # WinError 5 (AppLocker / Defender ASR "block child
+                        # process") atterrit ici — on continue vers le manuel.
+                        log_to_file(f"_perform_update: failed to launch install script: {launch_err}")
+                # L'install auto n'a pas abouti : anti-boucle (ne pas re-prompter
+                # ce target), rapport DM, puis message manuel (voie validée).
+                if target_version:
+                    MainJob._update_launch_blocked_cls.add(target_version)
+                try:
+                    self._report_update_status(
+                        campaign_id, "failed", version_before, target_version,
+                        "in-process install failed; manual fallback offered"
+                    )
+                except Exception:
+                    pass
+                self._send_telemetry("UpdateInstallFailed", {
+                    "version_after": target_version,
+                    "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                    "fallback": "manual",
+                    "route": "directed",
+                })
+                self._notify_update_blocked(target_version, install_script)
             else:
                 log_to_file("_perform_update: user postponed restart")
-
-            # Send telemetry
-            self._send_telemetry("ExtensionUpdated", {
-                "version_after": target_version,
-                "campaign_id": str(campaign_id) if campaign_id is not None else "",
-                "urgency": urgency,
-            })
+                self._save_update_state(directive, "postponed", route="directed",
+                                        postponed_until=time.time() + _UPDATE_POSTPONE_SECONDS)
+                self._send_telemetry("UpdatePostponed", {
+                    "version_after": target_version,
+                    "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                    "urgency": urgency,
+                    "route": "directed",
+                })
 
         except Exception as e:
             log_to_file(f"_perform_update: error: {e}")
@@ -2311,8 +2574,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
           1. **thePackageManagerFactory** obtained via `ctx.getValueByName` — a plain
              UNO method call, **no import** → works off the main thread. Its
-             `getPackageManager("user").addPackage(...)` deploys the OXT. (The probe
-             showed this singleton resolves where `theExtensionManager` does not.)
+             `getPackageManager("user").addPackage(...)` deploys the OXT. Repli de
+             dernier recours seulement : la voie normale est l'installation sur le
+             thread principal (_run_install_on_main_thread).
           2. The **ExtensionManager singleton pre-bound on the MAIN thread** at module
              load (`_EXT_MGR_SINGLETON`) → `addExtension`, as a fallback.
 
@@ -2349,72 +2613,153 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             try:
                 mgr = _EXT_MGR_SINGLETON.get(self.ctx)
             except Exception as exc:
-                log_to_file(f"_install_oxt_inprocess: theExtensionManager.get failed: {exc}")
+                log_to_file(f"_install_oxt_inprocess: ExtensionManager.get failed: {exc}")
             if mgr is not None:
-                try:
-                    mgr.removeExtension(_EXTENSION_IDENTIFIER, "", "user", abort, cmd_env)
-                    log_to_file("_install_oxt_inprocess: removed prior extension before add")
-                except Exception as rm_exc:
-                    log_to_file(f"_install_oxt_inprocess: removeExtension (ignored): {rm_exc}")
+                # Pas de remove-avant-add : addExtension remplace atomiquement une
+                # extension de même identifiant (VersionException approuvée par le
+                # handler silencieux), comme sur le chemin main-thread.
                 mgr.addExtension(oxt_url, props, "user", abort, cmd_env)
                 log_to_file("_install_oxt_inprocess: installed via ExtensionManager singleton")
                 return True
         log_to_file("_install_oxt_inprocess: no in-process deployment API available")
         return False
 
-    def _install_and_restart_in_process(self, oxt_path):
-        """Install the update via LibreOffice's own deployment API and restart via
-        the native OfficeRestartManager — all inside the soffice process.
+    def _make_silent_command_env(self):
+        """XCommandEnvironment silencieux pour l'API de déploiement (approuve la
+        VersionException du remplacement même-identifiant, licence déjà
+        supprimée). Classes pré-bindées au chargement du module — utilisable
+        depuis le worker d'update sans import UNO."""
+        if _SilentCommandEnv is not None and _SilentInteractionHandler is not None:
+            return _SilentCommandEnv(_SilentInteractionHandler())
+        return None
+
+    def _run_on_main_thread(self, action, timeout, label):
+        """Exécute `action()` sur le thread PRINCIPAL de LibreOffice, planifié via
+        com.sun.star.awt.AsyncCallback + _MainThreadCallback, et attend au plus
+        `timeout` s. Renvoie (ok, err). Après un timeout : si le callback n'a pas
+        démarré il devient no-op (garde `cancelled`) ; s'il a démarré, `action()`
+        tourne peut-être encore sur le thread principal et l'appelant ne doit pas
+        lancer un second flux (err == _MAIN_THREAD_TIMEOUT_AFTER_START).
+        La durée de l'action elle-même est exposée dans `_last_main_thread_action_s`
+        (0.0 si elle n'a pas tourné)."""
+        if _MainThreadCallback is None:
+            self._last_main_thread_action_s = 0.0
+            return False, _MAIN_THREAD_CALLBACK_UNAVAILABLE
+        holder = {"ok": False, "err": "", "cancelled": False, "started": False, "action_s": 0.0}
+        done = threading.Event()
+        # Verrou partagé : sans lui, le callback peut lire cancelled à faux, être
+        # préempté avant de poser started, et le worker conclure « jamais démarré »
+        # juste avant que l'action s'exécute — deux flux d'installation concurrents.
+        guard = threading.Lock()
+
+        def _run():
+            with guard:
+                if holder["cancelled"]:
+                    return
+                holder["started"] = True
+            action_start = None
+            try:
+                action_start = time.time()
+                action()
+                holder["ok"] = True
+            except Exception as exc:
+                holder["err"] = str(exc)
+            finally:
+                if action_start is not None:
+                    holder["action_s"] = time.time() - action_start
+                done.set()
+
+        try:
+            async_cb = self.ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.awt.AsyncCallback", self.ctx)
+            if async_cb is None:
+                self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
+                return False, _MAIN_THREAD_ASYNC_UNAVAILABLE
+            async_cb.addCallback(_MainThreadCallback(_run), None)
+        except Exception as exc:
+            log_to_file(f"{label}: schedule failed: {exc}")
+            self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
+            return False, _MAIN_THREAD_SCHEDULE_FAILED + str(exc)
+        if not done.wait(timeout):
+            with guard:
+                holder["cancelled"] = True
+                started = holder["started"]
+            if started:
+                log_to_file(f"{label}: timeout, action still running on main thread")
+                self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
+                return False, _MAIN_THREAD_TIMEOUT_AFTER_START
+            log_to_file(f"{label}: timeout waiting for main thread")
+            self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
+            return False, "timeout"
+        self._last_main_thread_action_s = float(holder.get("action_s") or 0.0)
+        return holder["ok"], holder["err"]
+
+    def _run_install_on_main_thread(self, oxt_url, props, cmd_env, timeout=90):
+        """Installe l'OXT via ExtensionManager.addExtension sur le thread PRINCIPAL.
+
+        C'est l'appel exact que le Gestionnaire des extensions (et l'updater natif
+        de LibreOffice) exécute pour une installation manuelle — la voie validée
+        sur le terrain comme fiable. Le main thread garde la base d'extensions et
+        registrymodifications.xcu cohérents ; les cycles removePackage/addPackage
+        répétés depuis le thread worker corrompent le registre. Pas de
+        remove-avant-add : addExtension remplace atomiquement une extension de
+        même identifiant (VersionException approuvée par le handler silencieux).
+        Aucun processus enfant (immunisé WinError 5).
+
+        Retourne True sur succès confirmé ; False sur échec ou timeout (l'appelant
+        dégrade). Après un timeout, le callback éventuel devient no-op (garde
+        `cancelled`) pour interdire une double installation concurrente.
+        """
+        ctx = self.ctx
+
+        def _install():
+            mgr = None
+            try:
+                mgr = ctx.getValueByName(
+                    "/singletons/com.sun.star.deployment.ExtensionManager")
+            except Exception as exc:
+                log_to_file(f"_run_install_on_main_thread: getValueByName(ExtensionManager): {exc}")
+            if mgr is None and _EXT_MGR_SINGLETON is not None:
+                try:
+                    mgr = _EXT_MGR_SINGLETON.get(ctx)
+                except Exception as exc:
+                    log_to_file(f"_run_install_on_main_thread: ExtensionManager.get: {exc}")
+            if mgr is None:
+                raise RuntimeError("ExtensionManager unavailable")
+            mgr.addExtension(oxt_url, props, "user", None, cmd_env)
+
+        ok, err = self._run_on_main_thread(_install, timeout, "_run_install_on_main_thread")
+        self._main_thread_install_in_flight = (err == _MAIN_THREAD_TIMEOUT_AFTER_START)
+        if ok:
+            log_to_file("_run_install_on_main_thread: addExtension OK (main thread)")
+            return True
+        log_to_file(f"_run_install_on_main_thread: install failed: {err}")
+        return False
+
+    def _install_and_restart_in_process(self, oxt_path, version_after="", campaign_id=None):
+        """Install the update via LibreOffice's own deployment API — entirely
+        inside the soffice process — then close LibreOffice cleanly.
 
         This is the key path for locked-down postes: it spawns **no** child
         process (no cmd.exe / soffice.exe), so it is not affected by the
         AppLocker / Defender-ASR policy that denies the install script (WinError
-        5). Returns True on success; any failure returns False so the caller
-        falls back to the install script, then to the manual-install message.
+        5). Order of attempts:
 
-        UNO imports are lazy (interfaces only resolve inside LibreOffice), so the
-        module still imports cleanly under the test stubs.
+          1. ExtensionManager.addExtension sur le MAIN thread (voie du
+             Gestionnaire des extensions — remplace proprement, pas de
+             corruption du registre) ;
+          2. legacy : thePackageManagerFactory depuis le worker
+             (_install_oxt_inprocess) — dernier recours seulement.
+
+        Returns True on success; any failure returns False so the caller falls
+        back to the manual-install message (ou au script si explicitement
+        réactivé). UNO usage is lazy so the module imports under test stubs.
         """
         try:
             if not oxt_path or not os.path.isfile(oxt_path):
                 return False
-            import unohelper
-            from com.sun.star.ucb import XCommandEnvironment
-            from com.sun.star.task import XInteractionHandler
-
-            class _SilentHandler(unohelper.Base, XInteractionHandler):
-                # Auto-approve deployment interactions (license already suppressed,
-                # version-replace confirmation, …) by selecting a continuation.
-                def handle(self, request):
-                    try:
-                        conts = request.getContinuations()
-                    except Exception:
-                        conts = ()
-                    chosen = None
-                    for cont in conts or ():
-                        name = type(cont).__name__.lower()
-                        if "approve" in name or "retry" in name or "resolved" in name:
-                            chosen = cont
-                            break
-                    try:
-                        (chosen or (conts[0] if conts else None)).select()
-                    except Exception:
-                        pass
-
-            class _SilentEnv(unohelper.Base, XCommandEnvironment):
-                def __init__(self, handler):
-                    self._handler = handler
-
-                def getInteractionHandler(self):
-                    return self._handler
-
-                def getProgressHandler(self):
-                    return None
-
-            handler = _SilentHandler()
-            cmd_env = _SilentEnv(handler)
+            cmd_env = self._make_silent_command_env()
             oxt_url = uno.systemPathToFileUrl(oxt_path)
-            smgr = self.ctx.getServiceManager()
 
             props = ()
             try:
@@ -2425,18 +2770,98 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             except Exception:
                 props = ()
 
-            if not self._install_oxt_inprocess(oxt_url, props, None, cmd_env):
-                log_to_file("_perform_update: in-process deployment API unavailable")
-                return False
+            if not self._run_install_on_main_thread(oxt_url, props, cmd_env):
+                if getattr(self, "_main_thread_install_in_flight", False):
+                    # addExtension tourne encore sur le thread principal : surtout
+                    # pas de second flux (double install = corruption du registre).
+                    # Repli manuel ; la réconciliation au prochain démarrage
+                    # rapportera « installed » si l'install a abouti.
+                    log_to_file("_perform_update: main-thread install still running, not starting a second one")
+                    return False
+                log_to_file("_perform_update: main-thread install unavailable, trying legacy worker path")
+                if not self._install_oxt_inprocess(oxt_url, props, None, cmd_env):
+                    log_to_file("_perform_update: in-process deployment API unavailable")
+                    return False
             log_to_file("_perform_update: in-process install succeeded")
 
             # Close LibreOffice cleanly so the user reopens it with the new version
             # active. We deliberately do NOT re-exec.
-            self._close_after_inprocess_update()
+            if not self._close_after_inprocess_update():
+                self._send_telemetry("UpdateCloseDeferred", {
+                    "route": "directed",
+                    "version_after": version_after,
+                    "campaign_id": str(campaign_id) if campaign_id is not None else "",
+                })
             return True
         except Exception as exc:
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
             return False
+
+    def _has_modified_documents(self):
+        """Vrai si au moins un document ouvert porte des modifications non
+        enregistrées. La sonde tourne sur le thread PRINCIPAL (accès UNO) ;
+        best-effort : sonde indisponible, Desktop absent ou composant muet →
+        Faux, l'appelant retombe sur son heuristique."""
+        try:
+            ctx = self.ctx
+            smgr = ctx.getServiceManager()
+        except Exception as exc:
+            log_to_file(f"_has_modified_documents: contexte indisponible ({exc})")
+            return False
+        found = {"modified": False}
+
+        def _probe():
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            components = desktop.getComponents() if desktop else None
+            enumeration = components.createEnumeration() if components else None
+            while enumeration is not None and enumeration.hasMoreElements():
+                component = enumeration.nextElement()
+                try:
+                    if component.isModified():
+                        found["modified"] = True
+                        return
+                except Exception:
+                    continue
+
+        ok, err = self._run_on_main_thread(
+            _probe, _CLOSE_ATTEMPT_TIMEOUT_SECONDS, "_has_modified_documents")
+        if not ok:
+            log_to_file(f"_has_modified_documents: sonde indisponible ({err})")
+            return False
+        return found["modified"]
+
+    def _notify_update_activates_at_restart(self):
+        """Informe l'utilisateur que la mise à jour installée s'activera au
+        prochain démarrage : la boîte précédente lui a promis une fermeture qui
+        n'a pas eu lieu. Sur le thread principal, best-effort, jamais bloquant."""
+        try:
+            ctx = self.ctx
+            smgr = ctx.getServiceManager()
+        except Exception as exc:
+            log_to_file(f"_notify_update_activates_at_restart: contexte indisponible ({exc})")
+            return
+
+        def _show():
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            frame = desktop.getCurrentFrame() if desktop else None
+            if frame is None:
+                return
+            toolkit = smgr.createInstance("com.sun.star.awt.Toolkit")
+            box = toolkit.createMessageBox(
+                frame.getContainerWindow(), 1, MSG_BUTTONS.BUTTONS_OK,
+                "MIrAI — Mise à jour",
+                "La mise à jour s'activera au prochain démarrage de LibreOffice.")
+            box.execute()
+            try:
+                box.dispose()
+            except Exception:
+                pass
+
+        try:
+            self._run_on_main_thread(
+                _show, _CLOSE_ATTEMPT_TIMEOUT_SECONDS, "_notify_update_activates_at_restart")
+        except Exception as exc:
+            log_to_file(f"_notify_update_activates_at_restart: {exc}")
 
     def _close_after_inprocess_update(self):
         """After an in-process install, CLOSE LibreOffice cleanly so the user reopens
@@ -2449,8 +2874,24 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         on every platform and spawns nothing.
 
         `Desktop.terminate()` must run on the **main thread** (from this update-worker
-        thread it corrupts the macOS layout engine); we marshal it via
-        `com.sun.star.awt.AsyncCallback`, falling back to SIGTERM.
+        thread it corrupts the macOS layout engine), via `_run_on_main_thread`. Sur la
+        route native, LibreOffice refuse la fermeture (veto) tant qu'une de ses
+        fenêtres modales — la progression de la mise à jour — est encore ouverte, ou
+        si le thread principal est occupé (timeout) : on retente périodiquement
+        jusqu'à acceptation ou expiration du délai. Un veto qui a mis du temps à
+        arriver, ou un veto alors qu'un document porte des modifications non
+        enregistrées, est traité comme un refus humain (« Enregistrer ? » →
+        Annuler) et respecté sans nouvel essai. Chaque abandon sans SIGTERM
+        informe l'utilisateur que la mise à jour s'activera au prochain démarrage
+        (la boîte précédente lui a promis une fermeture qui n'a pas eu lieu). SIGTERM n'intervient que si la PLANIFICATION sur
+        le thread principal échoue (callback ou AsyncCallback indisponible,
+        addCallback en échec) : le thread principal est alors injoignable. Une
+        exception remontée par l'action (Desktop indisponible, service en cours de
+        disposition) prouve au contraire qu'il répond — on rend la main sans tuer le
+        processus, la mise à jour s'activera au prochain démarrage.
+
+        Retourne True si la fermeture a été acceptée, False sinon (veto persistant,
+        refus humain, ou SIGTERM déclenché).
         """
         # Best-effort: tell the user before closing.
         try:
@@ -2464,8 +2905,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 box = toolkit.createMessageBox(
                     parent, 1, MSG_BUTTONS.BUTTONS_OK, "MIrAI — Mise à jour",
                     "La mise à jour a été installée.\n\n"
-                    "LibreOffice va se fermer : rouvrez-le pour\n"
-                    "utiliser la nouvelle version."
+                    "LibreOffice va se fermer pour l'activer.\n"
+                    "Rouvrez-le ensuite."
                 )
                 box.execute()
                 try:
@@ -2478,33 +2919,62 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # Clean shutdown on the MAIN thread — NO requestRestart (no windowless re-exec).
         ctx = self.ctx
         smgr = self.ctx.getServiceManager()
-        try:
-            from com.sun.star.awt import XCallback
 
-            class _CloseOnMain(unohelper.Base, XCallback):
-                def notify(self, _data):
-                    try:
-                        desktop = smgr.createInstanceWithContext(
-                            "com.sun.star.frame.Desktop", ctx
-                        )
-                        if desktop is not None:
-                            log_to_file("_close_after_inprocess_update: terminating on main thread")
-                            desktop.terminate()
-                    except Exception as term_err:
-                        log_to_file(f"_close_after_inprocess_update: main-thread terminate failed: {term_err}")
+        def _terminate():
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            if desktop is None:
+                raise RuntimeError("Desktop unavailable")
+            if not desktop.terminate():
+                raise RuntimeError(_MAIN_THREAD_VETOED)
 
-            async_cb = smgr.createInstanceWithContext(
-                "com.sun.star.awt.AsyncCallback", ctx
-            )
-            if async_cb is not None:
-                async_cb.addCallback(_CloseOnMain(), None)
-                log_to_file("_close_after_inprocess_update: close scheduled on main thread")
-                return
-            log_to_file("_close_after_inprocess_update: AsyncCallback unavailable, SIGTERM fallback")
-        except Exception as cb_err:
-            log_to_file(f"_close_after_inprocess_update: AsyncCallback path failed ({cb_err}), SIGTERM fallback")
-        # Fallback: quit (SIGTERM). The update still applies on next open.
-        self._terminate_on_main_thread()
+        deadline = time.time() + _CLOSE_RETRY_SECONDS
+        vetoed_logged = False
+        while True:
+            ok, err = self._run_on_main_thread(
+                _terminate, _CLOSE_ATTEMPT_TIMEOUT_SECONDS, "_close_after_inprocess_update")
+            action_s = getattr(self, "_last_main_thread_action_s", 0.0)
+            if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
+                log_to_file("_close_after_inprocess_update: terminate accepted on main thread")
+                return True
+            if err == _MAIN_THREAD_VETOED and self._has_modified_documents():
+                # Un document a des modifications non enregistrées : le veto vient
+                # du dialogue « Enregistrer les modifications ? », donc de
+                # l'utilisateur. Réessayer, c'est le lui réimposer toutes les 3 s.
+                log_to_file("_close_after_inprocess_update: fermeture refusée par l'utilisateur (document modifié ouvert), abandon")
+                self._notify_update_activates_at_restart()
+                return False
+            if err == _MAIN_THREAD_VETOED and action_s >= _CLOSE_USER_REFUSAL_SECONDS:
+                # Un veto après une action longue = réponse humaine (dialogue
+                # « Enregistrer ? ») ; la latence de planification sur le thread
+                # principal ne compte pas.
+                log_to_file(f"_close_after_inprocess_update: fermeture refusée par l'utilisateur ({action_s:.1f} s dans terminate()), abandon")
+                self._notify_update_activates_at_restart()
+                return False
+            if err in (_MAIN_THREAD_VETOED, "timeout"):
+                # Veto immédiat = dialogue modal de LibreOffice encore ouvert (fenêtre de
+                # progression de la MAJ) ; timeout = thread principal occupé. Dans les
+                # deux cas on réessaie jusqu'à l'échéance — jamais de SIGTERM ici.
+                if not vetoed_logged:
+                    log_to_file(f"_close_after_inprocess_update: terminate {err} (dialogue ouvert ou thread principal occupé), nouvel essai périodique")
+                    vetoed_logged = True
+                if time.time() < deadline:
+                    time.sleep(_CLOSE_RETRY_INTERVAL_SECONDS)
+                    continue
+                log_to_file("_close_after_inprocess_update: veto persistant, abandon — la MAJ s'active au prochain démarrage")
+                self._notify_update_activates_at_restart()
+                return False
+            if err in (_MAIN_THREAD_CALLBACK_UNAVAILABLE, _MAIN_THREAD_ASYNC_UNAVAILABLE) \
+                    or str(err).startswith(_MAIN_THREAD_SCHEDULE_FAILED):
+                # Le thread principal est injoignable (planification impossible) :
+                # seul cas où SIGTERM reste justifié.
+                log_to_file(f"_close_after_inprocess_update: main thread unreachable ({err}), SIGTERM fallback")
+                self._terminate_on_main_thread()
+                return False
+            # Exception de l'action : le thread principal répond, aucune raison de
+            # tuer le processus (documents non enregistrés).
+            log_to_file(f"_close_after_inprocess_update: fermeture impossible ({err}), abandon — la MAJ s'active au prochain démarrage")
+            self._notify_update_activates_at_restart()
+            return False
 
     def _terminate_on_main_thread(self):
         """Quit LibreOffice without calling desktop.terminate() from a background thread.
@@ -2540,6 +3010,625 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 log_to_file("_terminate_on_main_thread: terminate() called (Windows)")
             except Exception as e:
                 log_to_file(f"_terminate_on_main_thread: terminate error: {e}")
+
+    # Le résultat réel d'une mise à jour n'est connu qu'au redémarrage suivant
+    # (l'installation remplace l'extension qui exécute ce code). On persiste
+    # donc l'état de campagne à côté de l'artefact stagé, et au démarrage on
+    # compare la version active au target : rapport « installed » véridique,
+    # purge idempotente de pending_update, levée de l'anti-boucle.
+
+    def _update_state_path(self):
+        base = self._get_user_config_dir()
+        if not base:
+            return ""
+        return os.path.join(base, "pending_update", "update_state.json")
+
+    def _load_update_state(self):
+        """État persistant de la MAJ en cours, ou {} (fichier absent ou illisible).
+        La réconciliation garde sa propre lecture, qui supprime un fichier corrompu."""
+        path = self._update_state_path()
+        if not path or not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, encoding="utf-8") as fh:
+                state = json.load(fh)
+        except Exception:
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    def _save_update_state(self, directive, stage, route=None, postponed_until=None,
+                           native_attempts=None):
+        """Persiste l'état de la campagne en cours (best-effort, jamais bloquant).
+
+        Pour une même cible, les champs non fournis (route, postponed_until,
+        native_attempts) et version_before sont conservés depuis l'état
+        précédent : après l'installation, la version active est déjà la cible,
+        et version_before doit rester celle d'avant pour la réconciliation.
+        """
+        path = self._update_state_path()
+        if not path:
+            return
+        try:
+            previous = self._load_update_state()
+            target = str(directive.get("target_version", "")).strip()
+            same = bool(previous) and str(previous.get("target_version", "")) == target
+            version_before = str(previous.get("version_before") or "") if same else ""
+            if not version_before:
+                version_before = str(self._get_extension_version() or "")
+            if route is None:
+                route = str(previous.get("route") or "") if same else ""
+            if postponed_until is None:
+                postponed_until = float(previous.get("postponed_until") or 0) if same else 0.0
+            if native_attempts is None:
+                native_attempts = int(previous.get("native_attempts") or 0) if same else 0
+            state = {
+                "campaign_id": directive.get("campaign_id"),
+                "target_version": target,
+                "version_before": version_before,
+                "stage": stage,
+                "ts": time.time(),
+                "route": route,
+                "postponed_until": float(postponed_until),
+                "native_attempts": int(native_attempts),
+            }
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+        except Exception as exc:
+            log_to_file(f"_save_update_state: {exc}")
+
+    def _purge_pending_update_dir(self):
+        base = self._get_user_config_dir()
+        if not base:
+            return
+        folder = os.path.join(base, "pending_update")
+        try:
+            import shutil
+            shutil.rmtree(folder, ignore_errors=True)
+            log_to_file("_purge_pending_update_dir: pending_update purged")
+        except Exception as exc:
+            log_to_file(f"_purge_pending_update_dir: {exc}")
+
+    def _reconcile_update_state(self, at_startup=False):
+        """Clôt la mise à jour précédente de façon idempotente.
+
+        - version active == target → rapport « installed » au DM + télémétrie,
+          purge de pending_update (OXT stagé, scripts, état), retrait du target
+          de l'anti-boucle _update_launch_blocked_cls ;
+        - `at_startup` et étape installed_* dont la cible n'est pas active,
+          confirmé par deux lectures espacées du registre → l'installation a
+          été annulée (rollback de LibreOffice) : rapport
+          « failed » au DM + télémétrie, purge. En session (`at_startup` faux)
+          le registre garde l'ancienne version jusqu'au redémarrage : on ne
+          conclut rien ;
+        - état illisible ou périmé (> 14 jours) → purge silencieuse ;
+        - sinon (mise à jour encore en attente) → no-op, l'état est conservé.
+        """
+        path = self._update_state_path()
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                state = json.load(fh)
+        except Exception:
+            state = None
+        if not isinstance(state, dict):
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+            return
+        target = str(state.get("target_version", ""))
+        stage = str(state.get("stage") or "")
+        pending_restart = stage in ("installed_native", "installed_inprocess")
+        current = str(self._get_extension_version() or "")
+        if at_startup and pending_restart and target and current and current != target:
+            # Juste après le démarrage, le registre peut encore se consolider :
+            # seconde lecture espacée avant de conclure à un échec.
+            time.sleep(_NATIVE_POLL_SECONDS)
+            current = str(self._get_extension_version() or "")
+        if target and current == target:
+            log_to_file(f"_reconcile_update_state: update to {target} confirmed active")
+            try:
+                self._report_update_status(
+                    state.get("campaign_id"), "installed",
+                    str(state.get("version_before", "")), target)
+            except Exception as exc:
+                log_to_file(f"_reconcile_update_state: status report failed: {exc}")
+            try:
+                self._send_telemetry("ExtensionUpdated", {
+                    "version_after": target,
+                    "campaign_id": str(state.get("campaign_id") or ""),
+                    "confirmed": "true",
+                    "route": str(state.get("route") or ""),
+                })
+            except Exception:
+                pass
+            MainJob._update_launch_blocked_cls.discard(target)
+            self._purge_pending_update_dir()
+        elif at_startup and pending_restart and target and current:
+            log_to_file(
+                f"_reconcile_update_state: {target} installée mais inactive au redémarrage "
+                f"(version active {current}), échec rapporté")
+            try:
+                self._report_update_status(
+                    state.get("campaign_id"), "failed",
+                    str(state.get("version_before", "")), current,
+                    "installation non active au redémarrage")
+            except Exception as exc:
+                log_to_file(f"_reconcile_update_state: status report failed: {exc}")
+            try:
+                self._send_telemetry("UpdateInstallFailed", {
+                    "version_after": target,
+                    "campaign_id": str(state.get("campaign_id") or ""),
+                    "route": str(state.get("route") or ""),
+                })
+            except Exception:
+                pass
+            self._purge_pending_update_dir()
+        else:
+            age = time.time() - float(state.get("ts", 0) or 0)
+            if age > 14 * 24 * 3600:
+                log_to_file("_reconcile_update_state: stale update state, purging")
+                self._purge_pending_update_dir()
+
+    def _schedule_update_reconciliation(self):
+        """Lance la réconciliation en fond, une fois par process (réseau possible)."""
+        if MainJob._update_reconcile_started_cls:
+            return
+        MainJob._update_reconcile_started_cls = True
+
+        def _safe_reconcile():
+            try:
+                self._reconcile_update_state(at_startup=True)
+            except Exception as exc:
+                log_to_file(f"_reconcile_update_state: {exc}")
+
+        timer = threading.Timer(5.0, _safe_reconcile)
+        timer.daemon = True
+        timer.start()
+
+    # Route native pilotée : le DM décide (directive update), LibreOffice
+    # installe (dialogue « Mise à jour des extensions »). Le plugin ne télécharge
+    # rien : il vérifie que le feed <update-information> de l'extension installée
+    # annonce exactement la cible, ouvre le dialogue natif sur le thread
+    # principal, puis surveille la version installée et ferme LibreOffice
+    # proprement.
+
+    def _native_feed_offers(self, target_version):
+        """Vrai si le feed de l'extension INSTALLÉE annonce exactement
+        target_version. Interrogé par LibreOffice lui-même
+        (PackageInformationProvider.isUpdateAvailable, pile HTTP de LO — le
+        même chemin que son contrôle périodique). Faux si bloc feed absent,
+        feed injoignable, version divergente, ou erreur : la route dirigée prend
+        alors le relais. Singleton obtenu sans import (thread worker)."""
+        target = str(target_version or "").strip()
+        if not target:
+            return False
+        try:
+            provider = self.ctx.getValueByName(
+                "/singletons/com.sun.star.deployment.PackageInformationProvider")
+        except Exception as exc:
+            log_to_file(f"_native_feed_offers: provider unavailable: {exc}")
+            return False
+        if provider is None:
+            log_to_file("_native_feed_offers: PackageInformationProvider unavailable")
+            return False
+        try:
+            pairs = provider.isUpdateAvailable(_EXTENSION_IDENTIFIER)
+        except Exception as exc:
+            log_to_file(f"_native_feed_offers: isUpdateAvailable failed: {exc}")
+            return False
+        announced = ""
+        for pair in pairs or ():
+            try:
+                ident, version = str(pair[0]), str(pair[1])
+            except Exception:
+                continue
+            if ident == _EXTENSION_IDENTIFIER:
+                announced = version
+                break
+        offers = announced == target
+        log_to_file(
+            f"_native_feed_offers: target={target} announced={announced or '-'} offers={offers}")
+        return offers
+
+    def _trigger_native_update_dialog(self, timeout=_NATIVE_TRIGGER_TIMEOUT_SECONDS):
+        """Ouvre, sur le thread PRINCIPAL, le dialogue natif « Mise à jour des
+        extensions » : PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG"), l'appel
+        exact de la bulle de notification de LibreOffice (updatecheck.cxx). LO
+        interroge le feed, télécharge et installe lui-même ; ses dialogues tournent
+        sur son thread de commandes, l'appel rend la main aussitôt.
+        Vrai si le déclenchement s'est exécuté sans exception avant `timeout`.
+        Après un timeout, le rappel éventuel devient no-op (voir _run_on_main_thread).
+        Un timeout après démarrage compte comme déclenché : l'effet est en cours,
+        la surveillance ou le report qui suivent sont l'issue sûre."""
+        ctx = self.ctx
+
+        def _trigger():
+            dialog = ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.deployment.ui.PackageManagerDialog", ctx)
+            if dialog is None:
+                raise RuntimeError("PackageManagerDialog unavailable")
+            dialog.trigger("SHOW_UPDATE_DIALOG")
+
+        ok, err = self._run_on_main_thread(_trigger, timeout, "_trigger_native_update_dialog")
+        if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
+            suffix = "" if ok else " (still running on main thread)"
+            log_to_file(f"_trigger_native_update_dialog: SHOW_UPDATE_DIALOG triggered{suffix}")
+            return True
+        log_to_file(f"_trigger_native_update_dialog: failed: {err}")
+        return False
+
+    def _wait_before_prompting(self):
+        """Laisse l'assistant d'enrôlement se terminer (budget
+        _PROMPT_WIZARD_WAIT_SECONDS), puis un délai de grâce, puis revérifie :
+        l'assistant peut s'être ouvert pendant la grâce (auto-check à T+3 s) et le
+        dialogue de mise à jour ne doit pas se superposer à lui."""
+        deadline = time.time() + _PROMPT_WIZARD_WAIT_SECONDS
+        self._wait_wizard_closed(deadline)
+        time.sleep(_PROMPT_GRACE_SECONDS)
+        self._wait_wizard_closed(deadline + _PROMPT_GRACE_SECONDS)
+
+    def _wait_wizard_closed(self, deadline):
+        while time.time() < deadline:
+            with MainJob._enrollment_wizard_lock_cls:
+                if not MainJob._enrollment_wizard_active_cls:
+                    return
+            time.sleep(_PROMPT_POLL_SECONDS)
+
+    def _native_attempts_for(self, target_version):
+        """Tentatives natives déjà faites pour cette cible (état persistant) ;
+        0 si autre cible, état absent ou champ illisible. Cible et état sont
+        comparés normalisés (strip) : c'est la même normalisation que
+        _save_update_state et _schedule_update."""
+        target = str(target_version or "").strip()
+        previous = self._load_update_state()
+        if not target or str(previous.get("target_version", "")).strip() != target:
+            return 0
+        try:
+            return int(previous.get("native_attempts") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _package_cache_dir(self):
+        """Dossier du cache des paquets utilisateur
+        (<profil>/user/uno_packages/cache/uno_packages) : on remonte depuis ce
+        module jusqu'à la racine du paquet — le dossier qui contient
+        description.xml — puis de deux niveaux (<paquet>.oxt → <lu…> → cache).
+        Repli sur la profondeur historique (cinq niveaux) si aucun
+        description.xml n'est trouvé dans les niveaux inspectés. Calculé une
+        fois par instance."""
+        cached = getattr(self, "_package_cache_dir_value", None)
+        if cached:
+            return cached
+        root = self._package_root_dir()
+        result = os.path.dirname(os.path.dirname(root)) if root else None
+        if result is None:
+            log_to_file("_package_cache_dir: description.xml introuvable, repli sur la profondeur fixe")
+            result = os.path.abspath(__file__)
+            for _ in range(5):
+                result = os.path.dirname(result)
+        self._package_cache_dir_value = result
+        return result
+
+    def _cached_package_versions(self):
+        """Entrées (dossier <lu…>, version) de NOTRE extension présentes dans le
+        cache des paquets sur disque. En session, LibreOffice garde l'ancien
+        paquet enregistré jusqu'au redémarrage : le registre (getExtensionList)
+        ne voit jamais la nouvelle version, mais son dossier existe déjà dans le
+        cache — c'est le signal fiable d'une installation native aboutie. Le nom
+        du dossier <lu…> est gardé (pas seulement la version) pour distinguer un
+        dossier apparu pendant l'attente d'un dossier résiduel d'une tentative
+        antérieure sur la même cible. Best-effort, jamais d'exception."""
+        entries = set()
+        try:
+            cache = self._package_cache_dir()
+            for lu in os.listdir(cache):
+                lu_dir = os.path.join(cache, lu)
+                if not os.path.isdir(lu_dir):
+                    continue
+                for pkg in os.listdir(lu_dir):
+                    desc = os.path.join(lu_dir, pkg, "description.xml")
+                    if not os.path.isfile(desc):
+                        continue
+                    with open(desc, encoding="utf-8", errors="replace") as fh:
+                        text = fh.read()
+                    if not re.search(r'<identifier\s+value="' + re.escape(_EXTENSION_IDENTIFIER) + r'"', text):
+                        continue
+                    m = re.search(r'<version\s+value="([^"]+)"', text)
+                    if m:
+                        entries.add((lu, m.group(1).strip()))
+        except Exception as exc:
+            log_to_file(f"_cached_package_versions: {exc}")
+        return entries
+
+    @staticmethod
+    def _versions_of(entries):
+        return {v for (_d, v) in entries}
+
+    def _perform_native_update(self, directive):
+        """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
+
+        Renvoie True si le dialogue a été montré et l'issue traitée — installée
+        (fermeture propre) ou reportée (cooldown) ; False si le déclenchement a
+        échoué, sans rien rapporter ni persister : l'appelant bascule en route
+        dirigée. Après l'installation native, LibreOffice garde l'ancien paquet
+        chargé jusqu'au redémarrage et le nouveau dossier apparaît à côté : d'ici
+        la fermeture, aucun import de module du plugin.
+
+        Détection de l'installation : combine le registre
+        (`_get_extension_version`, via `PackageInformationProvider`) et le cache
+        des paquets sur disque (`_cached_package_versions`) — en session,
+        LibreOffice garde l'ancien paquet enregistré jusqu'au redémarrage, donc
+        le registre seul reste bloqué sur l'ancienne version même après une
+        installation native aboutie. Détection confirmée sur deux lectures
+        consécutives, et uniquement pour un dossier apparu depuis l'instantané
+        pris avant l'attente et l'ouverture du dialogue.
+        """
+        target_version = str(directive.get("target_version", "")).strip()
+        campaign_id = directive.get("campaign_id")
+        campaign_attr = str(campaign_id) if campaign_id is not None else ""
+        urgency = directive.get("urgency", "normal")
+        version_before = str(self._get_extension_version() or "")
+        attempts = self._native_attempts_for(target_version)
+
+        cached_before = self._cached_package_versions()
+        self._wait_before_prompting()
+        log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
+        if not self._trigger_native_update_dialog():
+            return False
+
+        self._report_update_status(campaign_id, "deferred", version_before, target_version)
+        self._save_update_state(directive, "native_dialog", route="native",
+                                native_attempts=attempts + 1)
+        self._send_telemetry("UpdateNativeDialogShown", {
+            "version_after": target_version,
+            "campaign_id": campaign_attr,
+            "route": "native",
+            "attempt": str(attempts + 1),
+            "urgency": urgency,
+        })
+
+        deadline = time.time() + _NATIVE_INSTALL_WAIT_SECONDS
+        last_seen = None
+        polls = 0
+        hits = 0
+        while time.time() < deadline:
+            time.sleep(_NATIVE_POLL_SECONDS)
+            polls += 1
+            probe_start = time.time()
+            seen = str(self._get_extension_version() or "")
+            cached = self._cached_package_versions()
+            new_entries = cached - cached_before
+            if target_version in self._versions_of(new_entries):
+                seen = target_version
+            probe_ms = int((time.time() - probe_start) * 1000)
+            hits = hits + 1 if seen == target_version and target_version else 0
+            # Journal de diagnostic : valeur vue à chaque changement (et à la
+            # première lecture), ou lecture anormalement lente.
+            if seen != last_seen or probe_ms > _SLOW_PROBE_LOG_MS:
+                log_to_file(
+                    f"_perform_native_update: poll #{polls} installed={seen or '-'} "
+                    f"cache={sorted(self._versions_of(cached)) or '-'} target={target_version} "
+                    f"hits={hits} ({probe_ms} ms)")
+                last_seen = seen
+            if hits >= 2:
+                log_to_file(f"_perform_native_update: {target_version} installed natively, closing for restart")
+                self._save_update_state(directive, "installed_native", route="native")
+                self._send_telemetry("UpdateInstalledPendingRestart", {
+                    "version_after": target_version,
+                    "campaign_id": campaign_attr,
+                    "route": "native",
+                })
+                closed = False
+                try:
+                    closed = self._close_after_inprocess_update()
+                except Exception as exc:
+                    log_to_file(f"_perform_native_update: close failed (update is installed): {exc}")
+                if not closed:
+                    self._send_telemetry("UpdateCloseDeferred", {
+                        "version_after": target_version,
+                        "campaign_id": campaign_attr,
+                        "route": "native",
+                    })
+                return True
+
+        log_to_file(f"_perform_native_update: no install detected after {polls} polls (last seen {last_seen or '-'}), postponed")
+        self._save_update_state(directive, "postponed", route="native",
+                                postponed_until=time.time() + _UPDATE_POSTPONE_SECONDS)
+        self._send_telemetry("UpdatePostponed", {
+            "version_after": target_version,
+            "campaign_id": campaign_attr,
+            "route": "native",
+            "urgency": urgency,
+        })
+        return True
+
+    # Diagnostic passif du feed natif : LibreOffice récupère le feed avec SA pile
+    # HTTP (proxy/TLS/GPO propres), pas celle du plugin. Ce check headless valide
+    # donc, sans aucune action utilisateur et à l'échelle de la flotte, que la
+    # route native est viable sur les postes durcis — et détecte un feed DM
+    # absent ou mal formé AVANT d'appuyer le déploiement large dessus.
+
+    def _update_feed_urls(self):
+        """URLs du feed natif, dérivées des bootstrap configurés (failover d'abord).
+        Même convention que le bake au build (scripts/inject_update_feed.py),
+        avec le ?version= que la réécriture pose sur description.xml."""
+        urls = [
+            base.rstrip("/") + _UPDATE_FEED_PATH
+            for base in (self._failover_ordered_urls() or [])
+            if isinstance(base, str) and base.strip()
+        ]
+        # Seulement si la réécriture a réussi : sinon (offline, installation non
+        # inscriptible) LibreOffice lit l'adresse nue, le diagnostic aussi.
+        version = str(MainJob._feed_rewrite_last_cls or "").strip()
+        return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
+
+    # Réécriture de l'adresse du feed natif : le DM ne sert sur l'adresse nue que
+    # la « version générale ». Le plugin écrit dans le description.xml de SON
+    # installation `?version=<cible>` (directive update) ou `?version=<installée>`
+    # (sinon) : LibreOffice relit ce fichier à chaque vérification, et chaque
+    # poste ne voit que sa propre cible.
+
+    def _package_root_dir(self):
+        """Racine du paquet installé (dossier contenant description.xml), ou None."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        for _ in range(_PACKAGE_ROOT_SEARCH_LEVELS):
+            if os.path.isfile(os.path.join(here, "description.xml")):
+                return here
+            here = os.path.dirname(here)
+        return None
+
+    def _feed_target_for(self, directive):
+        """Version à inscrire dans l'adresse du feed : la cible d'une directive
+        `update`, sinon la version installée. Un rollback garde la version
+        installée : LibreOffice ne propose jamais une version plus ancienne, et
+        l'adresse ne doit pas non plus reproposer celle qu'on retire."""
+        if isinstance(directive, dict) and directive.get("action") == "update":
+            target = str(directive.get("target_version") or "").strip()
+            if target:
+                return target
+        return str(self._get_extension_version() or "").strip()
+
+    def _rewrite_feed_for_directive(self, directive):
+        try:
+            self._rewrite_feed_url(self._feed_target_for(directive))
+        except Exception as exc:
+            log_to_file(f"_rewrite_feed_url: {exc}")
+
+    def _rewrite_feed_url(self, version, unless_already_set=False):
+        """Pose ?version=<version> sur l'adresse du feed du description.xml
+        installé. Sans effet si le bloc est absent (profil offline) ou si rien ne
+        change ; installation non inscriptible (couche partagée) → journalisé,
+        la route dirigée reste le repli (_native_feed_offers ne verra pas la
+        cible). Avec `unless_already_set`, n'écrit rien si une adresse a déjà été
+        posée dans ce process. Renvoie le résultat de feed_rewrite (None si rien
+        n'a été tenté)."""
+        if not version:
+            return feed_rewrite.ERROR
+        root = self._package_root_dir()
+        if not root:
+            log_to_file("_rewrite_feed_url: description.xml introuvable")
+            return feed_rewrite.ERROR
+        path = os.path.join(root, "description.xml")
+        with MainJob._feed_rewrite_lock_cls:
+            if unless_already_set and MainJob._feed_rewrite_last_result_cls is not None:
+                return None
+            result, detail = feed_rewrite.rewrite_description_file(path, version)
+            # Journal et télémétrie une fois par changement d'état, pas à chaque
+            # lecture de /config.
+            changed = (result, version) != MainJob._feed_rewrite_last_result_cls
+            MainJob._feed_rewrite_last_result_cls = (result, version)
+            if result in (feed_rewrite.WRITTEN, feed_rewrite.UNCHANGED):
+                MainJob._feed_rewrite_last_cls = version
+        if changed and result != feed_rewrite.UNCHANGED:
+            log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
+            self._send_telemetry("FeedRewrite", {
+                "feed.target": str(version),
+                "feed.result": result,
+                "feed.error": str(detail)[:200],
+            })
+        return result
+
+    def _schedule_feed_rewrite(self):
+        """Réécriture au démarrage, une fois par process, avant le diagnostic
+        du feed (45 s) et avant toute directive : cible = version installée."""
+        if MainJob._feed_rewrite_started_cls:
+            return
+        MainJob._feed_rewrite_started_cls = True
+
+        def _safe_rewrite():
+            try:
+                # Une directive lue entre-temps a déjà posé la bonne adresse : ne
+                # pas l'écraser avec la version installée.
+                self._rewrite_feed_url(str(self._get_extension_version() or "").strip(),
+                                       unless_already_set=True)
+            except Exception as exc:
+                log_to_file(f"_rewrite_feed_url (démarrage): {exc}")
+
+        timer = threading.Timer(2.0, _safe_rewrite)
+        timer.daemon = True
+        timer.start()
+
+    def _check_native_feed(self):
+        """Interroge le feed via com.sun.star.deployment.UpdateInformationProvider
+        (la machinerie exacte du bouton « Vérifier les mises à jour »), et rapporte
+        le résultat en log + télémétrie NativeFeedCheck. N'installe rien, aucune
+        UI ; best-effort — toute erreur est non-fatale. Retourne la version
+        annoncée par le feed, ou None."""
+        urls = self._update_feed_urls()
+        if not urls:
+            log_to_file("_check_native_feed: no bootstrap configured, skipped")
+            return None
+        provider = None
+        try:
+            provider = self.ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.deployment.UpdateInformationProvider", self.ctx)
+        except Exception as exc:
+            log_to_file(f"_check_native_feed: provider unavailable: {exc}")
+        if provider is None:
+            return None
+        announced = ""
+        error = ""
+        try:
+            infos = provider.getUpdateInformation(tuple(urls), _EXTENSION_IDENTIFIER)
+            for element in infos or ():
+                # Le feed conforme expose <version value="…"/> dans le namespace
+                # update/2006 ; on tolère aussi un document sans namespace.
+                for getter in ("getElementsByTagNameNS", "getElementsByTagName"):
+                    try:
+                        if getter == "getElementsByTagNameNS":
+                            nodes = element.getElementsByTagNameNS(_UPDATE_FEED_NS, "version")
+                        else:
+                            nodes = element.getElementsByTagName("version")
+                        node = nodes.item(0) if nodes is not None and nodes.getLength() > 0 else None
+                        value = str(node.getAttribute("value")) if node is not None else ""
+                    except Exception:
+                        value = ""
+                    if value:
+                        announced = value
+                        break
+                if announced:
+                    break
+            if not announced:
+                error = "feed reachable but no <version value> found"
+        except Exception as exc:
+            error = str(exc)
+        current = str(self._get_extension_version() or "")
+        ok = bool(announced)
+        log_to_file(
+            f"_check_native_feed: ok={ok} announced={announced or '-'} "
+            f"current={current or '-'} urls={len(urls)}"
+            + (f" error={error}" if error else "")
+        )
+        try:
+            self._send_telemetry("NativeFeedCheck", {
+                "feed.ok": "true" if ok else "false",
+                "feed.announced_version": announced,
+                "feed.error": error[:200],
+                "version_current": current,
+            })
+        except Exception:
+            pass
+        return announced or None
+
+    def _schedule_native_feed_check(self):
+        """Lance le diagnostic du feed en fond, une fois par process, après que
+        l'enrollment/config a eu le temps de se poser (réseau via la pile de LO)."""
+        if MainJob._feed_check_started_cls:
+            return
+        MainJob._feed_check_started_cls = True
+
+        def _safe_check():
+            try:
+                self._check_native_feed()
+            except Exception as exc:
+                log_to_file(f"_check_native_feed: {exc}")
+
+        timer = threading.Timer(45.0, _safe_check)
+        timer.daemon = True
+        timer.start()
 
     def _report_update_status(self, campaign_id, status, version_before, version_after, error_detail=""):
         """Report update status back to device-management server."""

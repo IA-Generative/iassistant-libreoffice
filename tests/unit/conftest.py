@@ -29,6 +29,8 @@ def _reset_mainjob_flags():
     MainJob._update_in_progress_cls = False
     MainJob._enrollment_dismissed_cls = False
     MainJob._update_launch_blocked_cls = set()
+    MainJob._feed_rewrite_last_cls = None
+    MainJob._feed_rewrite_last_result_cls = None
 
 
 def _cleanup_phantom_dirs():
