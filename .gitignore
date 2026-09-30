@@ -34,6 +34,9 @@ log.txt
 # Claude Code worktrees
 .claude/worktrees/
 
+# Specs et plans de travail des agents (superpowers) — restent locaux
+docs/superpowers/
+
 # Sorties sensibles locales (rapports, diagnostics) — jamais committées
 private/
 
