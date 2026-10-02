@@ -234,6 +234,7 @@ class TestPersistClearsRevokedToken(_JobCase):
         self.assertEqual(credentials.recall(credentials.DM_LLM_TOKEN), "fresh.token")
         self.assertEqual(credentials.expires_at(credentials.DM_LLM_TOKEN), expires_at)
         self.assertNotIn("llm_api_tokens", read_user_config(self.config_dir))
+        self.assertIsNone(credentials.store().get("llm_api_tokens"))
 
 
 class TestNoKeycloakFallbackInProxyMode(_JobCase):

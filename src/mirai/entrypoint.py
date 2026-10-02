@@ -1281,8 +1281,55 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_setup.install(data_dir)
             for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
                 log_to_file(f"[stockage] {action}")
+            self._move_secrets_out_of_settings()
             self._apply_install_changes(self._local_config().record_install(
                 self._get_extension_version(), self._package_root_dir() or ""))
+
+    def _credential_scope(self):
+        return self._local_config().transport_scope()
+
+    def _store_secret(self, key, value, scope):
+        """Coffre de l'OS ; s'il refuse l'écriture (trousseau désynchronisé,
+        persistance plafonnée), le secret reste en mémoire pour la session au
+        lieu d'être perdu."""
+        if credentials.set_secret(key, value, scope):
+            credentials.forget(key)
+            return True
+        credentials.remember(key, value)
+        return False
+
+    def _move_secrets_out_of_settings(self):
+        """Secrets restés dans settings.json (migration, rollback) → coffre ou
+        mémoire ; jetons courts abandonnés. Sans coffre (Linux), ils ne vivent
+        plus que le temps de la session.
+
+        Un secret n'y revient que par un écrivain plus récent (version antérieure
+        après un retour arrière, reprise par la migration) : il remplace donc
+        celui du coffre."""
+        cfg = self._local_config()
+        settings = cfg.settings()
+        scope = self._credential_scope()
+        stored = []
+        refused = []
+        for key in credentials.STORED_KEYS:
+            value = settings.get(key)
+            if value in (None, ""):
+                continue
+            if self._store_secret(key, value, scope):
+                stored.append(key)
+            else:
+                refused.append(key)
+        stale = [key for key in settings
+                 if key in credentials.STORED_KEYS or key in credentials.MEMORY_KEYS
+                 or key in local_config.SECRET_DM_KEYS or key == "llmTokenExpiresAt"]
+        if stale:
+            cfg.update(remove=stale)
+            where = ("dans le coffre" if getattr(credentials.store(), "persistent", False)
+                     else "en mémoire pour la session")
+            log_to_file(f"[secrets] {len(stored)} secret(s) rangé(s) {where}, "
+                        f"{len(stale)} clé(s) retirée(s) des réglages"
+                        + (f" ; refusés par le coffre, gardés en mémoire : {', '.join(refused)}"
+                           if refused else ""))
 
     def _apply_install_changes(self, changes):
         changes = set(changes or ())
@@ -1291,6 +1338,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         remove = list(self._DERIVED_CACHE_KEYS)
         if "transport" in changes:
             remove += list(self._ENVIRONMENT_BOUND_KEYS)
+            for key in credentials.SCOPED_KEYS:
+                credentials.delete_secret(key)
+                credentials.forget(key)
+            credentials.forget("access_token")
         cfg = self._local_config()
         cfg.update(remove=remove)
         cfg.delete_snapshot()
@@ -1448,6 +1499,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _get_config_from_file(self, key, default, telemetry_defaults=None):
         """Valeur locale de `key` : transport de l'OXT, réglages de l'utilisateur,
         dernier instantané du DM, défauts de l'OXT (cf. LocalConfig.get)."""
+        if key in credentials.STORED_KEYS:
+            # La mémoire ne porte qu'une écriture refusée par le coffre : plus
+            # récente que ce que le coffre garde encore.
+            return (credentials.recall(key)
+                    or credentials.get_secret(key, self._credential_scope()) or default)
+        if key in credentials.MEMORY_KEYS:
+            return credentials.recall(key) or default
         value = self._local_config().get(key, default)
         if telemetry_defaults and key == "telemetryKey" and value in ("", None) \
                 and key in telemetry_defaults:
@@ -3628,6 +3686,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return self._get_config_from_file(key, default, telemetry_defaults=telemetry_defaults)
 
     def set_config(self, key, value):
+        if key in credentials.STORED_KEYS:
+            if not self._store_secret(key, value, self._credential_scope()):
+                log_to_file(f"[secrets] {key} refusé par le coffre : gardé en mémoire "
+                            "pour la session")
+            return
+        if key in credentials.MEMORY_KEYS:
+            credentials.remember(key, value)
+            return
         try:
             self._local_config().set(key, value)
         except OSError as e:
@@ -5445,11 +5511,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return value != 0
         return False
 
-    def _get_proxy_config(self):
+    def _get_proxy_config(self, with_credentials=False):
+        """`with_credentials` : le dialogue proxy doit afficher (et réenregistrer)
+        identifiant et mot de passe même proxy coupé. Sinon, pas de lecture du
+        coffre de l'OS à chaque requête HTTP quand le proxy est désactivé."""
         enabled = self._as_bool(self._get_config_from_file("proxy_enabled", False))
         proxy_url = str(self._get_config_from_file("proxy_url", "")).strip()
-        username = str(self._get_config_from_file("proxy_username", "")).strip()
-        password = str(self._get_config_from_file("proxy_password", ""))
+        username = password = ""
+        if enabled or with_credentials:
+            username = str(self._get_config_from_file("proxy_username", "")).strip()
+            password = str(self._get_config_from_file("proxy_password", ""))
         allow_insecure = self._as_bool(self._get_config_from_file("proxy_allow_insecure_ssl", False))
         return {
             "enabled": enabled,
@@ -5701,7 +5772,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file(f"Dialog prop unsupported: control={name} type={type} prop={key} error={str(e)}")
             return control
 
-        cfg = self._get_proxy_config()
+        cfg = self._get_proxy_config(with_credentials=True)
         lo = self._lo_proxy_settings()
         proxy_url_value = cfg["proxy_url"]
         if not proxy_url_value and lo["host"]:

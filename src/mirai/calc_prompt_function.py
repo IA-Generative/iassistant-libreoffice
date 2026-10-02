@@ -440,8 +440,11 @@ class PromptFunction(unohelper.Base):
             self._config = None
             return ("#PROMPT_ERROR: configuration LLM indisponible — ouvrez l'assistant "
                     "MIrAI puis recalculez la feuille")
-        token = credentials.recall(credentials.DM_LLM_TOKEN) or str(
-            config.get("llm_api_tokens", "") or "").strip()
+        scope = local_config.LocalConfig(_user_config_path(self._ctx), []).transport_scope()
+        token = (credentials.recall(credentials.DM_LLM_TOKEN)
+                 or credentials.recall("llm_api_tokens")
+                 or credentials.get_secret("llm_api_tokens", scope)
+                 or str(config.get("llm_api_tokens", "") or "").strip())
         if not token and local_config._truthy(config.get("enabled")):
             self._config = None
             return ("#PROMPT_ERROR: jeton LLM indisponible — ouvrez l'assistant MIrAI "

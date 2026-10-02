@@ -25,10 +25,10 @@ def _job():
 
 def test_value_is_persisted():
     job, config_dir = _job()
-    job.set_config("relay_client_id", "rc_abc")
+    job.set_config("device_name", "poste-a")
 
     with open(os.path.join(config_dir, "mirai", "settings.json"), encoding="utf-8") as fh:
-        assert json.load(fh)["relay_client_id"] == "rc_abc"
+        assert json.load(fh)["device_name"] == "poste-a"
 
 
 def test_no_temporary_file_is_left_behind():
@@ -44,7 +44,7 @@ def test_concurrent_readers_never_see_a_truncated_file():
     """Le cœur du sujet : jamais de JSON partiel, même sous écritures répétées."""
     job, config_dir = _job()
     path = os.path.join(config_dir, "mirai", "settings.json")
-    job.set_config("relay_client_id", "rc_initial")
+    job.set_config("device_name", "poste-initial")
 
     corrupted = []
     stop = threading.Event()
@@ -73,10 +73,10 @@ def test_concurrent_readers_never_see_a_truncated_file():
 
 def test_existing_keys_survive_a_write():
     job, config_dir = _job()
-    job.set_config("relay_client_id", "rc_abc")
-    job.set_config("relay_client_key", "key_xyz")
+    job.set_config("device_name", "poste-a")
+    job.set_config("llm_tool_mode", "native")
 
     with open(os.path.join(config_dir, "mirai", "settings.json"), encoding="utf-8") as fh:
         data = json.load(fh)
-    assert data["relay_client_id"] == "rc_abc"
-    assert data["relay_client_key"] == "key_xyz"
+    assert data["device_name"] == "poste-a"
+    assert data["llm_tool_mode"] == "native"

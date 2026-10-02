@@ -279,8 +279,10 @@ def get_secret(name, scope):
         return ""
     if not isinstance(entry, dict):
         return ""
+    # Pas d'effacement ici : une lecture dégradée (empreinte calculée sans le
+    # dossier de config) perdrait une paire valide. L'effacement suit un
+    # changement de transport constaté au démarrage, ou wipe().
     if name in SCOPED_KEYS and entry.get("scope") != scope:
-        delete_secret(name)
         return ""
     return str(entry.get("value") or "")
 

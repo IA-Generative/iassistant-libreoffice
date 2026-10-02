@@ -581,3 +581,38 @@ def test_dm_tier_without_token_still_returns_the_error(tmp_path):
     with patch("src.mirai.calc_prompt_function.call_llm") as call:
         assert fn.prompt("bonjour").startswith("#PROMPT_ERROR:")
     call.assert_not_called()
+
+
+def test_prompt_uses_the_user_key_from_the_store(tmp_path):
+    from src.mirai import credentials
+    credentials.forget_all()
+    credentials.set_secret("llm_api_tokens", "user-key", "")
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"enabled": False, "llm_base_urls": "http://localhost:11434/v1"}
+    seen = {}
+
+    def _fake_call(**kwargs):
+        seen.update(kwargs["config"])
+        return "ok"
+
+    with patch("src.mirai.calc_prompt_function.call_llm", side_effect=_fake_call):
+        assert fn.prompt("bonjour") == "ok"
+    assert seen["llm_api_tokens"] == "user-key"
+
+
+def test_prompt_prefers_the_session_copy_of_a_key_refused_by_the_store(tmp_path):
+    from src.mirai import credentials
+    credentials.forget_all()
+    credentials.set_secret("llm_api_tokens", "ancienne", "")
+    credentials.remember("llm_api_tokens", "nouvelle")
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"enabled": False, "llm_base_urls": "http://localhost:11434/v1"}
+    seen = {}
+
+    def _fake_call(**kwargs):
+        seen.update(kwargs["config"])
+        return "ok"
+
+    with patch("src.mirai.calc_prompt_function.call_llm", side_effect=_fake_call):
+        assert fn.prompt("bonjour") == "ok"
+    assert seen["llm_api_tokens"] == "nouvelle"

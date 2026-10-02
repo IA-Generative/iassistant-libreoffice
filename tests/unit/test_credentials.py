@@ -59,12 +59,16 @@ def test_secret_roundtrip_and_empty_deletes():
     assert credentials.get_secret("proxy_password", "scope-a") == ""
 
 
-def test_scoped_secret_is_invisible_and_dropped_in_another_environment():
+def test_scoped_secret_is_invisible_in_another_environment():
+    # Une lecture avec une autre empreinte (lecture dégradée au démarrage) ne
+    # doit pas effacer la paire : seul un changement de transport constaté
+    # l'efface (MainJob._apply_install_changes), ou wipe().
     store = _fresh_store()
     credentials.set_secret("relay_client_key", "rk", "scope-a")
     assert credentials.get_secret("relay_client_key", "scope-a") == "rk"
     assert credentials.get_secret("relay_client_key", "scope-b") == ""
-    assert store.get("relay_client_key") is None
+    assert store.get("relay_client_key") is not None
+    assert credentials.get_secret("relay_client_key", "scope-a") == "rk"
 
 
 def test_wipe_deletes_every_stored_key_and_memory():
