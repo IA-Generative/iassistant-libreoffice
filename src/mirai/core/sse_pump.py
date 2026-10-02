@@ -106,7 +106,7 @@ def run_stream(shell, request, on_event, tick=None, cancel_event=None):
             body = ""
         error = StreamHttpError(exc.code, body, exc.headers)
         shell.report_llm_error(error.status, error.body, error.headers)
-        shell.log(f"[sse] HTTP {error.status} body={error.body[:500]}")
+        shell.log(f"[sse] HTTP {error.status} body_len={len(error.body)}")
         return StreamOutcome(ok=False, error=error)
     except Exception as exc:
         if _cancelled():
