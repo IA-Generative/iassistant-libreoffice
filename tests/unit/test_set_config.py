@@ -1,5 +1,5 @@
 """
-Tests for set_config / _config_write_lock in MainJob.
+Tests for set_config in MainJob.
 Verifies atomic writes and concurrent-write safety.
 """
 import json
@@ -17,7 +17,7 @@ class TestSetConfig(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.job = make_job(config_dir=self.tmpdir)
-        self.config_path = os.path.join(self.tmpdir, "config.json")
+        self.config_path = os.path.join(self.tmpdir, "mirai", "settings.json")
 
     def test_writes_key_to_file(self):
         self.job.set_config("my_key", "my_value")

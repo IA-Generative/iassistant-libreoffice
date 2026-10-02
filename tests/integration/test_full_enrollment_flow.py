@@ -20,7 +20,6 @@ webbrowser.open is patched to auto-send the auth code to that server.
 """
 import base64
 import json
-import os
 import tempfile
 import threading
 import time
@@ -30,7 +29,7 @@ import urllib.request
 from unittest.mock import patch
 
 from tests.integration.mock_http import MockHttpRouter
-from tests.stubs.uno_stubs import install, make_job
+from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
 
 install()
 
@@ -150,7 +149,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
     def _write_local_config(self):
         """
-        Write config.json with bootstrap URL and Keycloak client settings.
+        Write the user settings with bootstrap URL and Keycloak client settings.
 
         _authorization_code_flow reads keycloakClientId, keycloak_redirect_uri,
         and keycloak_allowed_redirect_uri directly from the local config file
@@ -173,8 +172,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
             "keycloak_redirect_uri": "http://localhost:19876/callback",
             "keycloak_allowed_redirect_uri": ["http://localhost:19876/callback"],
         }
-        with open(os.path.join(self.tmpdir, "config.json"), "w") as f:
-            json.dump(config, f)
+        seed_user_config(self.tmpdir, config)
 
     def _register_routes(self):
         # Step 1: public config (first call, before enrollment)
@@ -293,9 +291,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         )
 
         # Tokens must be persisted to config.json
-        config_path = os.path.join(self.tmpdir, "config.json")
-        with open(config_path) as f:
-            saved = json.load(f)
+        saved = read_user_config(self.tmpdir)
         self.assertIn("access_token", saved, "access_token must be saved to config.json")
         self.assertIn("refresh_token", saved, "refresh_token must be saved to config.json")
 
@@ -330,9 +326,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertIn("Bearer", auth, "Enrollment must use Authorization: Bearer <token>")
 
         # Relay credentials persisted
-        config_path = os.path.join(self.tmpdir, "config.json")
-        with open(config_path) as f:
-            saved = json.load(f)
+        saved = read_user_config(self.tmpdir)
         self.assertEqual(saved.get("relay_client_id"), RELAY_CLIENT_ID,
                          "relayClientId must be persisted")
         self.assertEqual(saved.get("relay_client_key"), RELAY_CLIENT_KEY,
@@ -444,9 +438,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertIn("url", captured_browser, "Steps 3-4: browser must open for PKCE")
         self.assertTrue(self.router.called("POST", "/protocol/openid-connect/token"),
                         "Steps 3-4: Keycloak /token must be called")
-        config_path = os.path.join(self.tmpdir, "config.json")
-        with open(config_path) as f:
-            saved = json.load(f)
+        saved = read_user_config(self.tmpdir)
         self.assertIn("access_token", saved, "Step 4: access_token must be stored")
         self.router.calls.clear()
 
@@ -459,8 +451,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
         self.assertTrue(self.router.called("POST", "/enroll"),
                         "Step 5: POST /enroll must be called")
-        with open(config_path) as f:
-            saved = json.load(f)
+        saved = read_user_config(self.tmpdir)
         self.assertEqual(saved.get("relay_client_id"), RELAY_CLIENT_ID,
                          "Step 6: relay_client_id must be stored")
         self.assertTrue(saved.get("enrolled"), "Step 6: enrolled flag must be set")

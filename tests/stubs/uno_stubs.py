@@ -8,6 +8,7 @@ Usage — call install() before importing anything from src.mirai.entrypoint:
     install()
     from src.mirai.entrypoint import MainJob
 """
+import os
 import sys
 import time
 from unittest.mock import MagicMock
@@ -180,3 +181,18 @@ def make_job(config_dir=None):
     job._fetching_config = False
     job._schedule_config_refresh = MagicMock()
     return job
+
+
+def seed_user_config(config_dir, data):
+    """Remplace les réglages utilisateur par `data`, comme les aurait laissés
+    set_config (disposition <config_dir>/mirai/settings.json)."""
+    from src.mirai import local_config
+    path = os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE)
+    local_config.write_json_atomic(path, dict(data))
+    return path
+
+
+def read_user_config(config_dir):
+    from src.mirai import local_config
+    return local_config.read_json(
+        os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE))

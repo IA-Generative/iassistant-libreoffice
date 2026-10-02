@@ -9,6 +9,7 @@ import tempfile
 import time
 from unittest.mock import MagicMock
 
+from src.mirai import local_config
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -61,7 +62,7 @@ def test_config_cache_persist_and_hydrate_roundtrip():
     job = make_job(config_dir=d)
     data = {"meta": {"schema_version": 2}, "config": {"keycloakRealm": "mirai"}}
     job._persist_config_cache(data)
-    assert os.path.isfile(os.path.join(d, "config_cache.json"))
+    assert os.path.isfile(os.path.join(d, "mirai", "dm_snapshot.json"))
     # instance fraîche, cache vide → hydrate le recharge
     job2 = make_job(config_dir=d)
     job2.config_cache = None
@@ -72,8 +73,9 @@ def test_config_cache_persist_and_hydrate_roundtrip():
 def test_config_cache_hydrate_skips_when_stale():
     d = tempfile.mkdtemp()
     job = make_job(config_dir=d)
-    with open(os.path.join(d, "config_cache.json"), "w") as f:
-        json.dump({"ts": time.time() - (job.config_ttl + 100), "config_data": {"config": {}}}, f)
+    local_config.write_json_atomic(
+        os.path.join(d, "mirai", "dm_snapshot.json"),
+        {"ts": time.time() - (job.config_ttl + 100), "config_data": {"config": {}}})
     job.config_cache = None
     job._hydrate_config_cache()
     assert job.config_cache is None

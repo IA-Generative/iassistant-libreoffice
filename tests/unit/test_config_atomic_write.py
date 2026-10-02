@@ -27,7 +27,7 @@ def test_value_is_persisted():
     job, config_dir = _job()
     job.set_config("relay_client_id", "rc_abc")
 
-    with open(os.path.join(config_dir, "config.json"), encoding="utf-8") as fh:
+    with open(os.path.join(config_dir, "mirai", "settings.json"), encoding="utf-8") as fh:
         assert json.load(fh)["relay_client_id"] == "rc_abc"
 
 
@@ -35,14 +35,15 @@ def test_no_temporary_file_is_left_behind():
     job, config_dir = _job()
     job.set_config("a", "1")
 
-    leftovers = [n for n in os.listdir(config_dir) if n.endswith(".tmp")]
+    leftovers = [n for n in os.listdir(os.path.join(config_dir, "mirai"))
+                 if n.startswith(".tmp-")]
     assert leftovers == [], f"fichiers temporaires oubliés : {leftovers}"
 
 
 def test_concurrent_readers_never_see_a_truncated_file():
     """Le cœur du sujet : jamais de JSON partiel, même sous écritures répétées."""
     job, config_dir = _job()
-    path = os.path.join(config_dir, "config.json")
+    path = os.path.join(config_dir, "mirai", "settings.json")
     job.set_config("relay_client_id", "rc_initial")
 
     corrupted = []
@@ -75,7 +76,7 @@ def test_existing_keys_survive_a_write():
     job.set_config("relay_client_id", "rc_abc")
     job.set_config("relay_client_key", "key_xyz")
 
-    with open(os.path.join(config_dir, "config.json"), encoding="utf-8") as fh:
+    with open(os.path.join(config_dir, "mirai", "settings.json"), encoding="utf-8") as fh:
         data = json.load(fh)
     assert data["relay_client_id"] == "rc_abc"
     assert data["relay_client_key"] == "key_xyz"

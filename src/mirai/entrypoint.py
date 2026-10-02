@@ -178,8 +178,7 @@ import hashlib
 import threading
 import socket
 from .formatting import insert_formatted
-from . import feed_rewrite
-from . import local_config
+from . import credentials, feed_rewrite, local_config
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .security_flow import (
@@ -719,7 +718,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self._relay_recovery_last_at = 0
         self._llm_auth_recovery_lock = threading.Lock()
         self._llm_auth_recovery_last_at = 0
-        self._config_write_lock = threading.Lock()
         self._edit_dialog = None
         self._resize_dialog = None
         self._formula_dialog = None
@@ -1247,6 +1245,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
         return user_config_path
 
+    def _local_config(self):
+        if getattr(self, "_local_cfg", None) is None:
+            self._local_cfg = local_config.LocalConfig(
+                self._get_user_config_dir(),
+                local_config.package_config_candidates(os.path.dirname(os.path.abspath(__file__))),
+            )
+        return self._local_cfg
+
     def _ensure_extension_uuid(self):
         """Ensure extension has a unique UUID, generate if missing."""
         extension_uuid = self.get_config("extensionUUID", "")
@@ -1394,130 +1400,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         }
 
     def _get_config_from_file(self, key, default, telemetry_defaults=None):
-        name_file = "config.json"
-        package_file = "config.default.json"
-        path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-
-        user_config_path = getattr(path_settings, "UserConfig")
-
-        if user_config_path.startswith('file://'):
-            user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-
-        # Ensure the path ends with the filename
-        config_file_path = os.path.join(user_config_path, name_file)
-
-        user_config_data = None
-        package_config_data = None
-
-        # Load user config (if present)
-        if os.path.exists(config_file_path):
-            try:
-                with open(config_file_path, 'r', encoding='utf-8') as file:
-                    user_config_data = json.load(file)
-            except (IOError, json.JSONDecodeError):
-                user_config_data = None
-        else:
-            log_to_file(f"Config file not found in user profile: {config_file_path}")
-
-        # Load packaged config.default.json (inside extension)
-        package_config_candidates = [
-            os.path.join(os.path.dirname(__file__), package_file),
-            os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', package_file)),
-        ]
-        for package_config_path in package_config_candidates:
-            if os.path.exists(package_config_path):
-                try:
-                    with open(package_config_path, 'r', encoding='utf-8') as file:
-                        package_config_data = json.load(file)
-                    break
-                except (IOError, json.JSONDecodeError):
-                    package_config_data = None
-
-        # If user config missing or invalid, initialize from package defaults
-        if not isinstance(user_config_data, dict) or not user_config_data:
-            if isinstance(package_config_data, dict) and package_config_data:
-                try:
-                    with open(config_file_path, 'w', encoding='utf-8') as file:
-                        json.dump(package_config_data, file, indent=4, ensure_ascii=False)
-                    user_config_data = dict(package_config_data)
-                    log_to_file(f"Config initialized from package defaults: {config_file_path}")
-                except Exception:
-                    user_config_data = None
-
-        # Merge: packaged defaults overridden by user config
-        config_data = {}
-        if isinstance(package_config_data, dict):
-            config_data.update(package_config_data)
-        if isinstance(user_config_data, dict):
-            config_data.update(user_config_data)
-
-        # Debug: log where token is read from (masked)
-        if key == "llm_api_tokens":
-            try:
-                raw_value = config_data.get(key, default)
-                masked = ""
-                if raw_value:
-                    text = str(raw_value)
-                    masked = text[:2] + "***" + text[-2:] if len(text) > 4 else "*" * len(text)
-                log_to_file(
-                    "Config read llm_api_tokens "
-                    f"path={config_file_path} "
-                    f"user_present={bool(user_config_data)} "
-                    f"package_present={bool(package_config_data)} "
-                    f"value={masked}"
-                )
-            except Exception:
-                pass
-
-        # Upgrade user config if package has higher configVersion
-        pkg_version = None
-        user_version = None
-        try:
-            pkg_version = int(config_data.get("configVersion")) if "configVersion" in config_data else None
-        except Exception:
-            pkg_version = None
-        try:
-            user_version = int(user_config_data.get("configVersion")) if isinstance(user_config_data, dict) and "configVersion" in user_config_data else None
-        except Exception:
-            user_version = None
-        if pkg_version is not None and (user_version is None or user_version < pkg_version):
-            try:
-                merged = {}
-                if isinstance(package_config_data, dict):
-                    merged.update(package_config_data)
-                if isinstance(user_config_data, dict):
-                    merged.update(user_config_data)
-                merged["configVersion"] = pkg_version
-                with open(config_file_path, 'w') as file:
-                    json.dump(merged, file, indent=4)
-                config_data = merged
-                log_to_file(f"Config upgraded to version {pkg_version}: {config_file_path}")
-            except Exception:
-                pass
-
-        if not config_data:
-            return default
-
-        # Get the value from config file
-        value = config_data.get(key, default)
-
-        # If telemetry key is empty string and we have a default from telemetry_defaults, use it
-        if telemetry_defaults and key == "telemetryKey" and (value == "" or value is None) and key in telemetry_defaults:
+        """Valeur locale de `key` : transport de l'OXT, réglages de l'utilisateur,
+        dernier instantané du DM, défauts de l'OXT (cf. LocalConfig.get)."""
+        value = self._local_config().get(key, default)
+        if telemetry_defaults and key == "telemetryKey" and value in ("", None) \
+                and key in telemetry_defaults:
             return telemetry_defaults[key]
-
         return value
 
     def _device_management_enabled(self):
         return self._as_bool(self._get_config_from_file("enabled", False))
 
     def _select_settings(self, config_data):
-        if not isinstance(config_data, dict):
-            return None
-        for candidate in ("config", "settings", "parameters", "mirai", "mirai_config", "miraiConfig"):
-            value = config_data.get(candidate)
-            if isinstance(value, dict):
-                return value
-        return None
+        return local_config.select_settings(config_data)
 
     def _schedule_config_refresh(self, force=False, reason="background"):
         if not self._device_management_enabled():
@@ -1779,100 +1674,48 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return None
 
     def _persist_bootstrap_config(self, config_data):
-        """Write key bootstrap values (LLM, telemetry) into local config file."""
-        try:
-            inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
-            if not isinstance(inner, dict):
-                return
-            keys_to_sync = [
-                "llm_base_urls", "llm_api_tokens", "llmTokenExpiresAt",
-                "llm_default_models", "systemPrompt",
-                "telemetryEndpoint", "telemetryKey",
-                "telemetryAuthorizationType", "telemetrySel",
-                "relayAssistantBaseUrl",
-                "doc_url", "portal_url",
-                "keycloak_redirect_uri", "keycloak_allowed_redirect_uri",
-                "analyze_range_max_tokens", "llm_request_timeout_seconds",
-                "simplify_selection_max_tokens", "simplify_selection_system_prompt",
-                "extend_selection_max_tokens", "extend_selection_system_prompt",
-                "edit_selection_max_new_tokens", "edit_selection_system_prompt",
-                "summarize_selection_max_tokens", "summarize_selection_system_prompt",
-            ]
-            # Keys that are only written locally if the user has no local value yet
-            user_preference_keys = {"llm_default_models"}
-            # Clés dont la valeur VIDE est significative : le DM nous dit « ce
-            # credential n'est plus valable ». L'ignorer laisse un llmToken
-            # périmé ou révoqué sur disque, rejoué indéfiniment en 401.
-            clearable_keys = {"llm_api_tokens", "llmTokenExpiresAt"}
-            for key in keys_to_sync:
-                if key not in inner:
-                    continue
-                val = inner[key]
-                current = self._get_config_from_file(key, None)
-                if key in user_preference_keys:
-                    # Only set from DM if user has no local preference
-                    if not current and val:
-                        self.set_config(key, val)
-                    continue
-                if val == current:
-                    continue
-                if val == "" and key not in clearable_keys:
-                    continue
-                self.set_config(key, val)
-                if key == "llm_api_tokens":
-                    log_to_file(
-                        f"[persist] llm_api_tokens synced from DM ({len(str(val))} chars)"
-                        if val else
-                        "[persist] llm_api_tokens vidé par le DM (aucun llmToken minté)"
-                    )
-            log_to_file("Bootstrap config persisted to local file")
-        except Exception as e:
-            log_to_file(f"Failed to persist bootstrap config: {str(e)}")
-
-    def _config_cache_path(self):
-        """Path of the on-disk cache of the full enriched config_data."""
-        try:
-            base = self._get_user_config_dir()
-            return os.path.join(base, "config_cache.json") if base else ""
-        except Exception:
-            return ""
+        """Jetons courts de la réponse /config → mémoire du processus. Les autres
+        réglages vivent dans l'instantané (_persist_config_cache), remplacé à
+        chaque récupération : une clé abandonnée par le DM disparaît avec lui, ce
+        que ne ferait pas une recopie dans les réglages utilisateur."""
+        inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
+        credentials.remember_dm_tokens(inner)
 
     def _persist_config_cache(self, config_data):
-        """Persist the enriched config_data (secrets blanked) + timestamp so a
-        fresh MainJob instance (LO re-instantiates the job per action) can reuse
-        it without a blocking network fetch."""
-        path = self._config_cache_path()
-        if not path or not isinstance(config_data, dict):
+        """Instantané de la réponse /config (secrets vidés) : sert de couche DM
+        hors ligne et évite un appel bloquant aux instances suivantes de MainJob
+        (LibreOffice en crée une par action)."""
+        if not isinstance(config_data, dict):
             return
         try:
-            local_config.write_json_atomic(path, {
-                "ts": time.time(),
-                "config_data": local_config.redact_dm_config(config_data),
-            })
+            self._local_config().save_dm_snapshot(
+                config_data, extra_settings=self._keycloak_settings_from(config_data))
         except Exception as exc:
-            log_to_file(f"config cache persist failed: {str(exc)}")
+            log_to_file(f"config snapshot persist failed: {str(exc)}")
 
     def _hydrate_config_cache(self):
-        """Load the last persisted config_data into the in-memory cache when it
-        is still fresh (< config_ttl), so per-action instances don't block on a
-        network fetch. The background refresh keeps it up to date."""
+        """Recharge l'instantané en cache mémoire s'il a moins de config_ttl."""
         if self.config_cache:
             return
-        path = self._config_cache_path()
-        if not path or not os.path.isfile(path):
-            return
+        blob = self._local_config().snapshot()
+        data = blob.get("config_data")
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                blob = json.load(f)
             ts = float(blob.get("ts", 0))
-            data = blob.get("config_data")
-            age = time.time() - ts
-            if isinstance(data, dict) and 0 <= age < self.config_ttl:
-                self.config_cache = data
-                self.config_loaded_at = ts
-                log_to_file(f"config cache hydrated from disk (age {int(age)}s)")
-        except Exception as exc:
-            log_to_file(f"config cache hydrate failed: {str(exc)}")
+        except (TypeError, ValueError):
+            return
+        age = time.time() - ts
+        if isinstance(data, dict) and 0 <= age < self.config_ttl:
+            # Jeton vidé dans l'instantané : un nouveau processus n'a rien en
+            # mémoire, le servir bloquerait toute récupération pendant config_ttl.
+            settings = local_config.select_settings(data) or {}
+            if ("llmToken" in settings or "llm_api_tokens" in settings) \
+                    and not credentials.recall(credentials.DM_LLM_TOKEN):
+                log_to_file("Instantané DM non rechargé : aucun llmToken en mémoire, "
+                            "récupération auprès du DM requise")
+                return
+            self.config_cache = data
+            self.config_loaded_at = ts
+            log_to_file(f"config cache hydrated from disk (age {int(age)}s)")
 
     # ── Update & Feature Toggling (schema_version 2) ─────────────────
 
@@ -3687,11 +3530,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return self._resolve_llm_token(default, telemetry_defaults=telemetry_defaults)
 
         if key == "llm_default_models":
-            local_model = str(self._get_config_from_file("llm_default_models", "", telemetry_defaults=telemetry_defaults)).strip()
+            local_model = str(self._local_config().settings().get("llm_default_models", "") or "").strip()
             config_model = self._get_setting("llm_default_models")
             config_model = str(config_model).strip() if config_model is not None else ""
             if config_model and len(config_model) < 6:
                 config_model = ""
+            if not config_model:
+                config_model = str(
+                    self._get_config_from_file("llm_default_models", "") or "").strip()
 
             endpoint = self.get_config("llm_base_urls", "http://127.0.0.1:5000")
             api_key = self.get_config("llm_api_tokens", "")
@@ -3729,56 +3575,21 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # pas la valeur du DM, on retombe sur la lecture locale.
         if key in local_config.SECRET_DM_KEYS and config_value == "":
             config_value = None
+        if key == "telemetryKey" and not config_value:
+            config_value = credentials.recall(credentials.DM_TELEMETRY_KEY) or None
         if config_value is not None:
             return config_value
 
         return self._get_config_from_file(key, default, telemetry_defaults=telemetry_defaults)
 
     def set_config(self, key, value):
-        name_file = "config.json"
-
-        path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-        user_config_path = getattr(path_settings, "UserConfig")
-
-        if user_config_path.startswith('file://'):
-            user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-
-        config_file_path = os.path.join(user_config_path, name_file)
-
-        with self._config_write_lock:
-            if os.path.exists(config_file_path):
-                try:
-                    with open(config_file_path, 'r', encoding='utf-8') as file:
-                        config_data = json.load(file)
-                except (IOError, json.JSONDecodeError):
-                    config_data = {}
-            else:
-                config_data = {}
-
-            config_data[key] = value
-            if key == "llm_default_models":
-                log_to_file(f"Model saved (local): {value}")
-
-            # Écriture ATOMIQUE : fichier temporaire puis remplacement.
-            # Écrire en place expose tout lecteur concurrent — un autre thread
-            # du plugin, une seconde instance de LibreOffice — à un JSON
-            # tronqué. Le lecteur repart alors sur les valeurs par défaut et
-            # PERD les credentials : c'est une façon d'entrer dans l'état
-            # absorbant (enrôlé sans paire relais) sans que personne ne l'ait
-            # demandé. os.replace est atomique sur POSIX comme sur Windows.
-            temporary_path = f"{config_file_path}.tmp"
-            try:
-                with open(temporary_path, 'w', encoding='utf-8') as file:
-                    json.dump(config_data, file, indent=4, ensure_ascii=False)
-                    file.flush()
-                    os.fsync(file.fileno())
-                os.replace(temporary_path, config_file_path)
-            except OSError as e:
-                log_to_file(f"Error writing to {config_file_path}: {e}")
-                try:
-                    os.remove(temporary_path)
-                except OSError:
-                    pass
+        try:
+            self._local_config().set(key, value)
+        except OSError as e:
+            log_to_file(f"Error writing setting {key}: {e}")
+            return
+        if key == "llm_default_models":
+            log_to_file(f"Model saved (local): {value}")
 
     def _jwt_payload(self, token):
         try:
@@ -5172,10 +4983,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         config_data = self._fetch_config()
         if not config_data:
             return
-        try:
-            self._sync_keycloak_from_config(config_data)
-        except Exception:
-            pass
 
         access_token = self._ensure_access_token(config_data, interactive=False)
         keycloak = self._keycloak_config(config_data)
@@ -5418,20 +5225,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """
         cached = self._get_setting("llm_api_tokens")
         settings = self._select_settings(self.config_cache) or {}
-        if cached is not None and len(str(cached)) >= 6:
+        if cached and len(str(cached)) >= 6:
             if not self._token_expired_at(settings.get("llmTokenExpiresAt")):
                 return cached
             log_to_file("[llm-auth] llmToken du cache DM expiré — refresh forcé")
             self._schedule_config_refresh(force=True, reason="llm_token_expired")
-
-        stored = self._get_config_from_file(
-            "llm_api_tokens", default, telemetry_defaults=telemetry_defaults)
-        if stored and self._token_expired_at(
-                self._get_config_from_file("llmTokenExpiresAt", 0)):
-            log_to_file("[llm-auth] llmToken persisté expiré — ignoré, refresh forcé")
+        remembered = credentials.recall(credentials.DM_LLM_TOKEN)
+        if remembered:
+            return remembered
+        if credentials.expires_at(credentials.DM_LLM_TOKEN):
+            log_to_file("[llm-auth] llmToken mémorisé expiré — refresh forcé")
             self._schedule_config_refresh(force=True, reason="llm_token_expired")
-            return default
-        return stored
+        return self._get_config_from_file(
+            "llm_api_tokens", default, telemetry_defaults=telemetry_defaults)
 
     def _llm_auth_debug(self):
         """Une ligne sans ambiguïté sur le credential retenu pour l'appel LLM.
@@ -6161,11 +5967,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 log_to_file(f"Reload config: no settings dict found (type={type(config_data).__name__})")
                 return {}
             settings = config_data
-        self._sync_keycloak_from_settings(settings, config_data)
         log_to_file(f"Reload config: keys={sorted(settings.keys())}")
         return dict(settings)
 
-    def _sync_keycloak_from_settings(self, settings, config_data=None):
+    def _keycloak_settings_from(self, config_data):
+        settings = local_config.select_settings(config_data) or {}
         keycloak_src = None
 
         def _flat_keycloak(source):
@@ -6257,7 +6063,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if keycloak_src is None:
                 keycloak_src = _flat_keycloak(config_data)
         if not isinstance(keycloak_src, dict):
-            return
+            return {}
         keycloak_map = {
             "keycloakIssuerUrl": (
                 keycloak_src.get("issuerUrl")
@@ -6324,36 +6130,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 or keycloak_src.get("keycloak_allowed_redirect_uri")
             ),
         }
-        for target_key, value in keycloak_map.items():
-            if value is None:
-                continue
-            text = str(value).strip()
-            if not text:
-                continue
-            # F1 — Le DM est autoritatif sur le SSO : on écrase systématiquement la
-            # valeur locale (potentiellement un placeholder baké) avec celle servie par
-            # le DM, sinon un placeholder non vide gagnerait à jamais (bug `mysso`).
-            try:
-                current = str(self._get_config_from_file(target_key, "") or "").strip()
-            except Exception:
-                current = ""
-            if text == current:
-                continue
-            try:
-                self.set_config(target_key, text)
-                log_to_file(f"[keycloak-sync] {target_key} updated from DM")
-            except Exception:
-                pass
-
-    def _sync_keycloak_from_config(self, config_data):
-        settings = None
-        if isinstance(config_data, dict):
-            config_obj = config_data.get("config")
-            if isinstance(config_obj, dict):
-                settings = config_obj
-            else:
-                settings = self._select_settings(config_data)
-        self._sync_keycloak_from_settings(settings if isinstance(settings, dict) else {}, config_data=config_data)
+        return {key: str(value).strip() for key, value in keycloak_map.items()
+                if value is not None and str(value).strip()}
 
     def _get_cached_models(self, endpoint, api_key, is_openwebui):
         key = (endpoint, api_key, bool(is_openwebui))
@@ -7545,14 +7323,8 @@ EDITED VERSION:
                         self._fetch_config(force=True)
                     except Exception:
                         pass
-                    # Verify token is now available — read directly from disk
-                    try:
-                        _cfg_path = os.path.join(self._get_user_config_dir(), "config.json")
-                        with open(_cfg_path, "r", encoding="utf-8") as _f:
-                            _disk = json.load(_f)
-                        token_check = str(_disk.get("llm_api_tokens", "") or "").strip()
-                    except Exception:
-                        token_check = str(self._get_config_from_file("llm_api_tokens", "") or "").strip()
+                    # Verify token is now available
+                    token_check = str(self.get_config("llm_api_tokens", "") or "").strip()
                     log_to_file(f"[edit] after refresh: llm_api_tokens={'present' if token_check else 'still empty'}")
                     if not token_check:
                         break  # no point retrying without a token
@@ -11090,10 +10862,6 @@ EDITED VERSION:
         if not config_data:
             log_to_file("First enrollment: config fetch failed")
             return False
-        try:
-            self._sync_keycloak_from_config(config_data)
-        except Exception:
-            pass
         access_token = self._ensure_access_token(config_data, interactive=True)
         if access_token:
             log_to_file("First enrollment: auth succeeded")

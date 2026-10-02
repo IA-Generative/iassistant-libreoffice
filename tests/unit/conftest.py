@@ -39,23 +39,34 @@ def _cleanup_phantom_dirs():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _cleanup_config_cache():
-    # `config_cache.json` (cache disque du config_data enrichi) est écrit dans
-    # le UserConfig PARTAGÉ des tests (/tmp/test_libreoffice_config). Sans purge,
-    # il fuit d'un test à l'autre (p. ex. un `update` directive persisté puis
-    # relu ailleurs). On le retire avant ET après chaque test.
-    for base in ("/tmp/test_libreoffice_config",):
+def _cleanup_shared_config_dir():
+    # make_job() sans config_dir partage /tmp/test_libreoffice_config : ses
+    # fichiers (réglages, instantané DM, ancien cache) fuiraient d'un test à
+    # l'autre. On les retire avant ET après chaque test.
+    base = "/tmp/test_libreoffice_config"
+    shutil.rmtree(os.path.join(base, "mirai"), ignore_errors=True)
+    for name in ("config_cache.json", "config.json"):
         try:
-            os.remove(os.path.join(base, "config_cache.json"))
+            os.remove(os.path.join(base, name))
         except OSError:
             pass
+
+
+def _reset_credentials():
+    try:
+        from src.mirai import credentials
+    except Exception:
+        return
+    credentials.forget_all()
 
 
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state():
     _reset_mainjob_flags()
-    _cleanup_config_cache()
+    _reset_credentials()
+    _cleanup_shared_config_dir()
     yield
     _reset_mainjob_flags()
+    _reset_credentials()
     _cleanup_phantom_dirs()
-    _cleanup_config_cache()
+    _cleanup_shared_config_dir()
