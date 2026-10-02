@@ -1721,7 +1721,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file(f"DM config fetch headers: relay={'yes' if _relay_present else 'no'} keys={list(headers.keys())}")
                     with self._urlopen(request, context=self.get_ssl_context(base_url), timeout=fetch_timeout, use_proxy=use_proxy) as response:
                         payload = response.read().decode("utf-8")
-                    log_to_file(f"DM bootstrap raw response ({mode}): {payload[:4000]}")
+                    log_to_file(f"DM bootstrap response ({mode}): {len(payload)} octets")
                     config_data = json.loads(payload)
                     if isinstance(config_data, dict):
                         # Handle EnrichedConfigResponse (schema_version=2)
@@ -6605,13 +6605,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 pass
 
         json_data = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        log_to_file(f"Request data: {json.dumps(data, ensure_ascii=False, indent=2)}")
+        # Jamais le corps : il contient le texte du document.
+        log_to_file(
+            f"Request: model={data.get('model', '')} max_tokens={data.get('max_tokens')} "
+            f"messages={len(messages)} body={len(json_data)} octets"
+        )
         log_to_file(f"Headers: {_redacted_headers(headers)}")
-        try:
-            curl_headers = _curl_headers_for_log(headers)
-            log_to_file(f"Chat completions curl: curl -i -X POST {curl_headers} '{url}' -d '{json.dumps(data)}'")
-        except Exception:
-            pass
         
         # Note: method='POST' is implicit when data is provided
         request = urllib.request.Request(url, data=json_data, headers=_with_user_agent(headers))
@@ -6791,7 +6790,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                 content, finish_reason = \
                                     self.extract_content_from_response(chunk, api_type)
                                 if _data_count <= 2:
-                                    log_to_file(f"[stream] sample chunk keys={list(chunk.keys())} content={content!r} finish={finish_reason}")
+                                    log_to_file(f"[stream] sample chunk keys={list(chunk.keys())} content_len={len(content)} finish={finish_reason}")
                                 if content:
                                     chunk_queue.put(content)
                                 if finish_reason:
@@ -8284,7 +8283,7 @@ EDITED VERSION:
                 # 3. Remove a trailing unclosed <think>… block
                 raw = _re.sub(r"<think>.*$", "", raw, flags=_re.DOTALL | _re.IGNORECASE)
                 raw = raw.strip()
-                log_to_file(f"ResizeSelection cleaned result ({len(raw)} chars): {raw[:200]!r}")
+                log_to_file(f"ResizeSelection cleaned result ({len(raw)} chars)")
 
                 # Show cleaned result in preview
                 if preview_control:

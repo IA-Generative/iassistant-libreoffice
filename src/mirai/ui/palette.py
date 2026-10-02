@@ -1435,26 +1435,24 @@ class AssistantPalette:
 
     # ── Fil de conversation (main courante : le plus récent EN HAUT) ────
 
-    def journal_line(self, text, step="", **attributes):
+    def journal_line(self, text, step="", detail="", **attributes):
         """Ajoute une ligne au journal d'actions (onglet « Actions »).
-
-        Le journal n'était alimenté que par le mode agentique via RunObserver :
-        un preset ou une réécriture laissait l'onglet désespérément vide, alors
-        que c'est justement là que l'utilisateur cherche ce qui s'est passé.
 
         Trois destinations, trois publics :
 
-        - l'**onglet Actions**, pour l'utilisateur, en français ;
-        - **`~/log.txt`**, pour le diagnostic après coup — sans quoi un défaut
-          rapporté ne laisse aucune trace de ce que le run a réellement fait
-          (constaté le 2026-07-26 : le fichier ne portait que « run: début » et
-          « run: terminé », impossible de dire quel chemin avait été pris) ;
+        - l'**onglet Actions**, pour l'utilisateur, en français : `text`, suivi
+          de ` — {detail}` quand `detail` (extrait du document ou du modèle)
+          n'est pas vide ;
+        - **`~/log.txt`**, pour le diagnostic après coup : `text` et la seule
+          longueur de `detail`, le fichier ne porte jamais de texte du document ;
         - la **télémétrie**, pour l'exploitation — mais uniquement si l'appelant
           nomme une étape (`step=`), et jamais le texte français : il cite le
           document, et la télémétrie quitte le poste (cf. `telemetry_steps`).
         """
-        self._journal_lines.append(text)
-        self.shell.log(f"[journal] {text}")
+        shown = f"{text} — {detail}" if detail else text
+        self._journal_lines.append(shown)
+        logged = f"{text} ({len(detail)} car.)" if detail else text
+        self.shell.log(f"[journal] {logged}")
         if step:
             telemetry_steps.emit(self.shell, step, attributes)
         joined = "\n".join(self._journal_lines)
@@ -1910,9 +1908,9 @@ class AssistantPalette:
                                 cancel_event=self._cancel,
                                 dispatcher=self.dispatcher,
                                 append_mode=self.append_mode)
-        # Le texte du message vient du modèle : il reste au journal et au
-        # fichier, seule sa LONGUEUR part en télémétrie.
-        self.journal_line(f"✓ {preset.label} — {message[:70]}",
+        # Le texte du message vient du modèle : l'onglet Actions le montre, le
+        # fichier n'en garde que la longueur et la télémétrie aussi.
+        self.journal_line(f"✓ {preset.label}", detail=message[:70],
                           step=telemetry_steps.PRESET_DONE,
                           **{"preset.name": preset.id,
                              "result.chars": len(message or "")})
@@ -2035,7 +2033,7 @@ class AssistantPalette:
                           **{"document.paragraphs": len(originals),
                              "document.headings": len(headings)})
         if headings:
-            self.journal_line(f"↳ Titre conservé : « {headings[0][:50]} »")
+            self.journal_line("↳ Titre conservé", detail=f"« {headings[0][:50]} »")
         self.journal_line(f"⚙ Réécriture des paragraphes {first} à {last}",
                           step=telemetry_steps.DOCUMENT_START,
                           **{"body.paragraphs": len(body),
