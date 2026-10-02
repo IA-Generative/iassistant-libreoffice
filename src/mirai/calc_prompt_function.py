@@ -23,16 +23,6 @@ import urllib.request
 
 import unohelper
 
-# ---------------------------------------------------------------------------
-# Logging (reuse the same log file as entrypoint.py for consistency)
-# ---------------------------------------------------------------------------
-_log_file_path = os.path.join(os.path.expanduser("~"), "log.txt")
-logging.basicConfig(
-    filename=_log_file_path,
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s",
-)
-
 
 def _log(message: str) -> None:
     logging.info("[calc_prompt_function] %s", message)

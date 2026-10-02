@@ -23,10 +23,13 @@ def _reset_mainjob_flags():
     try:
         from tests.stubs.uno_stubs import install
         install()
+        from src.mirai import log_setup
         from src.mirai.entrypoint import MainJob
     except Exception:
         return
+    log_setup.uninstall()
     MainJob._update_in_progress_cls = False
+    MainJob._storage_ready_cls = False
     MainJob._enrollment_dismissed_cls = False
     MainJob._update_launch_blocked_cls = set()
     MainJob._feed_rewrite_last_cls = None

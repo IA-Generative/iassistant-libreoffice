@@ -43,8 +43,8 @@ class MainJobShell:
     def set_config(self, key, value):
         return self._job.set_config(key, value)
 
-    def user_config_dir(self):
-        return self._job._get_user_config_dir()
+    def data_dir(self):
+        return self._job._data_dir()
 
     # ── Transport LLM ───────────────────────────────────────────────────
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):

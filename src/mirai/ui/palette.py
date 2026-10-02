@@ -516,7 +516,7 @@ class AssistantPalette:
         self._laying_out = False       # garde anti-réentrance (_layout → setPosSize)
         self._resize_watcher = None
         self.registry = register_all(ToolRegistry())
-        self.conversation = ConversationStore(shell.user_config_dir())
+        self.conversation = ConversationStore(shell.data_dir())
         self.dialog = None
         self._models = {}
         self._handlers = []                 # garde les listeners vivants (GC)
@@ -1443,8 +1443,9 @@ class AssistantPalette:
         - l'**onglet Actions**, pour l'utilisateur, en français : `text`, suivi
           de ` — {detail}` quand `detail` (extrait du document ou du modèle)
           n'est pas vide ;
-        - **`~/log.txt`**, pour le diagnostic après coup : `text` et la seule
-          longueur de `detail`, le fichier ne porte jamais de texte du document ;
+        - **le journal de l'extension** (`<profil>/user/config/mirai/mirai.log`),
+          pour le diagnostic après coup : `text` et la seule longueur de
+          `detail`, le fichier ne porte jamais de texte du document ;
         - la **télémétrie**, pour l'exploitation — mais uniquement si l'appelant
           nomme une étape (`step=`), et jamais le texte français : il cite le
           document, et la télémétrie quitte le poste (cf. `telemetry_steps`).

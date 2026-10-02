@@ -201,7 +201,7 @@ def test_install_and_restart_falls_back_to_legacy_worker_path():
 
 def _job_with_state(state, current_version="0.0.1.0.31"):
     job = make_job(config_dir=tempfile.mkdtemp())
-    pend = os.path.join(job._get_user_config_dir(), "pending_update")
+    pend = job._pending_update_dir()
     os.makedirs(pend, exist_ok=True)
     with open(os.path.join(pend, "update_state.json"), "w", encoding="utf-8") as fh:
         json.dump(state, fh)
@@ -318,7 +318,7 @@ def test_reconcile_purges_stale_state():
 def test_reconcile_discards_corrupt_state_file():
     """update_state.json illisible → supprimé, jamais d'exception."""
     job = make_job(config_dir=tempfile.mkdtemp())
-    pend = os.path.join(job._get_user_config_dir(), "pending_update")
+    pend = job._pending_update_dir()
     os.makedirs(pend, exist_ok=True)
     state_path = os.path.join(pend, "update_state.json")
     with open(state_path, "w") as fh:

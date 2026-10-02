@@ -178,7 +178,7 @@ import hashlib
 import threading
 import socket
 from .formatting import insert_formatted
-from . import credentials, feed_rewrite, local_config
+from . import credentials, feed_rewrite, local_config, log_setup
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .security_flow import (
@@ -354,10 +354,6 @@ _UI = {
     "font_body":       9,          # body text font size
     "font_small":      8,          # small caption font size
 }
-
-# Configure logging once at module level (thread-safe, not per-call)
-_log_file_path = os.path.join(os.path.expanduser('~'), 'log.txt')
-logging.basicConfig(filename=_log_file_path, level=logging.INFO, format='%(asctime)s - %(message)s')
 
 def _with_user_agent(headers=None):
     result = dict(headers) if headers else {}
@@ -680,6 +676,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # par /config.
     _feed_rewrite_started_cls = False
     _feed_rewrite_lock_cls = threading.Lock()
+    # Préparation du stockage local (journal, migration, empreinte) : une fois
+    # par processus.
+    _storage_ready_cls = False
+    _storage_lock_cls = threading.Lock()
     _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
     _feed_rewrite_last_result_cls = None    # (résultat, version) du dernier appel
     _context_menu_refs_cls = []
@@ -747,14 +747,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file("MainJob initialized without XSCRIPTCONTEXT")
 
         try:
-            path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-            user_config_path = getattr(path_settings, "UserConfig")
-            if user_config_path.startswith('file://'):
-                user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-            config_file_path = os.path.join(user_config_path, "config.json")
-            log_to_file(f"Profile config path: {config_file_path}")
+            self._prepare_local_storage()
         except Exception as e:
-            log_to_file(f"Failed to resolve profile config path: {str(e)}")
+            log_to_file(f"Local storage preparation failed: {str(e)}")
         
         # Initialise User-Agent with real plugin + LibreOffice versions
         try:
@@ -1253,6 +1248,27 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             )
         return self._local_cfg
 
+    def _data_dir(self):
+        return self._local_config().dir
+
+    def _pending_update_dir(self):
+        base = self._data_dir()
+        return os.path.join(base, "pending_update") if base else ""
+
+    def _prompt_log_path(self):
+        base = self._data_dir()
+        return os.path.join(base, "prompt.txt") if base else ""
+
+    def _prepare_local_storage(self):
+        """Une fois par processus : journal dans le dossier de l'extension."""
+        with MainJob._storage_lock_cls:
+            if MainJob._storage_ready_cls:
+                return
+            MainJob._storage_ready_cls = True
+        data_dir = self._data_dir()
+        if data_dir:
+            log_setup.install(data_dir)
+
     def _ensure_extension_uuid(self):
         """Ensure extension has a unique UUID, generate if missing."""
         extension_uuid = self.get_config("extensionUUID", "")
@@ -1301,7 +1317,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return None
             plugin_uuid = self._ensure_plugin_uuid()
             device_name = str(self._get_config_from_file("device_name", "mirai-libreoffice") or "").strip() or "mirai-libreoffice"
-            user_config_dir = self._get_user_config_dir()
+            user_config_dir = self._data_dir()
             if not user_config_dir:
                 # Pas de dossier de config exploitable -> flux sécurisé
                 # indisponible (évite d'écrire l'état dans un chemin fantôme).
@@ -1947,7 +1963,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # (from the update worker thread) AND at restart would double-install
             # and can clobber the running instance.
             try:
-                stable_dir = os.path.join(self._get_user_config_dir(), "pending_update")
+                stable_dir = self._pending_update_dir()
+                if not stable_dir:
+                    raise OSError("dossier de l'extension indisponible")
                 os.makedirs(stable_dir, exist_ok=True)
             except Exception:
                 stable_dir = os.path.dirname(tmp_path)
@@ -2011,7 +2029,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file(f"_perform_update: unopkg={unopkg} platform={sys_name}")
 
                     # Stage the update: quit LO → wait → remove old → install new → relaunch
-                    log_path = os.path.expanduser("~/log.txt")
+                    log_path = log_setup.path() or os.path.join(self._data_dir(), log_setup.LOG_FILE)
                     _ts = 'date "+%Y-%m-%d %H:%M:%S"'
 
                     if sys_name == "Windows":
@@ -2298,7 +2316,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 if oxt and os.path.isfile(oxt):
                     folder = os.path.dirname(oxt)
                 else:
-                    cand = os.path.join(self._get_user_config_dir(), "pending_update")
+                    cand = self._pending_update_dir()
                     if os.path.isdir(cand):
                         folder = cand
             except Exception:
@@ -2848,10 +2866,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # purge idempotente de pending_update, levée de l'anti-boucle.
 
     def _update_state_path(self):
-        base = self._get_user_config_dir()
-        if not base:
-            return ""
-        return os.path.join(base, "pending_update", "update_state.json")
+        base = self._pending_update_dir()
+        return os.path.join(base, "update_state.json") if base else ""
 
     def _load_update_state(self):
         """État persistant de la MAJ en cours, ou {} (fichier absent ou illisible).
@@ -2908,10 +2924,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_save_update_state: {exc}")
 
     def _purge_pending_update_dir(self):
-        base = self._get_user_config_dir()
-        if not base:
+        folder = self._pending_update_dir()
+        if not folder:
             return
-        folder = os.path.join(base, "pending_update")
         try:
             import shutil
             shutil.rmtree(folder, ignore_errors=True)
@@ -7180,14 +7195,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 pass
 
         try:
-            path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-            user_config_path = getattr(path_settings, "UserConfig")
-            if user_config_path.startswith('file://'):
-                user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-            prompt_log_path = os.path.join(user_config_path, "prompt.txt")
-            with open(prompt_log_path, "a", encoding="utf-8") as f:
-                f.write(user_input.strip() + "\n")
-                f.write("-" * 40 + "\n")
+            prompt_log_path = self._prompt_log_path()
+            if prompt_log_path:
+                with open(prompt_log_path, "a", encoding="utf-8") as f:
+                    f.write(user_input.strip() + "\n")
+                    f.write("-" * 40 + "\n")
         except Exception:
             pass
 
@@ -7606,9 +7618,7 @@ EDITED VERSION:
                             # MIRAI_SELFTEST_UPDATE_BLOCKED=1 (inerte en production).
                             if os.environ.get("MIRAI_SELFTEST_UPDATE_BLOCKED"):
                                 try:
-                                    pend = os.path.join(
-                                        about_self._get_user_config_dir(), "pending_update"
-                                    )
+                                    pend = about_self._pending_update_dir()
                                     os.makedirs(pend, exist_ok=True)
                                     open(os.path.join(pend, "mirai_update.oxt"), "a").close()
                                     if update_status:
@@ -7663,11 +7673,9 @@ EDITED VERSION:
                 elif source == btn_open_folder:
                     # Ouvre le dossier de MAJ en natif (Finder/Explorer, sans cmd.exe).
                     try:
-                        folder = os.path.join(
-                            about_self._get_user_config_dir(), "pending_update"
-                        )
+                        folder = about_self._pending_update_dir()
                         if not os.path.isdir(folder):
-                            folder = about_self._get_user_config_dir()
+                            folder = about_self._data_dir()
                         ok = about_self._open_folder_native(folder)
                         if update_status:
                             update_status.getModel().Label = (
@@ -8869,13 +8877,9 @@ EDITED VERSION:
                 self.outer = outer
             def actionPerformed(self, event):
                 try:
-                    path_settings = self.outer.sm.createInstanceWithContext(
-                        "com.sun.star.util.PathSettings", self.outer.ctx
-                    )
-                    user_config_path = getattr(path_settings, "UserConfig")
-                    if user_config_path.startswith("file://") or user_config_path.startswith("file:"):
-                        user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-                    prompt_log_path = os.path.join(user_config_path, "prompt.txt")
+                    prompt_log_path = self.outer._prompt_log_path()
+                    if not prompt_log_path:
+                        return
                     if not os.path.exists(prompt_log_path):
                         with open(prompt_log_path, "a", encoding="utf-8") as f:
                             f.write("")
@@ -9316,17 +9320,15 @@ EDITED VERSION:
     def _prompts_calc_path(self):
         """Chemin du fichier d'historique des prompts Calc.
 
-        L'historique se range à côté de config.json, dans le profil utilisateur
-        LibreOffice. Si ce dossier est introuvable on rend "" — surtout pas un
+        L'historique se range dans le dossier de l'extension, dans le profil
+        utilisateur LibreOffice. Si ce dossier est introuvable on rend "" — surtout pas un
         repli sur le HOME : ces lignes sont du contenu saisi par l'utilisateur,
         et les écrire en clair dans le dossier personnel est un défaut de
         confidentialité (issue #31). Les appelants traitent "" comme
         « pas d'historique disponible ».
         """
-        config_dir = self._get_user_config_dir()
-        if not config_dir:
-            return ""
-        return os.path.join(config_dir, "prompts_calc.txt")
+        base = self._data_dir()
+        return os.path.join(base, "prompts_calc.txt") if base else ""
 
     def _load_prompts_calc(self):
         """Load saved prompts (most-recent-first, max 100)."""
