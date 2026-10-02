@@ -1379,22 +1379,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"Secure identity bind failed: {str(exc)}")
             return ""
     
-    def _decode_default_key(self):
-        """
-        Decode the default telemetry key using base64 decoding.
-        The key is stored in an obfuscated format and decoded at runtime.
-        """
-        # Obfuscated key - reversed string then base64 encoded
-        obfuscated = "PT13WXBKWFp0UTNjbFJuT2psbWNsMUNkelZHZA=="
-        try:
-            # Decode the obfuscated string
-            decoded = base64.b64decode(obfuscated).decode('utf-8')
-            # Reverse the string to get the original key
-            return decoded[::-1]
-        except Exception as e:
-            log_to_file(f"Error decoding telemetry key: {str(e)}")
-            return ""
-    
     def _get_telemetry_defaults(self):
         """Return default values for telemetry configuration."""
         return {
@@ -1402,7 +1386,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "telemetryEndpoint": "https://traces.cpin.numerique-interieur.com/v1/traces",
             "telemetrySel": "mirai_salt",
             "telemetryAuthorizationType": "Basic",
-            "telemetryKey": self._decode_default_key(),
+            "telemetryKey": "",
             "telemetryHost": "",
             "telemetrylogJson": False,
             "telemetryFormatProtobuf": False
