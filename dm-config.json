@@ -4,7 +4,7 @@
     "authHeaderName": "Authorization",
     "authHeaderPrefix": "Bearer ",
     "portal_url": "https://mirai.interieur.gouv.fr",
-    "doc_url": "https://github.com/IA-Generative/AssistantMiraiLibreOffice/blob/master/docs/notice-utilisateur.md",
+    "doc_url": "https://docs.numerique.gouv.fr/docs/32d415eb-27e3-46d6-829b-be8eb12c6d5b/",
     "systemPrompt": "Tu es un assistant spécialisé dans la rédaction de documents le contenu doit est concis et professionnels. Ton rôle est d'assister le redacteur pour disposer d'une redaction impecable. Ne répète pas mot pour mot le texte, reformule. Uniquement en texte seul et en français",
     "extend_selection_max_tokens": 15000,
     "extend_selection_system_prompt": "",
