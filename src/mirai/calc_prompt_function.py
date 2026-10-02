@@ -274,13 +274,13 @@ def call_llm(
                 pass
         data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body_snippet = ""
+        body = ""
         try:
-            body_snippet = exc.read().decode("utf-8", errors="replace")[:200]
+            body = exc.read().decode("utf-8", errors="replace")
         except Exception:
             pass
-        _log(f"HTTP error {exc.code}: {body_snippet}")
-        return f"#PROMPT_ERROR: HTTP {exc.code} — {exc.reason} {body_snippet}".strip()
+        _log(f"HTTP error {exc.code}: body_len={len(body)}")
+        return f"#PROMPT_ERROR: HTTP {exc.code} — {exc.reason} {body[:200]}".strip()
     except urllib.error.URLError as exc:
         _log(f"URL error: {exc.reason}")
         return f"#PROMPT_ERROR: network error — {exc.reason}"
@@ -306,7 +306,7 @@ def call_llm(
             text = choice.get("text")
             if text is not None:
                 return str(text)
-        _log(f"Unexpected response structure: {json.dumps(data)[:300]}")
+        _log(f"Unexpected response structure: keys={sorted(data)}")
         return f"#PROMPT_ERROR: unexpected response structure"
     except Exception as exc:
         _log(f"Response parse error: {exc}")

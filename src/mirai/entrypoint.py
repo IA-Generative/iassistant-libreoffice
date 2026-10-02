@@ -647,7 +647,7 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
         log_to_file(f"Status: {e.code}")
         log_to_file(f"Reason: {e.reason}")
         log_to_file(f"Headers: {dict(e.headers) if hasattr(e, 'headers') else 'N/A'}")
-        log_to_file(f"Body: {error_body if error_body else '(empty)'}")
+        log_to_file(f"Body length: {len(error_body)}")
         log_to_file(f"=== End Telemetry Error ===")
     except Exception as e:
         log_to_file(f"=== Telemetry Exception ===")
@@ -1760,7 +1760,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     last_error = f"HTTP {e.code} {e.reason}"
                     log_to_file(
                         f"Failed to fetch device management config ({mode}): "
-                        f"HTTP {e.code} {e.reason} body={body[:500]}"
+                        f"HTTP {e.code} {e.reason} body_len={len(body)}"
                     )
                 except urllib.error.URLError as e:
                     last_error = f"URL error {e.reason}"
@@ -5326,7 +5326,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     error_body = e.read().decode("utf-8", errors="ignore")
                 except Exception:
                     pass
-            log_to_file(f"Device management enroll failed: {str(e)} body={error_body}")
+            log_to_file(f"Device management enroll failed: {str(e)} body_len={len(error_body)}")
 
     def _get_openwebui_access_token(self):
         if not self._device_management_enabled():
@@ -6758,7 +6758,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     request_id=request_id, will_retry=(e.code == 403))
                 log_to_file(
                     f"ERROR in stream_request: HTTP {e.code} {e.reason} "
-                    f"request_id={request_id} body={body[:2000]}")
+                    f"request_id={request_id} body_len={len(body)}")
             except Exception as e:
                 reason = str(e)
                 self._send_llm_relay_error(
