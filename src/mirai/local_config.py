@@ -34,10 +34,29 @@ def redact_dm_config(config_data):
     return config_data
 
 
+_frozen = False
+
+
+def freeze():
+    global _frozen
+    _frozen = True
+
+
+def is_frozen():
+    return _frozen
+
+
+def unfreeze_for_tests():
+    global _frozen
+    _frozen = False
+
+
 def write_json_atomic(path, data):
     """Écrit `data` en JSON sans jamais exposer de fichier tronqué : fichier
     temporaire du même dossier (0600 via mkstemp), fsync, puis os.replace,
     atomique sous POSIX comme sous Windows."""
+    if _frozen:
+        return
     folder = os.path.dirname(path)
     os.makedirs(folder, mode=0o700, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=folder)
@@ -242,8 +261,9 @@ class LocalConfig:
 
         Idempotent : un rollback vers une version antérieure réécrit config.json,
         la migration suivante le reprend sans écraser les réglages plus récents.
-        Rend les actions effectuées, pour le journal."""
-        if not self.dir:
+        Rend les actions effectuées, pour le journal. Rien après un effacement
+        (gel) : l'add-in =PROMPT() recréerait sinon le dossier."""
+        if not self.dir or _frozen:
             return []
         actions = []
         with _migration_lock:
@@ -388,3 +408,25 @@ def looks_like_our_log(path):
     except OSError:
         return False
     return any(marker in head for marker in LEGACY_LOG_MARKERS)
+
+
+def wipe(user_config_dir):
+    """Efface tout ce que l'extension a écrit dans le profil, puis gèle les
+    écritures pour le reste de la session (des minuteries peuvent encore
+    tourner après la désinstallation)."""
+    freeze()
+    if not user_config_dir:
+        return
+    shutil.rmtree(data_dir(user_config_dir), ignore_errors=True)
+    legacy = os.path.join(user_config_dir, LEGACY_CONFIG_FILE)
+    if any(key in read_json(legacy) for key in IDENTITY_KEYS):
+        try:
+            os.remove(legacy)
+        except OSError:
+            pass
+    for name in LEGACY_MOVED_FILES + LEGACY_DELETED_FILES:
+        try:
+            os.remove(os.path.join(user_config_dir, name))
+        except OSError:
+            pass
+    shutil.rmtree(os.path.join(user_config_dir, LEGACY_PENDING_DIR), ignore_errors=True)

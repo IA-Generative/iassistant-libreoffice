@@ -34,6 +34,13 @@ def _reset_mainjob_flags():
     MainJob._update_launch_blocked_cls = set()
     MainJob._feed_rewrite_last_cls = None
     MainJob._feed_rewrite_last_result_cls = None
+    MainJob._uninstall_listener_cls = None
+    MainJob._self_update_in_flight_cls = False
+    MainJob._wiped_cls = False
+    from src.mirai import credentials, local_config
+    local_config.unfreeze_for_tests()
+    credentials.unfreeze_for_tests()
+    log_setup.unfreeze_for_tests()
 
 
 def _cleanup_phantom_dirs():

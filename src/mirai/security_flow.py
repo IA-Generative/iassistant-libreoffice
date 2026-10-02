@@ -14,6 +14,8 @@ import urllib.parse
 
 from ctypes import wintypes
 
+from . import local_config
+
 
 def _b64e(raw):
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -70,6 +72,8 @@ class _BaseFileStore(object):
             return None
 
     def write(self, payload):
+        if local_config.is_frozen():
+            return
         with self._lock:
             self._ensure_parent()
             dir_path = os.path.dirname(self.path) or None

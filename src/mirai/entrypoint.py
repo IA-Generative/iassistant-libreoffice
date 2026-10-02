@@ -71,6 +71,31 @@ except Exception:
     _XCMDENV_IFACE = None
     _XINTERACTION_IFACE = None
 
+try:
+    from com.sun.star.util import XModifyListener as _XMODIFY_LISTENER_IFACE
+except Exception:
+    _XMODIFY_LISTENER_IFACE = None
+
+if _XMODIFY_LISTENER_IFACE is not None:
+    class MirAIUninstallListener(unohelper.Base, _XMODIFY_LISTENER_IFACE):
+        """Notifié à chaque changement du Gestionnaire des extensions : LibreOffice
+        n'offre aucun crochet de désinstallation, seule cette notification, sans
+        détail, arrive (dans le processus qui désinstalle)."""
+
+        def __init__(self, on_modified):
+            self._on_modified = on_modified
+
+        def modified(self, _event):
+            try:
+                self._on_modified()
+            except Exception as exc:
+                log_to_file(f"[désinstallation] {exc}")
+
+        def disposing(self, _event):
+            return
+else:
+    MirAIUninstallListener = None
+
 if _XCALLBACK_IFACE is not None:
     class _MainThreadCallback(unohelper.Base, _XCALLBACK_IFACE):
         """Exécute un callable sur le thread PRINCIPAL de LibreOffice, planifié via
@@ -658,6 +683,12 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
 # The MainJob is a UNO component derived from unohelper.Base class
 # and also the XJobExecutor, the implemented interface
 class MainJob(unohelper.Base, XJobExecutor, XJob):
+    _uninstall_listener_cls = None
+    _self_update_in_flight_cls = False
+    _wiped_cls = False
+    _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
+    _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
+    _EXTENSION_MANAGER = "/singletons/com.sun.star.deployment.ExtensionManager"
     # Caches dérivés d'une version, d'un modèle ou d'un DM : jamais conservés
     # d'une installation à l'autre.
     _DERIVED_CACHE_KEYS = ("assistant_model_capabilities", "llm_tool_mode_detected",
@@ -1267,7 +1298,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return os.path.join(base, "pending_update") if base else ""
 
     def _prompt_log_path(self):
-        base = self._data_dir()
+        base = "" if local_config.is_frozen() else self._data_dir()
         return os.path.join(base, "prompt.txt") if base else ""
 
     def _prepare_local_storage(self):
@@ -1284,6 +1315,85 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._move_secrets_out_of_settings()
             self._apply_install_changes(self._local_config().record_install(
                 self._get_extension_version(), self._package_root_dir() or ""))
+            try:
+                self._register_uninstall_listener()
+            except Exception as exc:
+                log_to_file(f"[désinstallation] écoute impossible : {exc}")
+
+    def _register_uninstall_listener(self):
+        if MainJob._uninstall_listener_cls is not None:
+            return
+        if MirAIUninstallListener is None:
+            log_to_file("[désinstallation] écoute non branchée : XModifyListener indisponible")
+            return
+        manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
+        if manager is None:
+            log_to_file("[désinstallation] écoute non branchée : "
+                        "gestionnaire des extensions introuvable")
+            return
+        listener = MirAIUninstallListener(self._schedule_uninstall_check)
+        manager.addModifyListener(listener)
+        MainJob._uninstall_listener_cls = listener
+
+    def _schedule_uninstall_check(self):
+        # Différé : la base des extensions doit être stabilisée (remplacement en
+        # cours, mise à jour native) avant de conclure à une désinstallation.
+        timer = threading.Timer(self._UNINSTALL_CHECK_DELAY_SECONDS, self._check_uninstalled)
+        timer.daemon = True
+        timer.start()
+
+    def _extension_still_deployed(self):
+        """True si l'extension figure encore dans un dépôt ; True aussi dans le
+        doute (API en échec) : on n'efface jamais sur une absence d'information.
+        Une extension désactivée reste listée."""
+        try:
+            manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
+            for repository in self._DEPLOYMENT_REPOSITORIES:
+                packages = manager.getDeployedExtensions(
+                    repository, manager.createAbortChannel(), None)
+                for package in packages or ():
+                    identifier = package.getIdentifier()
+                    if getattr(identifier, "Value", identifier) == _EXTENSION_IDENTIFIER:
+                        return True
+        except Exception as exc:
+            log_to_file(f"[désinstallation] état du déploiement illisible : {exc}")
+            return True
+        return False
+
+    def _check_uninstalled(self):
+        try:
+            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
+                return
+            if self._extension_still_deployed():
+                return
+            # Un remplacement (addPackage) efface l'ancienne entrée avant d'insérer
+            # la nouvelle : une seule absence ne prouve rien.
+            timer = threading.Timer(
+                self._UNINSTALL_CHECK_DELAY_SECONDS, self._confirm_uninstalled)
+            timer.daemon = True
+            timer.start()
+        except Exception as exc:
+            log_to_file(f"[désinstallation] contrôle impossible : {exc}")
+
+    def _confirm_uninstalled(self):
+        try:
+            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
+                return
+            if self._extension_still_deployed():
+                return
+            self._wipe_all_data("désinstallation depuis le Gestionnaire des extensions")
+        except Exception as exc:
+            log_to_file(f"[désinstallation] effacement impossible : {exc}")
+
+    def _wipe_all_data(self, reason):
+        MainJob._wiped_cls = True
+        log_to_file(f"[désinstallation] {reason} : effacement des données de l'extension")
+        credentials.freeze()
+        local_config.freeze()
+        log_setup.uninstall()
+        log_setup.freeze()
+        credentials.wipe()
+        local_config.wipe(self._local_config().user_config_dir)
 
     def _credential_scope(self):
         return self._local_config().transport_scope()
@@ -2050,6 +2160,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # the restart (see _install_and_restart_in_process). Installing here
             # (from the update worker thread) AND at restart would double-install
             # and can clobber the running instance.
+            if local_config.is_frozen():
+                log_to_file("_perform_update: extension désinstallée, mise en place abandonnée")
+                return
             try:
                 stable_dir = self._pending_update_dir()
                 if not stable_dir:
@@ -2691,6 +2804,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         back to the manual-install message (ou au script si explicitement
         réactivé). UNO usage is lazy so the module imports under test stubs.
         """
+        MainJob._self_update_in_flight_cls = True
         try:
             if not oxt_path or not os.path.isfile(oxt_path):
                 return False
@@ -2732,6 +2846,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as exc:
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
             return False
+        finally:
+            MainJob._self_update_in_flight_cls = False
 
     def _has_modified_documents(self):
         """Vrai si au moins un document ouvert porte des modifications non
@@ -2980,7 +3096,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         et version_before doit rester celle d'avant pour la réconciliation.
         """
         path = self._update_state_path()
-        if not path:
+        if not path or local_config.is_frozen():
             return
         try:
             previous = self._load_update_state()
@@ -9446,7 +9562,7 @@ EDITED VERSION:
     def _save_prompt_calc(self, prompt: str):
         """Prepend prompt to the history file (deduplicated, max 100 lines)."""
         path = self._prompts_calc_path()
-        if not path:
+        if not path or local_config.is_frozen():
             return
         try:
             existing = self._load_prompts_calc()

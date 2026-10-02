@@ -21,6 +21,7 @@ DM_TELEMETRY_KEY = "dm_telemetry_key"
 
 _memory = {}
 _memory_lock = threading.Lock()
+_frozen = False
 
 
 def _no_log(_message):
@@ -36,6 +37,16 @@ def set_log(func):
     _log = func or _no_log
 
 
+def freeze():
+    global _frozen
+    _frozen = True
+
+
+def unfreeze_for_tests():
+    global _frozen
+    _frozen = False
+
+
 def _as_epoch(raw):
     try:
         return int(float(raw or 0))
@@ -44,6 +55,8 @@ def _as_epoch(raw):
 
 
 def remember(name, value, expires_at=0):
+    if _frozen:
+        return
     with _memory_lock:
         if value in (None, ""):
             _memory.pop(name, None)
@@ -288,6 +301,8 @@ def get_secret(name, scope):
 
 
 def set_secret(name, value, scope):
+    if _frozen:
+        return False
     if value in (None, ""):
         delete_secret(name)
         return True

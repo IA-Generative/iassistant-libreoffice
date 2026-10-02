@@ -15,12 +15,23 @@ BACKUP_COUNT = 1
 
 _handler = None
 _lock = threading.Lock()
+_frozen = False
+
+
+def freeze():
+    global _frozen
+    _frozen = True
+
+
+def unfreeze_for_tests():
+    global _frozen
+    _frozen = False
 
 
 def install(data_dir):
     """Branche le journal sur `data_dir` (une seule fois par processus)."""
     global _handler
-    if not data_dir:
+    if not data_dir or _frozen:
         return
     with _lock:
         if _handler is not None:

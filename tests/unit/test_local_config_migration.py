@@ -110,6 +110,15 @@ def test_legacy_copy_written_after_a_rollback_replaces_the_moved_one(tmp_path):
     assert not (user / "pending_update").exists()
 
 
+def test_frozen_migration_never_recreates_the_data_folder(tmp_path):
+    cfg, user = _setup(tmp_path, LEGACY, {"enabled": True})
+    (user / "pending_update").mkdir()
+    (user / "pending_update" / "update_state.json").write_text("{}", encoding="utf-8")
+    local_config.freeze()
+    assert cfg.migrate_legacy(str(tmp_path)) == []
+    assert not (user / "mirai").exists()
+
+
 def test_home_log_removed_only_when_it_is_ours(tmp_path):
     cfg, _user = _setup(tmp_path, {"plugin_uuid": "u"}, {"enabled": True})
     (tmp_path / "log.txt").write_text("2026 - DM config fetch attempt\n", encoding="utf-8")
