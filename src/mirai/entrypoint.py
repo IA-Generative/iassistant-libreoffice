@@ -6147,6 +6147,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return self._fetch_models(endpoint, api_key, is_openwebui, include_info=True)
 
     def _refresh_config_to_local(self, cancel_flag=None):
+        """« Recharger la configuration » : force une récupération auprès du DM et
+        rend une copie de ses réglages pour affichage.
+
+        La récupération persiste elle-même ce qu'il faut (liste fermée) : recopier
+        toutes les clés du DM écrirait aussi les jetons et `proxy_allow_insecure_ssl`,
+        qui coupe la vérification TLS de tous les appels."""
         if cancel_flag and cancel_flag.get("cancel"):
             log_to_file("Reload config: canceled before fetch")
             return {}
@@ -6158,82 +6164,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file("Reload config: canceled after fetch")
             return {}
         config_obj = config_data.get("config") if isinstance(config_data, dict) else None
-        if isinstance(config_obj, dict):
-            settings = config_obj
-            log_to_file("Reload config: using config object")
-        else:
-            settings = self._select_settings(config_data)
-
+        settings = config_obj if isinstance(config_obj, dict) else self._select_settings(config_data)
         if not isinstance(settings, dict):
-            if isinstance(config_data, dict):
-                settings = config_data
-                log_to_file("Reload config: using top-level config (no settings wrapper)")
-            else:
+            if not isinstance(config_data, dict):
                 log_to_file(f"Reload config: no settings dict found (type={type(config_data).__name__})")
                 return {}
-        if "model" in settings:
-            settings.pop("model", None)
-        if "owuiEndpoint" in settings:
-            settings.pop("owuiEndpoint", None)
-        if "tokenOWUI" in settings:
-            settings.pop("tokenOWUI", None)
+            settings = config_data
         self._sync_keycloak_from_settings(settings, config_data)
-        # Normalize keycloak fields if provided at top-level settings
-        try:
-            if "keycloakRealm" not in settings:
-                for k in ("realm", "keycloak_realm"):
-                    if k in settings and str(settings.get(k) or "").strip():
-                        settings["keycloakRealm"] = str(settings.get(k)).strip()
-                        break
-            if "keycloakIssuerUrl" not in settings:
-                for k in ("issuerUrl", "issuerURL", "issuer_url", "baseUrl", "base_url", "keycloakIssuerUrl"):
-                    if k in settings and str(settings.get(k) or "").strip():
-                        settings["keycloakIssuerUrl"] = str(settings.get(k)).strip()
-                        break
-            if "keycloakClientId" not in settings:
-                for k in ("client_id", "clientId", "clientID", "keycloakClientId"):
-                    if k in settings and str(settings.get(k) or "").strip():
-                        settings["keycloakClientId"] = str(settings.get(k)).strip()
-                        break
-        except Exception:
-            pass
-        config_path = str(self._get_config_from_file("config_path", "/config/config.json"))
-        bootstrap_url = str(self._active_bootstrap_url() or "").strip()
-        normalized_url = f"{bootstrap_url.rstrip('/')}/{config_path.lstrip('/')}"
-        log_to_file(f"Reload config URL computed: {normalized_url}")
-        log_to_file(f"Reload config: url={normalized_url} keys={list(settings.keys())}")
-        synced = []
-        skipped = []
-        for meta_key in ("lastversion", "updateUrl", "configVersion", "environment"):
-            if isinstance(config_data, dict) and meta_key in config_data:
-                meta_val = config_data.get(meta_key)
-                if meta_val is None or (isinstance(meta_val, str) and meta_val.strip() == ""):
-                    continue
-                try:
-                    self.set_config(meta_key, meta_val)
-                    synced.append(meta_key)
-                except Exception:
-                    pass
-        for key, value in settings.items():
-            if value is None or (isinstance(value, str) and value.strip() == ""):
-                skipped.append(key)
-                continue
-            if key in ("proxy_url", "proxy_username", "proxy_password"):
-                try:
-                    if isinstance(value, str) and len(value.strip()) < 5:
-                        skipped.append(key)
-                        continue
-                except Exception:
-                    pass
-            try:
-                self.set_config(key, value)
-                synced.append(key)
-            except Exception:
-                pass
-        log_to_file(f"Device management config synced locally: {synced}")
-        if skipped:
-            log_to_file(f"Device management config skipped empty values: {skipped}")
-        return settings
+        log_to_file(f"Reload config: keys={sorted(settings.keys())}")
+        return dict(settings)
 
     def _sync_keycloak_from_settings(self, settings, config_data=None):
         keycloak_src = None
