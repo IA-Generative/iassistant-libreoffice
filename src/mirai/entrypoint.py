@@ -10057,6 +10057,17 @@ EDITED VERSION:
         self._formula_dialog = dlg
 
 
+    def _settings_token_values(self):
+        """(valeur affichée, jeton des requêtes du dialogue) du champ « Token OWUI ».
+
+        En mode DM le jeton est le llmToken minté par le DM : le champ reste vide,
+        sinon l'enregistrer comme clé utilisateur le rendrait persistant. Les
+        requêtes du dialogue utilisent le jeton courant."""
+        token = str(self.get_config("llm_api_tokens", "") or "")
+        if self._device_management_enabled():
+            return "", token
+        return token, token
+
     def settings_box(self,title="", x=None, y=None):
         """ Settings dialog with configurable backend options """
         WIDTH = 740
@@ -10200,11 +10211,11 @@ EDITED VERSION:
         try:
             animate_wait(wait_label, wait_toolkit, steps=4, delay=0.15)
             endpoint_value = str(self.get_config("llm_base_urls","http://127.0.0.1:5000/api"))
-            api_key_value = str(self.get_config("llm_api_tokens",""))
-            log_to_file(f"Settings open: llm_api_tokens length={len(api_key_value)}")
+            api_key_value, request_token = self._settings_token_values()
+            log_to_file(f"Settings open: llm_api_tokens length={len(request_token)}")
             current_model = str(self._get_config_from_file("llm_default_models","")).strip()
             is_openwebui = True
-            models, model_descriptions = self._fetch_models_info(endpoint_value, api_key_value, is_openwebui)
+            models, model_descriptions = self._fetch_models_info(endpoint_value, request_token, is_openwebui)
             if current_model and current_model not in models:
                 models = [current_model] + models
             if not models and current_model:
@@ -10400,7 +10411,7 @@ EDITED VERSION:
 
         access_token = str(self._get_config_from_file("access_token", "")).strip()
         email = self._token_email(access_token, allow_network=False) if access_token else None
-        anon_ok, auth_ok = self._api_status(endpoint_value, api_key_value, is_openwebui)
+        anon_ok, auth_ok = self._api_status(endpoint_value, request_token, is_openwebui)
 
         def _status_style(anon_ok, auth_ok, email_value):
             if auth_ok:
@@ -10541,7 +10552,7 @@ EDITED VERSION:
             except Exception:
                 endpoint_val = ""
             api_key_val = _read_api_key_value()
-            effective_api_key = self._effective_api_token(api_key_val)
+            effective_api_key = self._effective_api_token(api_key_val or request_token)
             log_to_file("Token test: start")
             conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val, True)
             if not conn_ok:
@@ -10686,7 +10697,7 @@ EDITED VERSION:
                     email = self.outer._token_email(access_token, allow_network=False) if access_token else None
                     _update_api_status_label(
                         str(self.endpoint_control.getModel().Text) if self.endpoint_control else "",
-                        _read_api_key_value(),
+                        _read_api_key_value() or request_token,
                         email_value=email
                     )
                 elif command == "toggle_api_key":
@@ -10857,7 +10868,7 @@ EDITED VERSION:
                 if field_controls.get("endpoint"):
                     field_controls["endpoint"].getModel().Text = endpoint_val
                 if field_controls.get("api_key"):
-                    field_controls["api_key"].getModel().Text = api_key_val
+                    field_controls["api_key"].getModel().Text = self._settings_token_values()[0]
                 if field_controls.get("model"):
                     model_control = field_controls["model"]
                     try:
@@ -11038,6 +11049,9 @@ EDITED VERSION:
                         except Exception:
                             pass
                     control_text = control.getModel().Text
+                    if (field.get("name") == "api_key" and not control_text
+                            and self._device_management_enabled()):
+                        continue
                     result[field["name"]] = control_text
         else:
             result = {}
