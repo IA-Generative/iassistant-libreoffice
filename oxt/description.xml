@@ -7,7 +7,7 @@
     <!-- Démonstrateur jetable : version alignée sur la campagne DM active
          (cible 0.0.1.0.29) pour neutraliser le dialog d'auto-update pendant
          les tests — l'update est sautée quand target == current. -->
-    <version value="0.0.1.0.31"/>
+    <version value="0.0.1.0.32"/>
     <registration>
         <simple-license accept-by="admin" default-license-id="ID0" suppress-on-update="true" >
             <license-text xlink:href="registration/license.txt" lang="en" license-id="ID0" />
