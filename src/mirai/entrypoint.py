@@ -179,6 +179,7 @@ import threading
 import socket
 from .formatting import insert_formatted
 from . import feed_rewrite
+from . import local_config
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .security_flow import (
@@ -1837,15 +1838,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return ""
 
     def _persist_config_cache(self, config_data):
-        """Persist the full enriched config_data + timestamp so a fresh MainJob
-        instance (LO re-instantiates the job per action) can reuse it without a
-        blocking network fetch."""
+        """Persist the enriched config_data (secrets blanked) + timestamp so a
+        fresh MainJob instance (LO re-instantiates the job per action) can reuse
+        it without a blocking network fetch."""
         path = self._config_cache_path()
         if not path or not isinstance(config_data, dict):
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"ts": time.time(), "config_data": config_data}, f)
+            local_config.write_json_atomic(path, {
+                "ts": time.time(),
+                "config_data": local_config.redact_dm_config(config_data),
+            })
         except Exception as exc:
             log_to_file(f"config cache persist failed: {str(exc)}")
 
@@ -3722,6 +3725,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return fallback
 
         config_value = self._get_setting(key)
+        # Valeur vidée avant l'écriture sur disque (cache réhydraté) : ce n'est
+        # pas la valeur du DM, on retombe sur la lecture locale.
+        if key in local_config.SECRET_DM_KEYS and config_value == "":
+            config_value = None
         if config_value is not None:
             return config_value
 
