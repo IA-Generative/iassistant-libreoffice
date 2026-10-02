@@ -476,3 +476,108 @@ class TestLoadConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Sources de la configuration et du jeton (disposition mirai/)
+# ---------------------------------------------------------------------------
+
+def _ctx_for(config_dir):
+    path_settings = MagicMock()
+    path_settings.UserConfig = config_dir
+    sm = MagicMock()
+    sm.createInstanceWithContext.return_value = path_settings
+    ctx = MagicMock()
+    ctx.getServiceManager.return_value = sm
+    return ctx
+
+
+def test_load_config_reads_settings_and_dm_snapshot(tmp_path):
+    from src.mirai import local_config
+    cfg = local_config.LocalConfig(str(tmp_path), [])
+    cfg.set("llm_default_models", "modele-choisi")
+    cfg.save_dm_snapshot({"config": {"llm_base_urls": "https://dm/llm/v1"}})
+    config = load_config(_ctx_for(str(tmp_path)))
+    assert config["llm_default_models"] == "modele-choisi"
+    assert config["llm_base_urls"] == "https://dm/llm/v1"
+
+
+def test_prompt_uses_the_remembered_dm_token(tmp_path):
+    from src.mirai import credentials
+    credentials.remember(credentials.DM_LLM_TOKEN, "dm-token-123")
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"llm_base_urls": "https://dm/llm/v1"}
+    seen = {}
+
+    def _fake_call(**kwargs):
+        seen.update(kwargs["config"])
+        return "ok"
+
+    with patch("src.mirai.calc_prompt_function.call_llm", side_effect=_fake_call):
+        assert fn.prompt("bonjour") == "ok"
+    assert seen["llm_api_tokens"] == "dm-token-123"
+
+
+def test_prompt_without_token_returns_a_readable_error(tmp_path):
+    from src.mirai import credentials
+    credentials.forget_all()
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"llm_base_urls": "https://dm/llm/v1"}
+    result = fn.prompt("bonjour")
+    assert result.startswith("#PROMPT_ERROR:")
+
+
+def test_prompt_reloads_a_config_cached_without_endpoint(tmp_path):
+    from src.mirai import credentials
+    credentials.remember(credentials.DM_LLM_TOKEN, "dm-token-123")
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"enabled": True}
+    seen = {}
+
+    def _fake_call(**kwargs):
+        seen.update(kwargs["config"])
+        return "ok"
+
+    with patch("src.mirai.calc_prompt_function.load_config",
+               return_value={"enabled": True, "llm_base_urls": "https://dm/llm/v1"}), \
+            patch("src.mirai.calc_prompt_function.call_llm", side_effect=_fake_call):
+        assert fn.prompt("bonjour") == "ok"
+    assert seen["llm_base_urls"] == "https://dm/llm/v1"
+    assert seen["llm_api_tokens"] == "dm-token-123"
+
+
+def test_prompt_without_endpoint_never_calls_the_llm(tmp_path):
+    from src.mirai import credentials
+    credentials.remember(credentials.DM_LLM_TOKEN, "dm-token-123")
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {}
+    with patch("src.mirai.calc_prompt_function.load_config", return_value={}), \
+            patch("src.mirai.calc_prompt_function.call_llm") as call:
+        assert fn.prompt("bonjour").startswith("#PROMPT_ERROR:")
+    call.assert_not_called()
+
+
+def test_offline_tier_calls_the_llm_without_key(tmp_path):
+    from src.mirai import credentials
+    credentials.forget_all()
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"enabled": False, "llm_base_urls": "http://localhost:11434/v1"}
+    seen = {}
+
+    def _fake_call(**kwargs):
+        seen.update(kwargs["config"])
+        return "ok"
+
+    with patch("src.mirai.calc_prompt_function.call_llm", side_effect=_fake_call):
+        assert fn.prompt("bonjour") == "ok"
+    assert seen["llm_api_tokens"] == ""
+
+
+def test_dm_tier_without_token_still_returns_the_error(tmp_path):
+    from src.mirai import credentials
+    credentials.forget_all()
+    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn._config = {"enabled": True, "llm_base_urls": "https://dm/llm/v1"}
+    with patch("src.mirai.calc_prompt_function.call_llm") as call:
+        assert fn.prompt("bonjour").startswith("#PROMPT_ERROR:")
+    call.assert_not_called()

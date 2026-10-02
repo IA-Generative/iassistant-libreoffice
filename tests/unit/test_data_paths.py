@@ -24,3 +24,12 @@ def test_no_user_config_dir_means_no_paths(tmp_path):
     assert job._data_dir() == ""
     assert job._pending_update_dir() == ""
     assert job._prompts_calc_path() == ""
+
+
+def test_startup_moves_a_staged_update_before_reconciliation(tmp_path):
+    legacy = tmp_path / "pending_update"
+    legacy.mkdir()
+    (legacy / "update_state.json").write_text('{"stage": "staged"}', encoding="utf-8")
+    job = make_job(config_dir=str(tmp_path))
+    assert os.path.isfile(job._update_state_path())
+    assert job._load_update_state() == {"stage": "staged"}

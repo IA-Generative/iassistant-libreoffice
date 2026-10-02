@@ -1268,6 +1268,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         data_dir = self._data_dir()
         if data_dir:
             log_setup.install(data_dir)
+            for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
+                log_to_file(f"[stockage] {action}")
 
     def _ensure_extension_uuid(self):
         """Ensure extension has a unique UUID, generate if missing."""

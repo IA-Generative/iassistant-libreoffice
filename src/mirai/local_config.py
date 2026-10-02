@@ -7,6 +7,7 @@ Module sans dépendance UNO, partagé par la coquille (entrypoint.py) et l'add-i
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -99,6 +100,11 @@ def _dm_base_url(url):
     host = parts.hostname or ""
     netloc = f"{host}:{port}" if port else host
     return f"{parts.scheme.lower()}://{netloc}{parts.path.rstrip('/')}"
+
+
+def legacy_home_dir():
+    """Dossier personnel où les anciennes versions écrivaient log.txt."""
+    return os.path.expanduser("~")
 
 
 def package_config_candidates(module_dir):
@@ -217,3 +223,155 @@ class LocalConfig:
                 os.remove(path)
             except OSError:
                 pass
+
+    def migrate_legacy(self, home_dir):
+        """Range l'ancienne disposition dans le dossier de l'extension.
+
+        Idempotent : un rollback vers une version antérieure réécrit config.json,
+        la migration suivante le reprend sans écraser les réglages plus récents.
+        Rend les actions effectuées, pour le journal."""
+        if not self.dir:
+            return []
+        actions = []
+        with _migration_lock:
+            os.makedirs(self.dir, mode=0o700, exist_ok=True)
+            actions += self._migrate_legacy_config()
+            actions += self._move_legacy_files()
+            log_path = os.path.join(home_dir, "log.txt") if home_dir else ""
+            if log_path and os.path.isfile(log_path) and looks_like_our_log(log_path):
+                try:
+                    os.remove(log_path)
+                    actions.append("~/log.txt : ancien journal supprimé")
+                except OSError as exc:
+                    actions.append(f"~/log.txt : suppression impossible ({exc})")
+        return actions
+
+    def _migrate_legacy_config(self):
+        legacy_path = os.path.join(self.user_config_dir, LEGACY_CONFIG_FILE)
+        legacy = read_json(legacy_path)
+        if not set(legacy) - set(IDENTITY_KEYS):
+            if os.path.exists(legacy_path) or not self._write_identity_stub(legacy_path, legacy):
+                return []
+            return ["config.json : souche d'identité écrite"]
+        keep = set(LEGACY_KEEP_KEYS)
+        if not _truthy(self.transport().get("enabled", legacy.get("enabled", False))):
+            keep |= LEGACY_OFFLINE_KEEP_KEYS
+        if RELOAD_FOOTPRINT_KEYS & set(legacy):
+            keep.discard("proxy_allow_insecure_ssl")
+        kept = {key: value for key, value in legacy.items() if key in keep}
+        current = self.settings()
+        self.update({key: value for key, value in kept.items()
+                     if key not in current or key in LEGACY_FRESHER_KEYS})
+        self._write_identity_stub(legacy_path, legacy)
+        return [f"config.json : {len(kept)} clé(s) reprise(s), "
+                f"{len(legacy) - len(kept)} abandonnée(s)"]
+
+    def _write_identity_stub(self, legacy_path, legacy):
+        """Garde l'identité du poste dans config.json pour qu'une version
+        antérieure ne régénère pas l'identifiant d'appareil."""
+        settings = self.settings()
+        stub = {key: settings.get(key, legacy.get(key)) for key in IDENTITY_KEYS
+                if settings.get(key, legacy.get(key))}
+        if not stub:
+            return False
+        write_json_atomic(legacy_path, stub)
+        return True
+
+    def _move_legacy_files(self):
+        # Ce qui réapparaît à l'ancien emplacement après une migration a été
+        # écrit plus tard, par une version antérieure (retour arrière du DM) :
+        # cet exemplaire remplace celui déjà rangé, comme LEGACY_FRESHER_KEYS.
+        actions = []
+        for name in LEGACY_MOVED_FILES:
+            source = os.path.join(self.user_config_dir, name)
+            if not os.path.isfile(source):
+                continue
+            target = os.path.join(self.dir, name)
+            try:
+                replaced = os.path.exists(target)
+                os.replace(source, target)
+                actions.append(f"{name} : " + ("remplacé par l'exemplaire plus récent"
+                                               if replaced else "déplacé"))
+            except OSError as exc:
+                actions.append(f"{name} : échec ({exc})")
+        source = os.path.join(self.user_config_dir, LEGACY_PENDING_DIR)
+        if os.path.isdir(source):
+            target = os.path.join(self.dir, LEGACY_PENDING_DIR)
+            try:
+                if os.path.exists(target):
+                    shutil.rmtree(target)
+                shutil.move(source, target)
+                actions.append(f"{LEGACY_PENDING_DIR} : rangé")
+            except OSError as exc:
+                actions.append(f"{LEGACY_PENDING_DIR} : échec ({exc})")
+        for name in LEGACY_DELETED_FILES:
+            path = os.path.join(self.user_config_dir, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                    actions.append(f"{name} : supprimé")
+                except OSError as exc:
+                    actions.append(f"{name} : échec ({exc})")
+        return actions
+
+
+LEGACY_CONFIG_FILE = "config.json"
+IDENTITY_KEYS = ("extensionUUID", "plugin_uuid")
+# Ce que config.json porte de propre au poste et que la migration reprend :
+# identité, préférences, réglages réseau, et les secrets durables (rangés dans
+# le coffre ensuite). Tout le reste vient du DM ou de l'OXT.
+LEGACY_KEEP_KEYS = frozenset({
+    "extensionUUID", "plugin_uuid", "enrolled",
+    "relay_client_id", "relay_client_key", "relay_key_expires_at", "refresh_token",
+    "llm_default_models", "llm_tool_mode",
+    "proxy_enabled", "proxy_url", "proxy_username", "proxy_password",
+    "proxy_allow_insecure_ssl", "ca_bundle_path",
+    "config_fetch_timeout_seconds", "keycloak_auth_timeout_seconds",
+    "assistant_window_rect", "assistant_append_mode", "assistant_active_tab",
+    "edit_dialog_x", "edit_dialog_y", "formula_dialog_x", "formula_dialog_y",
+    "calc_input_dialog_x", "calc_input_dialog_y",
+})
+# Après un retour arrière, la version antérieure se réinscrit et le DM révoque
+# l'ancienne paire : ce que config.json porte alors est plus récent que settings.json.
+LEGACY_FRESHER_KEYS = frozenset({
+    "relay_client_id", "relay_client_key", "relay_key_expires_at", "refresh_token",
+    "enrolled",
+})
+# Palier hors ligne (enabled:false) : l'utilisateur règle lui-même son LLM.
+LEGACY_OFFLINE_KEEP_KEYS = frozenset({
+    "llm_base_urls", "llm_api_tokens", "authHeaderName", "authHeaderPrefix",
+})
+# Clés d'une recopie intégrale de la réponse du DM : leur présence dit que
+# proxy_allow_insecure_ssl peut venir du gabarit DM et non de l'utilisateur.
+RELOAD_FOOTPRINT_KEYS = frozenset({
+    "api_type", "is_openwebui", "openai_compatibility", "embdUrl", "llmEndpoint",
+})
+LEGACY_MOVED_FILES = ("assistant_conversation.json", "prompts_calc.txt", "prompt.txt",
+                      "telemetry_queue.json", "secure_bootstrap_state.json")
+LEGACY_DELETED_FILES = ("config_cache.json",)
+LEGACY_PENDING_DIR = "pending_update"
+LEGACY_LOG_MARKERS = ("MainJob.__init__", "DM config fetch", "[llm-auth]", "[palette]",
+                      "Config file not found in user profile")
+
+_migration_lock = threading.Lock()
+
+
+def _truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
+
+
+def looks_like_our_log(path):
+    """~/log.txt est un nom générique : on ne le supprime que s'il porte nos
+    marqueurs."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as handle:
+            head = handle.read(65536)
+    except OSError:
+        return False
+    return any(marker in head for marker in LEGACY_LOG_MARKERS)
