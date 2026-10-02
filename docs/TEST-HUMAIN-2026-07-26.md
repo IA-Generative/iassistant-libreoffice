@@ -534,12 +534,12 @@ ce modèle et ce serveur, il n'est pas remesuré à chaque fois.
 
 ### Le fichier à récupérer
 
-L'assistant écrit tout ce qu'il fait dans un fichier appelé **`log.txt`**, dans votre dossier
-personnel :
+L'assistant écrit tout ce qu'il fait dans un fichier appelé **`mirai.log`**, dans le dossier
+`mirai` de la configuration de LibreOffice :
 
-- **macOS** : `/Users/<votre-nom>/log.txt`
-- **Windows** : `C:\Users\<votre-nom>\log.txt`
-- **Linux** : `/home/<votre-nom>/log.txt`
+- **macOS** : `/Users/<votre-nom>/Library/Application Support/LibreOffice/4/user/config/mirai/mirai.log`
+- **Windows** : `%APPDATA%\LibreOffice\4\user\config\mirai\mirai.log`
+- **Linux** : `/home/<votre-nom>/.config/libreoffice/4/user/config/mirai/mirai.log`
 
 Le plus simple : ouvrez ce fichier avec un éditeur de texte, allez tout **en bas**, et copiez
 les **cinquante dernières lignes**.
@@ -562,7 +562,7 @@ Pour chaque anomalie, ces cinq éléments suffisent :
 2. **Ce que vous avez fait**, en une phrase.
 3. **Ce que vous attendiez**, et **ce qui s'est passé à la place**.
 4. **Une capture d'écran**, si quelque chose est visible à l'écran.
-5. **Les 50 dernières lignes de `log.txt`**.
+5. **Les 50 dernières lignes de `mirai.log`**.
 
 Précisez aussi votre **système** (macOS / Windows / Linux) et la **version de LibreOffice**
 (menu *LibreOffice ▸ À propos*).

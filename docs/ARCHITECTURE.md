@@ -209,11 +209,23 @@ comme « la demande porte sur le document entier ».
 
 ## Persistance de conversation (MVP) — `core/conversation.py`
 
-`<UserConfig>/assistant_conversation.json` — 20 échanges / 100 Ko max,
+`<UserConfig>/mirai/assistant_conversation.json` — 20 échanges / 100 Ko max,
 écriture atomique, tolérant à la corruption, local uniquement, bouton
 « Nouvelle conversation ». Les tours user + réponses finales seulement
 (jamais les tool calls). Injection des derniers échanges dans le contexte
 (cap ~4 000 caractères).
+
+## Fichiers locaux et secrets — modules partagés de `src/mirai/`
+
+- `local_config.py` : dossier `<UserConfig>/mirai/`, écritures atomiques, aucune valeur secrète
+  (`redact_dm_config` vide les clés de `SECRET_DM_KEYS` avant `dm_snapshot.json`), effacement
+  complet à la désinstallation. Voir `docs/donnees-locales.md`.
+- `credentials.py` : jetons courts en mémoire, secrets durables dans le coffre de l'OS
+  (Gestionnaire d'identification Windows, trousseau macOS, mémoire ailleurs). Partagé avec
+  l'add-in `=PROMPT()` sous le même nom de module.
+- `log_setup.py` : journal `mirai/mirai.log`, rotation 1 Mo × 1. Ni jeton, ni réponse `/config`
+  brute du DM, ni corps de requête envoyé au modèle, ni texte du document (les lignes `[journal]`
+  n'y portent que la taille des extraits, affichés dans l'onglet « Actions »).
 
 ## Ajouter un tool en 5 étapes
 

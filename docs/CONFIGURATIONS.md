@@ -179,7 +179,7 @@ et `/update/status`.
 ```bash
 cd ~/Documents/GitHub/AssistantMiraiLibreOffice
 ./scripts/06-use-config-profile.sh dev      # bootstrap http://localhost:8089, ?profile=dev
-./scripts/00-clean-install.sh --uninstall   # purge creds relais + jetons — INDISPENSABLE
+./scripts/00-clean-install.sh --uninstall
 ./scripts/02-build-oxt.sh
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
   "$PWD/dist/mirai.oxt"
@@ -223,7 +223,7 @@ Disponibilité vérifiée le 2026-07-26 : ✅ `/config?profile=prod` → **HTTP 
 ```bash
 cd ~/Documents/GitHub/AssistantMiraiLibreOffice
 ./scripts/06-use-config-profile.sh prod
-./scripts/00-clean-install.sh --uninstall   # OBLIGATOIRE : voir ci-dessous
+./scripts/00-clean-install.sh --uninstall
 ./scripts/02-build-oxt.sh
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
   "$PWD/dist/mirai.oxt"
@@ -231,11 +231,19 @@ cd ~/Documents/GitHub/AssistantMiraiLibreOffice
 
 ### Précautions — chacune a déjà coûté une session de débogage
 
-1. **Purger la configuration à chaque changement de tier.** Une paire relais émise par le
-   DM local est refusée par Scaleway, et inversement. `00-clean-install.sh --uninstall`
-   efface identifiants relais et jetons ; sans lui, on hérite d'un 401 permanent.
+1. **Changer de tier = installer un OXT construit pour ce tier** : les identifiants de
+   l'ancien environnement sont écartés automatiquement au démarrage (ré-enrôlement).
+   Une paire relais émise par le DM local est refusée par Scaleway, et inversement.
+   Exception : la première mise à niveau depuis l'ancienne disposition (`config.json` à la
+   racine de `user/config/`) reprend la paire de ce fichier sous l'environnement du nouvel
+   OXT ; si elle vient d'un autre DM, elle est refusée (401) jusqu'à un ré-enrôlement.
+   **Règle de livraison** : changer dans un OXT l'ensemble des URL DM (`bootstrap_urls`,
+   `bootstrap_url` — ajouter ou retirer une URL de repli compte) ou le `?profile=` de
+   `config_path` revient à planifier une vague de ré-enrôlement : au démarrage suivant, les
+   identifiants de l'ancien environnement sont effacés sur chaque poste mis à jour. L'ordre
+   des URL, `enabled` et `bootstrap_insecure_urls` n'entrent pas en compte.
 2. **Ne jamais poser `enrolled: true` à la main** dans
-   `~/Library/Application Support/LibreOffice/4/user/config/config.json`. Le drapeau franchit
+   `~/Library/Application Support/LibreOffice/4/user/config/mirai/settings.json`. Le drapeau franchit
    le gate mais aucune paire relais n'existe : 401 « Missing credentials » sur 100 % des
    appels, **et le drapeau empêche le ré-enrôlement qui corrigerait la situation**
    (`[ENROLL] Auto-check: already enrolled, skipping wizard`). Seule sortie : un vrai
@@ -243,7 +251,7 @@ cd ~/Documents/GitHub/AssistantMiraiLibreOffice
 3. **Libérer le port 28443 avant tout test SSO** : `lsof -nP -iTCP:28443`. Un simulateur lié
    à `127.0.0.1:28443` intercepte le callback sans que le plugin échoue — il attend 3 min
    puis expire. Signature du diagnostic : **aucune ligne `PKCE callback received` dans
-   `~/log.txt`** alors que le navigateur a bien affiché une page.
+   `mirai/mirai.log`** alors que le navigateur a bien affiché une page.
 4. **Neutraliser la campagne de mise à jour pendant les tests d'authentification** : une
    directive d'update ouvre une boîte modale à chaque lancement et **interrompt le login SSO
    en cours**. Aligner la version du build sur la cible de campagne (`target == current`
@@ -264,12 +272,12 @@ curl -s -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
 
 | Symptôme | Première chose à regarder |
 |---|---|
-| 401 sur tous les appels IA | `config.json` : y a-t-il **`relay_client_id` ET `relay_client_key` ET un `llm_api_tokens` non vide** ? Si `enrolled: true` sans paire relais → état absorbant, ré-enrôlement obligatoire. |
+| 401 sur tous les appels IA | `mirai/settings.json` (drapeau `enrolled`) et coffre de l'OS : y a-t-il **`relay_client_id` ET `relay_client_key` ET un `llm_api_tokens` non vide** ? Si `enrolled: true` sans paire relais → état absorbant, ré-enrôlement obligatoire. |
 | « Callback invalide (state inconnu) » | `lsof -nP -iTCP:28443`. Ce message **n'existe pas dans le code du plugin** : s'il s'affiche, il vient d'un autre processus. |
 | Une boîte modale coupe le login SSO | Campagne de mise à jour active : aligner la version ou désactiver la campagne. |
-| Le plugin semble ne rien faire | `~/log.txt` : chercher le span de l'action (`SummarizeSelection`…) puis la réponse HTTP. Si les deux sont présents, l'action a bien tourné — c'est l'affichage qui est en cause. |
+| Le plugin semble ne rien faire | `mirai/mirai.log` : chercher le span de l'action (`SummarizeSelection`…) puis la réponse HTTP. Si les deux sont présents, l'action a bien tourné — c'est l'affichage qui est en cause. |
 | `unopkg` échoue en `NoConnectException` | Launch constraints macOS. Contrôle : `/Applications/LibreOffice.app/Contents/Resources/python --version` doit renvoyer **0**, pas 137 ; sinon re-signer ad hoc (`codesign --force -s -`). |
 | Le conteneur DM redémarre en boucle | `docker logs <conteneur>` : presque toujours `DATABASE_ADMIN_URL`, non surchargeable autrement que par un override compose. |
 
-Le journal applicatif du plugin est **`~/log.txt`** — c'est la source de vérité, le code y
+Le journal applicatif du plugin est **`<profil LibreOffice>/user/config/mirai/mirai.log`** — c'est la source de vérité, le code y
 trace abondamment.

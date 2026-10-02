@@ -273,12 +273,17 @@ Dans la plupart des cas, ces paramètres sont préconfigurés par votre administ
 | `config/config.default.example.json` | Exemple committable (sans secrets) |
 | `config/profiles/` | Profils prédéfinis (`docker`, `kubernetes`, `dgx`, `local-llm`) |
 
-Au premier lancement, `config.json` est initialisé depuis `config.default.json` puis enrichi par le bootstrap Device Management. Le fichier de configuration utilisateur se trouve dans :
+Au premier lancement, les réglages sont initialisés depuis `config.default.json` puis enrichis par le bootstrap Device Management. Les fichiers de l'utilisateur se trouvent dans le dossier `mirai/` :
 
 ```
-~/Library/Application Support/LibreOffice/4/user/config/config.json    # macOS
-~/.config/libreoffice/4/user/config/config.json                        # Linux
+~/Library/Application Support/LibreOffice/4/user/config/mirai/    # macOS
+~/.config/libreoffice/4/user/config/mirai/                        # Linux
+%APPDATA%\LibreOffice\4\user\config\mirai\                      # Windows
 ```
+
+#### Vos données
+
+L'extension ne garde sur votre poste que ses réglages, votre conversation et son journal, dans ce dossier. Aucun mot de passe ni jeton n'y est écrit (hors flux de télémétrie sécurisée hérité, inactif en pratique, voir donnees-locales.md) : ils sont confiés au coffre de votre système (Gestionnaire d'identification sous Windows, trousseau sous macOS). Sous Linux, ils ne sont gardés qu'en mémoire : l'assistant de connexion s'affiche à chaque session LibreOffice. Si vous désinstallez l'extension depuis le Gestionnaire des extensions de LibreOffice, tout est effacé ; redémarrez ensuite LibreOffice. Détails pour votre support : [donnees-locales.md](donnees-locales.md).
 
 Pour construire un OXT avec un profil spécifique :
 
@@ -288,15 +293,14 @@ Pour construire un OXT avec un profil spécifique :
 
 ### 5.3 🔵 Proxy et certificats SSL
 
-Configuration proxy dans `config.json` :
+Le proxy se règle depuis **🤖 MIrAI 🤖 → ⚙️ Paramètres**, bouton **Proxy**. Les réglages sont enregistrés dans `mirai/settings.json` ; le mot de passe du proxy, lui, va dans le coffre du système (voir [Vos données](#vos-données)) :
 
 ```json
 {
   "proxy_enabled": false,
   "proxy_url": "proxy.example.local:8080",
   "proxy_allow_insecure_ssl": true,
-  "proxy_username": "",
-  "proxy_password": ""
+  "proxy_username": ""
 }
 ```
 
@@ -369,7 +373,7 @@ Un fichier `prompt.txt` placé à côté du document est détecté automatiqueme
 
 > 🔵 **Expert** — Diagnostic avancé :
 >
-> - **Logs** — Toutes les requêtes et erreurs sont tracées dans `~/log.txt`. Consultez ce fichier pour diagnostiquer les problèmes de connexion, les erreurs HTTP, ou les réponses inattendues du modèle.
+> - **Logs** — Toutes les requêtes et erreurs sont tracées dans `mirai/mirai.log`, dans le dossier de configuration de LibreOffice (voir [donnees-locales.md](donnees-locales.md)). Consultez ce fichier pour diagnostiquer les problèmes de connexion, les erreurs HTTP, ou les réponses inattendues du modèle.
 > - **Deepseek-r1 think blocks** — Si du texte de raisonnement apparaît dans le document (phrases commençant par "Okay, I'm looking at…"), c'est que le modèle produit sa réflexion sans balises `<think>`. L'extension filtre ces balises mais le texte de raisonnement non balisé peut passer. Utilisez un modèle qui respecte la convention `<think>` ou un modèle non-raisonnement.
 > - **Limitations connues** — Certains modèles modifient les sauts de ligne ou la ponctuation. Les modèles très verbeux peuvent épuiser le budget de tokens en préambule. Performances optimales en français et en anglais.
 > - **Reset complet** — `./scripts/00-clean-install.sh --uninstall` puis `./scripts/dev-launch.sh`

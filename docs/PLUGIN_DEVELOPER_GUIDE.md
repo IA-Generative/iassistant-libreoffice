@@ -309,7 +309,7 @@ Et l'**update directive** que le plug-in reçoit dans la réponse `/config` :
 
 | Niveau | Identifiant | Durée de vie | Usage |
 |---|---|---|---|
-| **Device** | `client_uuid` (UUIDv4 random) | Permanente, persistée localement | Cohorte, campagne, dédup |
+| **Device** | `client_uuid` (UUIDv4 random) | Permanente, persistée localement ; conservée aux mises à jour, effacée à la désinstallation manuelle | Cohorte, campagne, dédup |
 | **Plugin instance** | `plugin_uuid` | Permanente | Identification dans /enroll |
 | **Relay credentials** | `relay_client_id` (`rc_xxx`) + `relay_client_key` (32B base64url) | TTL 30 jours, rotatable | Header `X-Relay-Client/Key` |
 | **User session** | `access_token` (JWT Keycloak) | TTL court (~5 min) + refresh_token | OIDC pendant l'enroll |
@@ -418,7 +418,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 ```
 
-Côté Python (LibreOffice) : `uuid.uuid4()` à la première exécution, persisté dans `~/Library/.../Application Support/LibreOffice/4/user/mirai-libreoffice.json`.
+Côté Python (LibreOffice) : `uuid.uuid4()` à la première exécution, persisté dans `<profil LibreOffice>/user/config/mirai/settings.json` (clés `extensionUUID` / `plugin_uuid`). Une souche d'identité `user/config/config.json` est conservée à côté, pour que l'identité de l'appareil soit conservée si l'extension est ramenée à une version antérieure (par exemple par une campagne de retour arrière du DM). L'identité survit aux mises à jour et n'est effacée qu'à la désinstallation manuelle depuis le Gestionnaire des extensions.
 
 ### 9.2 PKCE — challenge + verifier (JS)
 
@@ -608,7 +608,7 @@ def download_and_verify(bootstrap_url, slug, expected_sha256, relay_id, relay_ke
 - [ ] **Implémenter le bootstrap config public** (`GET /config/{slug}/config.json?profile=dev`, sans header).
 - [ ] **Implémenter PKCE** vers Keycloak (code_verifier hex 32 octets, code_challenge SHA-256/b64url).
 - [ ] **Implémenter `POST /enroll`** avec `Authorization: Bearer {access_token}` + headers `X-Client-UUID`, `X-Plugin-Version`, `X-Platform-Type`.
-- [ ] **Persister `relayClientId/relayClientKey`** dans le storage le plus sûr disponible (Keychain macOS / `chrome.storage.local` / fichier chmod 600).
+- [ ] **Ranger les secrets selon leur durée de vie** : identifiants durables (`relayClientId/relayClientKey`, refresh token) dans le coffre de l'OS (Gestionnaire d'identification Windows, Keychain macOS ; mémoire seule là où il n'y en a pas, Linux) ou `chrome.storage.local` pour un plug-in navigateur ; jetons courts (`llmToken`, clé de télémétrie, `access_token` Keycloak) en mémoire, jamais dans un fichier. Implémentation de référence LibreOffice : `src/mirai/credentials.py` ; Thunderbird utilise `nsILoginManager`.
 - [ ] **Refactor toutes les requêtes** vers DM/LLM pour ajouter `X-Relay-Client/Key`.
 - [ ] **Implémenter le refresh config** périodique (alarm 30 min, ou timer Python).
 - [ ] **Détecter `update.action == "update"`** dans la réponse config et planifier l'update (manuel ou auto selon plate-forme).
