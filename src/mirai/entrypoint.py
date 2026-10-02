@@ -397,6 +397,9 @@ def log_to_file(message):
         pass
 
 
+credentials.set_log(log_to_file)
+
+
 def is_main_thread():
     """Vrai si l'appelant est le thread principal du processus."""
     return threading.current_thread() is threading.main_thread()

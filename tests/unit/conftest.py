@@ -60,6 +60,7 @@ def _reset_credentials():
         from src.mirai import credentials
     except Exception:
         return
+    credentials.use_store(credentials.MemoryStore())
     credentials.forget_all()
 
 
