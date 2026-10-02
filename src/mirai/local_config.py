@@ -224,6 +224,19 @@ class LocalConfig:
             except OSError:
                 pass
 
+    def record_install(self, version, package):
+        """Compare l'installation courante à la précédente et l'enregistre."""
+        path = self._path(INSTALL_STATE_FILE)
+        if not path:
+            return set()
+        current = {"version": str(version or ""), "package": str(package or ""),
+                   "transport": self.transport_scope()}
+        previous = read_json(path)
+        write_json_atomic(path, current)
+        if not previous:
+            return {"first_run"}
+        return {key for key, value in current.items() if previous.get(key) != value}
+
     def migrate_legacy(self, home_dir):
         """Range l'ancienne disposition dans le dossier de l'extension.
 

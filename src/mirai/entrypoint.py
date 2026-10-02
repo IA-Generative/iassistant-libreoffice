@@ -655,6 +655,14 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
 # The MainJob is a UNO component derived from unohelper.Base class
 # and also the XJobExecutor, the implemented interface
 class MainJob(unohelper.Base, XJobExecutor, XJob):
+    # Caches dérivés d'une version, d'un modèle ou d'un DM : jamais conservés
+    # d'une installation à l'autre.
+    _DERIVED_CACHE_KEYS = ("assistant_model_capabilities", "llm_tool_mode_detected",
+                           "calc_transform_suggestions_cache", "last_bootstrap_url")
+    # Émis par un DM précis : sans valeur pour un autre environnement.
+    _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
+                               "relay_key_expires_at", "refresh_token",
+                               "access_token", "access_token_expires_at")
     # Class-level flags shared across all instances to prevent duplicate wizards/updates
     _enrollment_dismissed_cls = False
     _enrollment_wizard_active_cls = False
@@ -1270,6 +1278,23 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_setup.install(data_dir)
             for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
                 log_to_file(f"[stockage] {action}")
+            self._apply_install_changes(self._local_config().record_install(
+                self._get_extension_version(), self._package_root_dir() or ""))
+
+    def _apply_install_changes(self, changes):
+        changes = set(changes or ())
+        if not changes - {"first_run"}:
+            return
+        remove = list(self._DERIVED_CACHE_KEYS)
+        if "transport" in changes:
+            remove += list(self._ENVIRONMENT_BOUND_KEYS)
+        cfg = self._local_config()
+        cfg.update(remove=remove)
+        cfg.delete_snapshot()
+        log_to_file(f"[stockage] installation changée ({', '.join(sorted(changes))}) : "
+                    "caches effacés"
+                    + (", identifiants de l'ancien environnement effacés"
+                       if "transport" in changes else ""))
 
     def _ensure_extension_uuid(self):
         """Ensure extension has a unique UUID, generate if missing."""
@@ -1510,9 +1535,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if resolved:
             return resolved
         persisted = str(self._get_config_from_file("last_bootstrap_url", "") or "").strip()
-        if persisted:
-            return persisted
         urls = self._bootstrap_urls()
+        if persisted and persisted.rstrip("/") in {url.rstrip("/") for url in urls}:
+            return persisted
         return urls[0] if urls else ""
 
     def _is_insecure_bootstrap_url(self, url):
