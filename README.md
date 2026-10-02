@@ -108,7 +108,8 @@ Ou via l'interface : **Outils → Gestionnaire d'extensions → Ajouter** → s�
 # Build + install + config profile + launch LibreOffice
 ./scripts/dev-launch.sh --config config/profiles/config.default.integration.json
 
-# Reset complet avant test
+# Efface les données locales de l'extension (Keychain, journaux LibreOffice, cache
+# temporaire) et désinstalle l'extension
 ./scripts/00-clean-install.sh --uninstall
 ```
 
@@ -206,10 +207,11 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 
 | Fichier | Rôle |
 | --- | --- |
-| `config/config.default.json` | Valeurs par défaut packagées dans l'OXT |
+| `config/config.default.json` | Réglages de bootstrap packagés dans l'OXT (URL du DM, profil) |
 | `config/profiles/` | Profils prédéfinis (`docker`, `kubernetes`, `integration`, `local-llm`) |
 | `dm-config.json` | Configuration DM embarquée (bootstrap URL, profil) |
 | `dm-manifest.json` | Métadonnées plugin pour le catalogue DM |
+| [`docs/donnees-locales.md`](docs/donnees-locales.md) | Données que l'extension stocke sur le poste |
 
 ### Profils de déploiement
 
@@ -244,7 +246,7 @@ oxt/                           # Fichiers statiques packagés dans l'OXT
 config/profiles/               # Profils de configuration
 
 scripts/
-├── 00-clean-install.sh        # Purge config, logs, cache extension
+├── 00-clean-install.sh        # Efface données locales, entrées Keychain, journaux LO, cache extension (--uninstall : retire aussi l'extension)
 ├── 02-build-oxt.sh            # Produit dist/mirai.oxt
 ├── dev-launch.sh              # Build + install + launch LibreOffice
 ├── bump-version.sh            # Bump version + build + instructions deploy
@@ -266,7 +268,7 @@ tests/
 ## Scripts de développement
 
 ```bash
-# Reset complet
+# Efface les données locales de l'extension, puis la désinstalle
 ./scripts/00-clean-install.sh --uninstall
 
 # Cycle dev (build + install + launch)

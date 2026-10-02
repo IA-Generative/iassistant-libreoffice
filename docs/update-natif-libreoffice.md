@@ -132,7 +132,7 @@ un canary au reste du parc.
    - après démarrage, ouvrir le `description.xml` installé
      (`<profil>/user/uno_packages/cache/uno_packages/<lu…>/<…>.oxt/`) : chaque
      `<src>` finit par `?version=<version installée>` ;
-     `grep "_rewrite_feed_url" ~/log.txt` → `written` puis plus rien tant que la
+     `grep "_rewrite_feed_url" <profil>/user/config/mirai/mirai.log` → `written` puis plus rien tant que la
      cible ne change pas ;
    - sans directive, **Vérifier les mises à jour** ne propose rien, même si une
      version plus récente est publiée sur le DM ;
@@ -164,11 +164,11 @@ un canary au reste du parc.
 6. Après « Installer » dans le dialogue natif : observer la boîte « installée,
    LibreOffice va se fermer » du plugin pendant que le dialogue LibreOffice
    est encore ouvert, et vérifier si la fermeture est refusée
-   (`grep -E "terminate (accepted|vetoed)|veto persistant|refusée par l'utilisateur|fermeture impossible" ~/log.txt`).
+   (`grep -E "terminate (accepted|vetoed)|veto persistant|refusée par l'utilisateur|fermeture impossible" <profil>/user/config/mirai/mirai.log`).
    Variante à jouer : laisser un document modifié ouvert et répondre « Annuler »
    à « Enregistrer les modifications ? » — un seul dialogue doit apparaître,
    suivi de la boîte « s'activera au prochain démarrage » (ni réessai, ni SIGTERM).
-7. `grep "_native_feed_offers" ~/log.txt` sur le poste durci : `offers=True`
+7. `grep "_native_feed_offers" <profil>/user/config/mirai/mirai.log` sur le poste durci : `offers=True`
    prouve que la pile UCB de LibreOffice traverse proxy et TLS jusqu'au feed.
 8. Deux sauts natifs consécutifs N → N+1 → N+2 avec inspection de
    `pending_update/update_state.json` entre les deux (`route`,

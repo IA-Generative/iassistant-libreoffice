@@ -3,25 +3,24 @@
 #
 # What this does:
 #   1. Quit LibreOffice (if running)
-#   2. Reset config.json  → keep only bootstrap_url / config_path
+#   2. Erase local data: config/mirai/, the config.json identity stub, legacy
+#      files of older versions, and the macOS Keychain entries
 #   3. Delete LibreOffice log files  (unopkg.log, GraphicsRenderTests.log)
 #   4. Purge extension temp cache    (extensions/tmp/)
 #   5. Uninstall the Mirai extension (optional, --uninstall flag)
 #
 # Usage:
-#   scripts/00-clean-install.sh [--uninstall] [--config <profile.json>]
-#   scripts/00-clean-install.sh [--uninstall] [--bootstrap-url <url>] [--config-path <path>]
+#   scripts/00-clean-install.sh [--uninstall]
 
 set -euo pipefail
 
 SOFFICE="/Applications/LibreOffice.app/Contents/MacOS/soffice"
 UNOPKG="/Applications/LibreOffice.app/Contents/MacOS/unopkg"
 LO_USER_DIR="$HOME/Library/Application Support/LibreOffice/4/user"
-CONFIG_FILE="$LO_USER_DIR/config/config.json"
+KEYCHAIN_SERVICE="MIrAI-LibreOffice"
+KEYCHAIN_ACCOUNTS=(relay_client_id relay_client_key relay_key_expires_at refresh_token proxy_password llm_api_tokens)
+LEGACY_FILES=(config_cache.json assistant_conversation.json prompts_calc.txt prompt.txt telemetry_queue.json secure_bootstrap_state.json)
 
-BOOTSTRAP_URL=""
-CONFIG_PATH=""
-CONFIG_PROFILE=""
 DO_UNINSTALL=false
 
 log()  { printf '▶ %s\n' "$*"; }
@@ -30,26 +29,12 @@ ok()   { printf '✓ %s\n' "$*"; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --uninstall)          DO_UNINSTALL=true; shift ;;
-    --config)             CONFIG_PROFILE="${2:-}"; shift 2 ;;
-    --bootstrap-url)      BOOTSTRAP_URL="${2:-}"; shift 2 ;;
-    --config-path)        CONFIG_PATH="${2:-}"; shift 2 ;;
     -h|--help)
       sed -n '2,12p' "$0"; exit 0 ;;
     *)
       printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
-
-# If --config was given, use it as the initial config file directly
-if [ -n "$CONFIG_PROFILE" ]; then
-  if [ ! -f "$CONFIG_PROFILE" ]; then
-    printf 'ERROR: config profile not found: %s\n' "$CONFIG_PROFILE" >&2; exit 1
-  fi
-elif [ -z "$BOOTSTRAP_URL" ]; then
-  # Default fallback
-  BOOTSTRAP_URL="http://localhost:3001"
-  CONFIG_PATH="/config/libreoffice/config.json?profile=dev"
-fi
 
 # ── 1. Quit LibreOffice ───────────────────────────────────────────────────────
 if pgrep -x soffice >/dev/null 2>&1; then
@@ -62,28 +47,18 @@ if pgrep -x soffice >/dev/null 2>&1; then
   ok "LibreOffice closed"
 fi
 
-# ── 2. Reset config.json ──────────────────────────────────────────────────────
-log "Resetting config.json..."
-mkdir -p "$(dirname "$CONFIG_FILE")"
-if [ -n "$CONFIG_PROFILE" ]; then
-  cp "$CONFIG_PROFILE" "$CONFIG_FILE"
-  ok "config.json reset from profile → $CONFIG_PROFILE"
-else
-  python3 - "$CONFIG_FILE" "$BOOTSTRAP_URL" "$CONFIG_PATH" <<'PY'
-import json, sys
-path, bootstrap_url, config_path = sys.argv[1], sys.argv[2], sys.argv[3]
-data = {
-    "configVersion": 1,
-    "enabled": True,
-    "bootstrap_url": bootstrap_url,
-    "config_path": config_path,
-}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=4, ensure_ascii=False)
-    f.write("\n")
-PY
-  ok "config.json reset → $CONFIG_FILE"
-fi
+# ── 2. Erase local data ───────────────────────────────────────────────────────
+log "Erasing local data..."
+rm -rf "$LO_USER_DIR/config/mirai"
+rm -f "$LO_USER_DIR/config/config.json"
+for f in "${LEGACY_FILES[@]}"; do
+  rm -f "$LO_USER_DIR/config/$f"
+done
+rm -rf "$LO_USER_DIR/config/pending_update"
+for account in "${KEYCHAIN_ACCOUNTS[@]}"; do
+  security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$account" >/dev/null 2>&1 || true
+done
+ok "Local data erased"
 
 # ── 3. Delete log files ───────────────────────────────────────────────────────
 log "Deleting log files..."

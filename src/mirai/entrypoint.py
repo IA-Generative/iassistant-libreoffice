@@ -71,6 +71,31 @@ except Exception:
     _XCMDENV_IFACE = None
     _XINTERACTION_IFACE = None
 
+try:
+    from com.sun.star.util import XModifyListener as _XMODIFY_LISTENER_IFACE
+except Exception:
+    _XMODIFY_LISTENER_IFACE = None
+
+if _XMODIFY_LISTENER_IFACE is not None:
+    class MirAIUninstallListener(unohelper.Base, _XMODIFY_LISTENER_IFACE):
+        """Notifié à chaque changement du Gestionnaire des extensions : LibreOffice
+        n'offre aucun crochet de désinstallation, seule cette notification, sans
+        détail, arrive (dans le processus qui désinstalle)."""
+
+        def __init__(self, on_modified):
+            self._on_modified = on_modified
+
+        def modified(self, _event):
+            try:
+                self._on_modified()
+            except Exception as exc:
+                log_to_file(f"[désinstallation] {exc}")
+
+        def disposing(self, _event):
+            return
+else:
+    MirAIUninstallListener = None
+
 if _XCALLBACK_IFACE is not None:
     class _MainThreadCallback(unohelper.Base, _XCALLBACK_IFACE):
         """Exécute un callable sur le thread PRINCIPAL de LibreOffice, planifié via
@@ -178,8 +203,7 @@ import hashlib
 import threading
 import socket
 from .formatting import insert_formatted
-from . import feed_rewrite
-from . import local_config
+from . import credentials, feed_rewrite, local_config, log_setup
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .security_flow import (
@@ -356,10 +380,6 @@ _UI = {
     "font_small":      8,          # small caption font size
 }
 
-# Configure logging once at module level (thread-safe, not per-call)
-_log_file_path = os.path.join(os.path.expanduser('~'), 'log.txt')
-logging.basicConfig(filename=_log_file_path, level=logging.INFO, format='%(asctime)s - %(message)s')
-
 def _with_user_agent(headers=None):
     result = dict(headers) if headers else {}
     if "User-Agent" not in result:
@@ -400,6 +420,9 @@ def log_to_file(message):
         logging.info(message)
     except Exception:
         pass
+
+
+credentials.set_log(log_to_file)
 
 
 def is_main_thread():
@@ -660,6 +683,20 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
 # The MainJob is a UNO component derived from unohelper.Base class
 # and also the XJobExecutor, the implemented interface
 class MainJob(unohelper.Base, XJobExecutor, XJob):
+    _uninstall_listener_cls = None
+    _self_update_in_flight_cls = False
+    _wiped_cls = False
+    _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
+    _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
+    _EXTENSION_MANAGER = "/singletons/com.sun.star.deployment.ExtensionManager"
+    # Caches dérivés d'une version, d'un modèle ou d'un DM : jamais conservés
+    # d'une installation à l'autre.
+    _DERIVED_CACHE_KEYS = ("assistant_model_capabilities", "llm_tool_mode_detected",
+                           "calc_transform_suggestions_cache", "last_bootstrap_url")
+    # Émis par un DM précis : sans valeur pour un autre environnement.
+    _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
+                               "relay_key_expires_at", "refresh_token",
+                               "access_token", "access_token_expires_at")
     # Class-level flags shared across all instances to prevent duplicate wizards/updates
     _enrollment_dismissed_cls = False
     _enrollment_wizard_active_cls = False
@@ -681,6 +718,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # par /config.
     _feed_rewrite_started_cls = False
     _feed_rewrite_lock_cls = threading.Lock()
+    # Préparation du stockage local (journal, migration, empreinte) : une fois
+    # par processus.
+    _storage_ready_cls = False
+    _storage_lock_cls = threading.Lock()
     _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
     _feed_rewrite_last_result_cls = None    # (résultat, version) du dernier appel
     _context_menu_refs_cls = []
@@ -719,7 +760,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self._relay_recovery_last_at = 0
         self._llm_auth_recovery_lock = threading.Lock()
         self._llm_auth_recovery_last_at = 0
-        self._config_write_lock = threading.Lock()
         self._edit_dialog = None
         self._resize_dialog = None
         self._formula_dialog = None
@@ -749,14 +789,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file("MainJob initialized without XSCRIPTCONTEXT")
 
         try:
-            path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-            user_config_path = getattr(path_settings, "UserConfig")
-            if user_config_path.startswith('file://'):
-                user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-            config_file_path = os.path.join(user_config_path, "config.json")
-            log_to_file(f"Profile config path: {config_file_path}")
+            self._prepare_local_storage()
         except Exception as e:
-            log_to_file(f"Failed to resolve profile config path: {str(e)}")
+            log_to_file(f"Local storage preparation failed: {str(e)}")
         
         # Initialise User-Agent with real plugin + LibreOffice versions
         try:
@@ -1247,6 +1282,184 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
         return user_config_path
 
+    def _local_config(self):
+        if getattr(self, "_local_cfg", None) is None:
+            self._local_cfg = local_config.LocalConfig(
+                self._get_user_config_dir(),
+                local_config.package_config_candidates(os.path.dirname(os.path.abspath(__file__))),
+            )
+        return self._local_cfg
+
+    def _data_dir(self):
+        return self._local_config().dir
+
+    def _pending_update_dir(self):
+        base = self._data_dir()
+        return os.path.join(base, "pending_update") if base else ""
+
+    def _prompt_log_path(self):
+        base = "" if local_config.is_frozen() else self._data_dir()
+        return os.path.join(base, "prompt.txt") if base else ""
+
+    def _prepare_local_storage(self):
+        """Une fois par processus : journal dans le dossier de l'extension."""
+        with MainJob._storage_lock_cls:
+            if MainJob._storage_ready_cls:
+                return
+            MainJob._storage_ready_cls = True
+        data_dir = self._data_dir()
+        if data_dir:
+            log_setup.install(data_dir)
+            for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
+                log_to_file(f"[stockage] {action}")
+            self._move_secrets_out_of_settings()
+            self._apply_install_changes(self._local_config().record_install(
+                self._get_extension_version(), self._package_root_dir() or ""))
+            try:
+                self._register_uninstall_listener()
+            except Exception as exc:
+                log_to_file(f"[désinstallation] écoute impossible : {exc}")
+
+    def _register_uninstall_listener(self):
+        if MainJob._uninstall_listener_cls is not None:
+            return
+        if MirAIUninstallListener is None:
+            log_to_file("[désinstallation] écoute non branchée : XModifyListener indisponible")
+            return
+        manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
+        if manager is None:
+            log_to_file("[désinstallation] écoute non branchée : "
+                        "gestionnaire des extensions introuvable")
+            return
+        listener = MirAIUninstallListener(self._schedule_uninstall_check)
+        manager.addModifyListener(listener)
+        MainJob._uninstall_listener_cls = listener
+
+    def _schedule_uninstall_check(self):
+        # Différé : la base des extensions doit être stabilisée (remplacement en
+        # cours, mise à jour native) avant de conclure à une désinstallation.
+        timer = threading.Timer(self._UNINSTALL_CHECK_DELAY_SECONDS, self._check_uninstalled)
+        timer.daemon = True
+        timer.start()
+
+    def _extension_still_deployed(self):
+        """True si l'extension figure encore dans un dépôt ; True aussi dans le
+        doute (API en échec) : on n'efface jamais sur une absence d'information.
+        Une extension désactivée reste listée."""
+        try:
+            manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
+            for repository in self._DEPLOYMENT_REPOSITORIES:
+                packages = manager.getDeployedExtensions(
+                    repository, manager.createAbortChannel(), None)
+                for package in packages or ():
+                    identifier = package.getIdentifier()
+                    if getattr(identifier, "Value", identifier) == _EXTENSION_IDENTIFIER:
+                        return True
+        except Exception as exc:
+            log_to_file(f"[désinstallation] état du déploiement illisible : {exc}")
+            return True
+        return False
+
+    def _check_uninstalled(self):
+        try:
+            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
+                return
+            if self._extension_still_deployed():
+                return
+            # Un remplacement (addPackage) efface l'ancienne entrée avant d'insérer
+            # la nouvelle : une seule absence ne prouve rien.
+            timer = threading.Timer(
+                self._UNINSTALL_CHECK_DELAY_SECONDS, self._confirm_uninstalled)
+            timer.daemon = True
+            timer.start()
+        except Exception as exc:
+            log_to_file(f"[désinstallation] contrôle impossible : {exc}")
+
+    def _confirm_uninstalled(self):
+        try:
+            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
+                return
+            if self._extension_still_deployed():
+                return
+            self._wipe_all_data("désinstallation depuis le Gestionnaire des extensions")
+        except Exception as exc:
+            log_to_file(f"[désinstallation] effacement impossible : {exc}")
+
+    def _wipe_all_data(self, reason):
+        MainJob._wiped_cls = True
+        log_to_file(f"[désinstallation] {reason} : effacement des données de l'extension")
+        credentials.freeze()
+        local_config.freeze()
+        log_setup.uninstall()
+        log_setup.freeze()
+        credentials.wipe()
+        local_config.wipe(self._local_config().user_config_dir)
+
+    def _credential_scope(self):
+        return self._local_config().transport_scope()
+
+    def _store_secret(self, key, value, scope):
+        """Coffre de l'OS ; s'il refuse l'écriture (trousseau désynchronisé,
+        persistance plafonnée), le secret reste en mémoire pour la session au
+        lieu d'être perdu."""
+        if credentials.set_secret(key, value, scope):
+            credentials.forget(key)
+            return True
+        credentials.remember(key, value)
+        return False
+
+    def _move_secrets_out_of_settings(self):
+        """Secrets restés dans settings.json (migration, rollback) → coffre ou
+        mémoire ; jetons courts abandonnés. Sans coffre (Linux), ils ne vivent
+        plus que le temps de la session.
+
+        Un secret n'y revient que par un écrivain plus récent (version antérieure
+        après un retour arrière, reprise par la migration) : il remplace donc
+        celui du coffre."""
+        cfg = self._local_config()
+        settings = cfg.settings()
+        scope = self._credential_scope()
+        stored = []
+        refused = []
+        for key in credentials.STORED_KEYS:
+            value = settings.get(key)
+            if value in (None, ""):
+                continue
+            if self._store_secret(key, value, scope):
+                stored.append(key)
+            else:
+                refused.append(key)
+        stale = [key for key in settings
+                 if key in credentials.STORED_KEYS or key in credentials.MEMORY_KEYS
+                 or key in local_config.SECRET_DM_KEYS or key == "llmTokenExpiresAt"]
+        if stale:
+            cfg.update(remove=stale)
+            where = ("dans le coffre" if getattr(credentials.store(), "persistent", False)
+                     else "en mémoire pour la session")
+            log_to_file(f"[secrets] {len(stored)} secret(s) rangé(s) {where}, "
+                        f"{len(stale)} clé(s) retirée(s) des réglages"
+                        + (f" ; refusés par le coffre, gardés en mémoire : {', '.join(refused)}"
+                           if refused else ""))
+
+    def _apply_install_changes(self, changes):
+        changes = set(changes or ())
+        if not changes - {"first_run"}:
+            return
+        remove = list(self._DERIVED_CACHE_KEYS)
+        if "transport" in changes:
+            remove += list(self._ENVIRONMENT_BOUND_KEYS)
+            for key in credentials.SCOPED_KEYS:
+                credentials.delete_secret(key)
+                credentials.forget(key)
+            credentials.forget("access_token")
+        cfg = self._local_config()
+        cfg.update(remove=remove)
+        cfg.delete_snapshot()
+        log_to_file(f"[stockage] installation changée ({', '.join(sorted(changes))}) : "
+                    "caches effacés"
+                    + (", identifiants de l'ancien environnement effacés"
+                       if "transport" in changes else ""))
+
     def _ensure_extension_uuid(self):
         """Ensure extension has a unique UUID, generate if missing."""
         extension_uuid = self.get_config("extensionUUID", "")
@@ -1295,7 +1508,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return None
             plugin_uuid = self._ensure_plugin_uuid()
             device_name = str(self._get_config_from_file("device_name", "mirai-libreoffice") or "").strip() or "mirai-libreoffice"
-            user_config_dir = self._get_user_config_dir()
+            user_config_dir = self._data_dir()
             if not user_config_dir:
                 # Pas de dossier de config exploitable -> flux sécurisé
                 # indisponible (évite d'écrire l'état dans un chemin fantôme).
@@ -1394,130 +1607,26 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         }
 
     def _get_config_from_file(self, key, default, telemetry_defaults=None):
-        name_file = "config.json"
-        package_file = "config.default.json"
-        path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-
-        user_config_path = getattr(path_settings, "UserConfig")
-
-        if user_config_path.startswith('file://'):
-            user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-
-        # Ensure the path ends with the filename
-        config_file_path = os.path.join(user_config_path, name_file)
-
-        user_config_data = None
-        package_config_data = None
-
-        # Load user config (if present)
-        if os.path.exists(config_file_path):
-            try:
-                with open(config_file_path, 'r', encoding='utf-8') as file:
-                    user_config_data = json.load(file)
-            except (IOError, json.JSONDecodeError):
-                user_config_data = None
-        else:
-            log_to_file(f"Config file not found in user profile: {config_file_path}")
-
-        # Load packaged config.default.json (inside extension)
-        package_config_candidates = [
-            os.path.join(os.path.dirname(__file__), package_file),
-            os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', package_file)),
-        ]
-        for package_config_path in package_config_candidates:
-            if os.path.exists(package_config_path):
-                try:
-                    with open(package_config_path, 'r', encoding='utf-8') as file:
-                        package_config_data = json.load(file)
-                    break
-                except (IOError, json.JSONDecodeError):
-                    package_config_data = None
-
-        # If user config missing or invalid, initialize from package defaults
-        if not isinstance(user_config_data, dict) or not user_config_data:
-            if isinstance(package_config_data, dict) and package_config_data:
-                try:
-                    with open(config_file_path, 'w', encoding='utf-8') as file:
-                        json.dump(package_config_data, file, indent=4, ensure_ascii=False)
-                    user_config_data = dict(package_config_data)
-                    log_to_file(f"Config initialized from package defaults: {config_file_path}")
-                except Exception:
-                    user_config_data = None
-
-        # Merge: packaged defaults overridden by user config
-        config_data = {}
-        if isinstance(package_config_data, dict):
-            config_data.update(package_config_data)
-        if isinstance(user_config_data, dict):
-            config_data.update(user_config_data)
-
-        # Debug: log where token is read from (masked)
-        if key == "llm_api_tokens":
-            try:
-                raw_value = config_data.get(key, default)
-                masked = ""
-                if raw_value:
-                    text = str(raw_value)
-                    masked = text[:2] + "***" + text[-2:] if len(text) > 4 else "*" * len(text)
-                log_to_file(
-                    "Config read llm_api_tokens "
-                    f"path={config_file_path} "
-                    f"user_present={bool(user_config_data)} "
-                    f"package_present={bool(package_config_data)} "
-                    f"value={masked}"
-                )
-            except Exception:
-                pass
-
-        # Upgrade user config if package has higher configVersion
-        pkg_version = None
-        user_version = None
-        try:
-            pkg_version = int(config_data.get("configVersion")) if "configVersion" in config_data else None
-        except Exception:
-            pkg_version = None
-        try:
-            user_version = int(user_config_data.get("configVersion")) if isinstance(user_config_data, dict) and "configVersion" in user_config_data else None
-        except Exception:
-            user_version = None
-        if pkg_version is not None and (user_version is None or user_version < pkg_version):
-            try:
-                merged = {}
-                if isinstance(package_config_data, dict):
-                    merged.update(package_config_data)
-                if isinstance(user_config_data, dict):
-                    merged.update(user_config_data)
-                merged["configVersion"] = pkg_version
-                with open(config_file_path, 'w') as file:
-                    json.dump(merged, file, indent=4)
-                config_data = merged
-                log_to_file(f"Config upgraded to version {pkg_version}: {config_file_path}")
-            except Exception:
-                pass
-
-        if not config_data:
-            return default
-
-        # Get the value from config file
-        value = config_data.get(key, default)
-
-        # If telemetry key is empty string and we have a default from telemetry_defaults, use it
-        if telemetry_defaults and key == "telemetryKey" and (value == "" or value is None) and key in telemetry_defaults:
+        """Valeur locale de `key` : transport de l'OXT, réglages de l'utilisateur,
+        dernier instantané du DM, défauts de l'OXT (cf. LocalConfig.get)."""
+        if key in credentials.STORED_KEYS:
+            # La mémoire ne porte qu'une écriture refusée par le coffre : plus
+            # récente que ce que le coffre garde encore.
+            return (credentials.recall(key)
+                    or credentials.get_secret(key, self._credential_scope()) or default)
+        if key in credentials.MEMORY_KEYS:
+            return credentials.recall(key) or default
+        value = self._local_config().get(key, default)
+        if telemetry_defaults and key == "telemetryKey" and value in ("", None) \
+                and key in telemetry_defaults:
             return telemetry_defaults[key]
-
         return value
 
     def _device_management_enabled(self):
         return self._as_bool(self._get_config_from_file("enabled", False))
 
     def _select_settings(self, config_data):
-        if not isinstance(config_data, dict):
-            return None
-        for candidate in ("config", "settings", "parameters", "mirai", "mirai_config", "miraiConfig"):
-            value = config_data.get(candidate)
-            if isinstance(value, dict):
-                return value
-        return None
+        return local_config.select_settings(config_data)
 
     def _schedule_config_refresh(self, force=False, reason="background"):
         if not self._device_management_enabled():
@@ -1597,9 +1706,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if resolved:
             return resolved
         persisted = str(self._get_config_from_file("last_bootstrap_url", "") or "").strip()
-        if persisted:
-            return persisted
         urls = self._bootstrap_urls()
+        if persisted and persisted.rstrip("/") in {url.rstrip("/") for url in urls}:
+            return persisted
         return urls[0] if urls else ""
 
     def _is_insecure_bootstrap_url(self, url):
@@ -1779,100 +1888,48 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return None
 
     def _persist_bootstrap_config(self, config_data):
-        """Write key bootstrap values (LLM, telemetry) into local config file."""
-        try:
-            inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
-            if not isinstance(inner, dict):
-                return
-            keys_to_sync = [
-                "llm_base_urls", "llm_api_tokens", "llmTokenExpiresAt",
-                "llm_default_models", "systemPrompt",
-                "telemetryEndpoint", "telemetryKey",
-                "telemetryAuthorizationType", "telemetrySel",
-                "relayAssistantBaseUrl",
-                "doc_url", "portal_url",
-                "keycloak_redirect_uri", "keycloak_allowed_redirect_uri",
-                "analyze_range_max_tokens", "llm_request_timeout_seconds",
-                "simplify_selection_max_tokens", "simplify_selection_system_prompt",
-                "extend_selection_max_tokens", "extend_selection_system_prompt",
-                "edit_selection_max_new_tokens", "edit_selection_system_prompt",
-                "summarize_selection_max_tokens", "summarize_selection_system_prompt",
-            ]
-            # Keys that are only written locally if the user has no local value yet
-            user_preference_keys = {"llm_default_models"}
-            # Clés dont la valeur VIDE est significative : le DM nous dit « ce
-            # credential n'est plus valable ». L'ignorer laisse un llmToken
-            # périmé ou révoqué sur disque, rejoué indéfiniment en 401.
-            clearable_keys = {"llm_api_tokens", "llmTokenExpiresAt"}
-            for key in keys_to_sync:
-                if key not in inner:
-                    continue
-                val = inner[key]
-                current = self._get_config_from_file(key, None)
-                if key in user_preference_keys:
-                    # Only set from DM if user has no local preference
-                    if not current and val:
-                        self.set_config(key, val)
-                    continue
-                if val == current:
-                    continue
-                if val == "" and key not in clearable_keys:
-                    continue
-                self.set_config(key, val)
-                if key == "llm_api_tokens":
-                    log_to_file(
-                        f"[persist] llm_api_tokens synced from DM ({len(str(val))} chars)"
-                        if val else
-                        "[persist] llm_api_tokens vidé par le DM (aucun llmToken minté)"
-                    )
-            log_to_file("Bootstrap config persisted to local file")
-        except Exception as e:
-            log_to_file(f"Failed to persist bootstrap config: {str(e)}")
-
-    def _config_cache_path(self):
-        """Path of the on-disk cache of the full enriched config_data."""
-        try:
-            base = self._get_user_config_dir()
-            return os.path.join(base, "config_cache.json") if base else ""
-        except Exception:
-            return ""
+        """Jetons courts de la réponse /config → mémoire du processus. Les autres
+        réglages vivent dans l'instantané (_persist_config_cache), remplacé à
+        chaque récupération : une clé abandonnée par le DM disparaît avec lui, ce
+        que ne ferait pas une recopie dans les réglages utilisateur."""
+        inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
+        credentials.remember_dm_tokens(inner)
 
     def _persist_config_cache(self, config_data):
-        """Persist the enriched config_data (secrets blanked) + timestamp so a
-        fresh MainJob instance (LO re-instantiates the job per action) can reuse
-        it without a blocking network fetch."""
-        path = self._config_cache_path()
-        if not path or not isinstance(config_data, dict):
+        """Instantané de la réponse /config (secrets vidés) : sert de couche DM
+        hors ligne et évite un appel bloquant aux instances suivantes de MainJob
+        (LibreOffice en crée une par action)."""
+        if not isinstance(config_data, dict):
             return
         try:
-            local_config.write_json_atomic(path, {
-                "ts": time.time(),
-                "config_data": local_config.redact_dm_config(config_data),
-            })
+            self._local_config().save_dm_snapshot(
+                config_data, extra_settings=self._keycloak_settings_from(config_data))
         except Exception as exc:
-            log_to_file(f"config cache persist failed: {str(exc)}")
+            log_to_file(f"config snapshot persist failed: {str(exc)}")
 
     def _hydrate_config_cache(self):
-        """Load the last persisted config_data into the in-memory cache when it
-        is still fresh (< config_ttl), so per-action instances don't block on a
-        network fetch. The background refresh keeps it up to date."""
+        """Recharge l'instantané en cache mémoire s'il a moins de config_ttl."""
         if self.config_cache:
             return
-        path = self._config_cache_path()
-        if not path or not os.path.isfile(path):
-            return
+        blob = self._local_config().snapshot()
+        data = blob.get("config_data")
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                blob = json.load(f)
             ts = float(blob.get("ts", 0))
-            data = blob.get("config_data")
-            age = time.time() - ts
-            if isinstance(data, dict) and 0 <= age < self.config_ttl:
-                self.config_cache = data
-                self.config_loaded_at = ts
-                log_to_file(f"config cache hydrated from disk (age {int(age)}s)")
-        except Exception as exc:
-            log_to_file(f"config cache hydrate failed: {str(exc)}")
+        except (TypeError, ValueError):
+            return
+        age = time.time() - ts
+        if isinstance(data, dict) and 0 <= age < self.config_ttl:
+            # Jeton vidé dans l'instantané : un nouveau processus n'a rien en
+            # mémoire, le servir bloquerait toute récupération pendant config_ttl.
+            settings = local_config.select_settings(data) or {}
+            if ("llmToken" in settings or "llm_api_tokens" in settings) \
+                    and not credentials.recall(credentials.DM_LLM_TOKEN):
+                log_to_file("Instantané DM non rechargé : aucun llmToken en mémoire, "
+                            "récupération auprès du DM requise")
+                return
+            self.config_cache = data
+            self.config_loaded_at = ts
+            log_to_file(f"config cache hydrated from disk (age {int(age)}s)")
 
     # ── Update & Feature Toggling (schema_version 2) ─────────────────
 
@@ -2103,8 +2160,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             # the restart (see _install_and_restart_in_process). Installing here
             # (from the update worker thread) AND at restart would double-install
             # and can clobber the running instance.
+            if local_config.is_frozen():
+                log_to_file("_perform_update: extension désinstallée, mise en place abandonnée")
+                return
             try:
-                stable_dir = os.path.join(self._get_user_config_dir(), "pending_update")
+                stable_dir = self._pending_update_dir()
+                if not stable_dir:
+                    raise OSError("dossier de l'extension indisponible")
                 os.makedirs(stable_dir, exist_ok=True)
             except Exception:
                 stable_dir = os.path.dirname(tmp_path)
@@ -2168,7 +2230,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file(f"_perform_update: unopkg={unopkg} platform={sys_name}")
 
                     # Stage the update: quit LO → wait → remove old → install new → relaunch
-                    log_path = os.path.expanduser("~/log.txt")
+                    log_path = log_setup.path() or os.path.join(self._data_dir(), log_setup.LOG_FILE)
                     _ts = 'date "+%Y-%m-%d %H:%M:%S"'
 
                     if sys_name == "Windows":
@@ -2455,7 +2517,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 if oxt and os.path.isfile(oxt):
                     folder = os.path.dirname(oxt)
                 else:
-                    cand = os.path.join(self._get_user_config_dir(), "pending_update")
+                    cand = self._pending_update_dir()
                     if os.path.isdir(cand):
                         folder = cand
             except Exception:
@@ -2742,6 +2804,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         back to the manual-install message (ou au script si explicitement
         réactivé). UNO usage is lazy so the module imports under test stubs.
         """
+        MainJob._self_update_in_flight_cls = True
         try:
             if not oxt_path or not os.path.isfile(oxt_path):
                 return False
@@ -2783,6 +2846,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as exc:
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
             return False
+        finally:
+            MainJob._self_update_in_flight_cls = False
 
     def _has_modified_documents(self):
         """Vrai si au moins un document ouvert porte des modifications non
@@ -3005,10 +3070,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # purge idempotente de pending_update, levée de l'anti-boucle.
 
     def _update_state_path(self):
-        base = self._get_user_config_dir()
-        if not base:
-            return ""
-        return os.path.join(base, "pending_update", "update_state.json")
+        base = self._pending_update_dir()
+        return os.path.join(base, "update_state.json") if base else ""
 
     def _load_update_state(self):
         """État persistant de la MAJ en cours, ou {} (fichier absent ou illisible).
@@ -3033,7 +3096,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         et version_before doit rester celle d'avant pour la réconciliation.
         """
         path = self._update_state_path()
-        if not path:
+        if not path or local_config.is_frozen():
             return
         try:
             previous = self._load_update_state()
@@ -3065,10 +3128,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_save_update_state: {exc}")
 
     def _purge_pending_update_dir(self):
-        base = self._get_user_config_dir()
-        if not base:
+        folder = self._pending_update_dir()
+        if not folder:
             return
-        folder = os.path.join(base, "pending_update")
         try:
             import shutil
             shutil.rmtree(folder, ignore_errors=True)
@@ -3687,11 +3749,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return self._resolve_llm_token(default, telemetry_defaults=telemetry_defaults)
 
         if key == "llm_default_models":
-            local_model = str(self._get_config_from_file("llm_default_models", "", telemetry_defaults=telemetry_defaults)).strip()
+            local_model = str(self._local_config().settings().get("llm_default_models", "") or "").strip()
             config_model = self._get_setting("llm_default_models")
             config_model = str(config_model).strip() if config_model is not None else ""
             if config_model and len(config_model) < 6:
                 config_model = ""
+            if not config_model:
+                config_model = str(
+                    self._get_config_from_file("llm_default_models", "") or "").strip()
 
             endpoint = self.get_config("llm_base_urls", "http://127.0.0.1:5000")
             api_key = self.get_config("llm_api_tokens", "")
@@ -3729,56 +3794,29 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # pas la valeur du DM, on retombe sur la lecture locale.
         if key in local_config.SECRET_DM_KEYS and config_value == "":
             config_value = None
+        if key == "telemetryKey" and not config_value:
+            config_value = credentials.recall(credentials.DM_TELEMETRY_KEY) or None
         if config_value is not None:
             return config_value
 
         return self._get_config_from_file(key, default, telemetry_defaults=telemetry_defaults)
 
     def set_config(self, key, value):
-        name_file = "config.json"
-
-        path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-        user_config_path = getattr(path_settings, "UserConfig")
-
-        if user_config_path.startswith('file://'):
-            user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-
-        config_file_path = os.path.join(user_config_path, name_file)
-
-        with self._config_write_lock:
-            if os.path.exists(config_file_path):
-                try:
-                    with open(config_file_path, 'r', encoding='utf-8') as file:
-                        config_data = json.load(file)
-                except (IOError, json.JSONDecodeError):
-                    config_data = {}
-            else:
-                config_data = {}
-
-            config_data[key] = value
-            if key == "llm_default_models":
-                log_to_file(f"Model saved (local): {value}")
-
-            # Écriture ATOMIQUE : fichier temporaire puis remplacement.
-            # Écrire en place expose tout lecteur concurrent — un autre thread
-            # du plugin, une seconde instance de LibreOffice — à un JSON
-            # tronqué. Le lecteur repart alors sur les valeurs par défaut et
-            # PERD les credentials : c'est une façon d'entrer dans l'état
-            # absorbant (enrôlé sans paire relais) sans que personne ne l'ait
-            # demandé. os.replace est atomique sur POSIX comme sur Windows.
-            temporary_path = f"{config_file_path}.tmp"
-            try:
-                with open(temporary_path, 'w', encoding='utf-8') as file:
-                    json.dump(config_data, file, indent=4, ensure_ascii=False)
-                    file.flush()
-                    os.fsync(file.fileno())
-                os.replace(temporary_path, config_file_path)
-            except OSError as e:
-                log_to_file(f"Error writing to {config_file_path}: {e}")
-                try:
-                    os.remove(temporary_path)
-                except OSError:
-                    pass
+        if key in credentials.STORED_KEYS:
+            if not self._store_secret(key, value, self._credential_scope()):
+                log_to_file(f"[secrets] {key} refusé par le coffre : gardé en mémoire "
+                            "pour la session")
+            return
+        if key in credentials.MEMORY_KEYS:
+            credentials.remember(key, value)
+            return
+        try:
+            self._local_config().set(key, value)
+        except OSError as e:
+            log_to_file(f"Error writing setting {key}: {e}")
+            return
+        if key == "llm_default_models":
+            log_to_file(f"Model saved (local): {value}")
 
     def _jwt_payload(self, token):
         try:
@@ -5172,10 +5210,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         config_data = self._fetch_config()
         if not config_data:
             return
-        try:
-            self._sync_keycloak_from_config(config_data)
-        except Exception:
-            pass
 
         access_token = self._ensure_access_token(config_data, interactive=False)
         keycloak = self._keycloak_config(config_data)
@@ -5418,20 +5452,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """
         cached = self._get_setting("llm_api_tokens")
         settings = self._select_settings(self.config_cache) or {}
-        if cached is not None and len(str(cached)) >= 6:
+        if cached and len(str(cached)) >= 6:
             if not self._token_expired_at(settings.get("llmTokenExpiresAt")):
                 return cached
             log_to_file("[llm-auth] llmToken du cache DM expiré — refresh forcé")
             self._schedule_config_refresh(force=True, reason="llm_token_expired")
-
-        stored = self._get_config_from_file(
-            "llm_api_tokens", default, telemetry_defaults=telemetry_defaults)
-        if stored and self._token_expired_at(
-                self._get_config_from_file("llmTokenExpiresAt", 0)):
-            log_to_file("[llm-auth] llmToken persisté expiré — ignoré, refresh forcé")
+        remembered = credentials.recall(credentials.DM_LLM_TOKEN)
+        if remembered:
+            return remembered
+        if credentials.expires_at(credentials.DM_LLM_TOKEN):
+            log_to_file("[llm-auth] llmToken mémorisé expiré — refresh forcé")
             self._schedule_config_refresh(force=True, reason="llm_token_expired")
-            return default
-        return stored
+        return self._get_config_from_file(
+            "llm_api_tokens", default, telemetry_defaults=telemetry_defaults)
 
     def _llm_auth_debug(self):
         """Une ligne sans ambiguïté sur le credential retenu pour l'appel LLM.
@@ -5594,11 +5627,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return value != 0
         return False
 
-    def _get_proxy_config(self):
+    def _get_proxy_config(self, with_credentials=False):
+        """`with_credentials` : le dialogue proxy doit afficher (et réenregistrer)
+        identifiant et mot de passe même proxy coupé. Sinon, pas de lecture du
+        coffre de l'OS à chaque requête HTTP quand le proxy est désactivé."""
         enabled = self._as_bool(self._get_config_from_file("proxy_enabled", False))
         proxy_url = str(self._get_config_from_file("proxy_url", "")).strip()
-        username = str(self._get_config_from_file("proxy_username", "")).strip()
-        password = str(self._get_config_from_file("proxy_password", ""))
+        username = password = ""
+        if enabled or with_credentials:
+            username = str(self._get_config_from_file("proxy_username", "")).strip()
+            password = str(self._get_config_from_file("proxy_password", ""))
         allow_insecure = self._as_bool(self._get_config_from_file("proxy_allow_insecure_ssl", False))
         return {
             "enabled": enabled,
@@ -5850,7 +5888,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file(f"Dialog prop unsupported: control={name} type={type} prop={key} error={str(e)}")
             return control
 
-        cfg = self._get_proxy_config()
+        cfg = self._get_proxy_config(with_credentials=True)
         lo = self._lo_proxy_settings()
         proxy_url_value = cfg["proxy_url"]
         if not proxy_url_value and lo["host"]:
@@ -6161,11 +6199,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 log_to_file(f"Reload config: no settings dict found (type={type(config_data).__name__})")
                 return {}
             settings = config_data
-        self._sync_keycloak_from_settings(settings, config_data)
         log_to_file(f"Reload config: keys={sorted(settings.keys())}")
         return dict(settings)
 
-    def _sync_keycloak_from_settings(self, settings, config_data=None):
+    def _keycloak_settings_from(self, config_data):
+        settings = local_config.select_settings(config_data) or {}
         keycloak_src = None
 
         def _flat_keycloak(source):
@@ -6257,7 +6295,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if keycloak_src is None:
                 keycloak_src = _flat_keycloak(config_data)
         if not isinstance(keycloak_src, dict):
-            return
+            return {}
         keycloak_map = {
             "keycloakIssuerUrl": (
                 keycloak_src.get("issuerUrl")
@@ -6324,36 +6362,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 or keycloak_src.get("keycloak_allowed_redirect_uri")
             ),
         }
-        for target_key, value in keycloak_map.items():
-            if value is None:
-                continue
-            text = str(value).strip()
-            if not text:
-                continue
-            # F1 — Le DM est autoritatif sur le SSO : on écrase systématiquement la
-            # valeur locale (potentiellement un placeholder baké) avec celle servie par
-            # le DM, sinon un placeholder non vide gagnerait à jamais (bug `mysso`).
-            try:
-                current = str(self._get_config_from_file(target_key, "") or "").strip()
-            except Exception:
-                current = ""
-            if text == current:
-                continue
-            try:
-                self.set_config(target_key, text)
-                log_to_file(f"[keycloak-sync] {target_key} updated from DM")
-            except Exception:
-                pass
-
-    def _sync_keycloak_from_config(self, config_data):
-        settings = None
-        if isinstance(config_data, dict):
-            config_obj = config_data.get("config")
-            if isinstance(config_obj, dict):
-                settings = config_obj
-            else:
-                settings = self._select_settings(config_data)
-        self._sync_keycloak_from_settings(settings if isinstance(settings, dict) else {}, config_data=config_data)
+        return {key: str(value).strip() for key, value in keycloak_map.items()
+                if value is not None and str(value).strip()}
 
     def _get_cached_models(self, endpoint, api_key, is_openwebui):
         key = (endpoint, api_key, bool(is_openwebui))
@@ -7402,14 +7412,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 pass
 
         try:
-            path_settings = self.sm.createInstanceWithContext('com.sun.star.util.PathSettings', self.ctx)
-            user_config_path = getattr(path_settings, "UserConfig")
-            if user_config_path.startswith('file://'):
-                user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-            prompt_log_path = os.path.join(user_config_path, "prompt.txt")
-            with open(prompt_log_path, "a", encoding="utf-8") as f:
-                f.write(user_input.strip() + "\n")
-                f.write("-" * 40 + "\n")
+            prompt_log_path = self._prompt_log_path()
+            if prompt_log_path:
+                with open(prompt_log_path, "a", encoding="utf-8") as f:
+                    f.write(user_input.strip() + "\n")
+                    f.write("-" * 40 + "\n")
         except Exception:
             pass
 
@@ -7545,14 +7552,8 @@ EDITED VERSION:
                         self._fetch_config(force=True)
                     except Exception:
                         pass
-                    # Verify token is now available — read directly from disk
-                    try:
-                        _cfg_path = os.path.join(self._get_user_config_dir(), "config.json")
-                        with open(_cfg_path, "r", encoding="utf-8") as _f:
-                            _disk = json.load(_f)
-                        token_check = str(_disk.get("llm_api_tokens", "") or "").strip()
-                    except Exception:
-                        token_check = str(self._get_config_from_file("llm_api_tokens", "") or "").strip()
+                    # Verify token is now available
+                    token_check = str(self.get_config("llm_api_tokens", "") or "").strip()
                     log_to_file(f"[edit] after refresh: llm_api_tokens={'present' if token_check else 'still empty'}")
                     if not token_check:
                         break  # no point retrying without a token
@@ -7834,9 +7835,7 @@ EDITED VERSION:
                             # MIRAI_SELFTEST_UPDATE_BLOCKED=1 (inerte en production).
                             if os.environ.get("MIRAI_SELFTEST_UPDATE_BLOCKED"):
                                 try:
-                                    pend = os.path.join(
-                                        about_self._get_user_config_dir(), "pending_update"
-                                    )
+                                    pend = about_self._pending_update_dir()
                                     os.makedirs(pend, exist_ok=True)
                                     open(os.path.join(pend, "mirai_update.oxt"), "a").close()
                                     if update_status:
@@ -7891,11 +7890,9 @@ EDITED VERSION:
                 elif source == btn_open_folder:
                     # Ouvre le dossier de MAJ en natif (Finder/Explorer, sans cmd.exe).
                     try:
-                        folder = os.path.join(
-                            about_self._get_user_config_dir(), "pending_update"
-                        )
+                        folder = about_self._pending_update_dir()
                         if not os.path.isdir(folder):
-                            folder = about_self._get_user_config_dir()
+                            folder = about_self._data_dir()
                         ok = about_self._open_folder_native(folder)
                         if update_status:
                             update_status.getModel().Label = (
@@ -9097,13 +9094,9 @@ EDITED VERSION:
                 self.outer = outer
             def actionPerformed(self, event):
                 try:
-                    path_settings = self.outer.sm.createInstanceWithContext(
-                        "com.sun.star.util.PathSettings", self.outer.ctx
-                    )
-                    user_config_path = getattr(path_settings, "UserConfig")
-                    if user_config_path.startswith("file://") or user_config_path.startswith("file:"):
-                        user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-                    prompt_log_path = os.path.join(user_config_path, "prompt.txt")
+                    prompt_log_path = self.outer._prompt_log_path()
+                    if not prompt_log_path:
+                        return
                     if not os.path.exists(prompt_log_path):
                         with open(prompt_log_path, "a", encoding="utf-8") as f:
                             f.write("")
@@ -9544,17 +9537,15 @@ EDITED VERSION:
     def _prompts_calc_path(self):
         """Chemin du fichier d'historique des prompts Calc.
 
-        L'historique se range à côté de config.json, dans le profil utilisateur
-        LibreOffice. Si ce dossier est introuvable on rend "" — surtout pas un
+        L'historique se range dans le dossier de l'extension, dans le profil
+        utilisateur LibreOffice. Si ce dossier est introuvable on rend "" — surtout pas un
         repli sur le HOME : ces lignes sont du contenu saisi par l'utilisateur,
         et les écrire en clair dans le dossier personnel est un défaut de
         confidentialité (issue #31). Les appelants traitent "" comme
         « pas d'historique disponible ».
         """
-        config_dir = self._get_user_config_dir()
-        if not config_dir:
-            return ""
-        return os.path.join(config_dir, "prompts_calc.txt")
+        base = self._data_dir()
+        return os.path.join(base, "prompts_calc.txt") if base else ""
 
     def _load_prompts_calc(self):
         """Load saved prompts (most-recent-first, max 100)."""
@@ -9571,7 +9562,7 @@ EDITED VERSION:
     def _save_prompt_calc(self, prompt: str):
         """Prepend prompt to the history file (deduplicated, max 100 lines)."""
         path = self._prompts_calc_path()
-        if not path:
+        if not path or local_config.is_frozen():
             return
         try:
             existing = self._load_prompts_calc()
@@ -11090,10 +11081,6 @@ EDITED VERSION:
         if not config_data:
             log_to_file("First enrollment: config fetch failed")
             return False
-        try:
-            self._sync_keycloak_from_config(config_data)
-        except Exception:
-            pass
         access_token = self._ensure_access_token(config_data, interactive=True)
         if access_token:
             log_to_file("First enrollment: auth succeeded")

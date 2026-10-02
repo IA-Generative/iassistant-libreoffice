@@ -9,6 +9,8 @@ un JSON invalide repart vide, jamais de crash.
 import json
 import os
 
+from .. import local_config
+
 FILENAME = "assistant_conversation.json"
 MAX_EXCHANGES = 20            # paires user+assistant conservées
 MAX_BYTES = 100_000
@@ -65,6 +67,8 @@ class ConversationStore:
         return list(reversed(selected))
 
     def _write(self, entries):
+        if local_config.is_frozen():
+            return
         try:
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
             tmp_path = self._path + ".tmp"

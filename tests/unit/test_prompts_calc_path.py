@@ -45,13 +45,14 @@ class TestPromptsCalcPath(unittest.TestCase):
     def _break_path_settings(self):
         """Simule un PathSettings indisponible (LO dégradé, contexte mocké)."""
         self.job.sm.createInstanceWithContext.return_value.UserConfig = MagicMock()
+        self.job._local_cfg = None
 
     # ── Le chemin nominal ────────────────────────────────────────────────────
 
     def test_history_lives_next_to_config(self):
         self.assertEqual(
             self.job._prompts_calc_path(),
-            os.path.join(self.tmpdir, "prompts_calc.txt"),
+            os.path.join(self.tmpdir, "mirai", "prompts_calc.txt"),
         )
 
     def test_path_does_not_raise_on_missing_attribute(self):

@@ -153,7 +153,7 @@ def test_the_run_duration_is_measured_and_not_hardcoded():
     spans = []
     shell = MagicMock()
     shell.toolkit.return_value = MagicMock()
-    shell.user_config_dir.return_value = "/tmp/mirai-duration-test"
+    shell.data_dir.return_value = "/tmp/mirai-duration-test"
     shell.get_config.side_effect = lambda key, default=None: default
     shell.log = lambda _m: None
     shell.telemetry = lambda name, attrs=None: spans.append((name, dict(attrs or {})))

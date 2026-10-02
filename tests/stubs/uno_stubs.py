@@ -8,6 +8,7 @@ Usage — call install() before importing anything from src.mirai.entrypoint:
     install()
     from src.mirai.entrypoint import MainJob
 """
+import os
 import sys
 import time
 from unittest.mock import MagicMock
@@ -180,3 +181,26 @@ def make_job(config_dir=None):
     job._fetching_config = False
     job._schedule_config_refresh = MagicMock()
     return job
+
+
+def seed_user_config(config_dir, data):
+    """Remplace les réglages utilisateur par `data`, comme les aurait laissés
+    set_config : secrets dans le coffre (mémoire en test), le reste dans
+    <config_dir>/mirai/settings.json."""
+    from src.mirai import credentials, local_config
+    plain = {key: value for key, value in data.items()
+             if key not in credentials.STORED_KEYS and key not in credentials.MEMORY_KEYS}
+    path = os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE)
+    local_config.write_json_atomic(path, plain)
+    scope = local_config.LocalConfig(config_dir, []).transport_scope()
+    for key in credentials.STORED_KEYS:
+        credentials.set_secret(key, data.get(key, ""), scope)
+    for key in credentials.MEMORY_KEYS:
+        credentials.remember(key, data.get(key, ""))
+    return path
+
+
+def read_user_config(config_dir):
+    from src.mirai import local_config
+    return local_config.read_json(
+        os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE))

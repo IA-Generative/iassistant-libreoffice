@@ -2,18 +2,18 @@
 
 ## 1. Fichier de log automatique
 
-Le code génère automatiquement des logs dans `~/log.txt` (votre dossier utilisateur).
+Le code génère automatiquement des logs dans `<profil LibreOffice>/user/config/mirai/mirai.log` (rotation `mirai.log.1`, 1 Mo chacun).
 
 ### Voir les logs en temps réel :
 
 ```bash
-tail -f ~/log.txt
+tail -f ~/.config/libreoffice/4/user/config/mirai/mirai.log
 ```
 
 ### Effacer les logs :
 
 ```bash
-rm ~/log.txt
+rm ~/.config/libreoffice/4/user/config/mirai/mirai.log*
 ```
 
 ### Informations loguées :
@@ -21,8 +21,8 @@ rm ~/log.txt
 - URL de l'endpoint
 - Type d'API (chat/completions)
 - Modèle utilisé
-- Headers HTTP
-- Données de la requête
+- Headers HTTP (jeton masqué)
+- Taille de la requête, jamais son corps ni le texte du document
 - Statut de la réponse
 - Erreurs éventuelles
 
@@ -126,7 +126,7 @@ cat ~/Library/Application\ Support/LibreOffice/4/user/mirai.json
 
 ### Pas de réponse / Timeout
 - Vérifiez que le serveur est accessible : `curl http://localhost:3000`
-- Vérifiez les logs : `tail -f ~/log.txt`
+- Vérifiez les logs : `tail -f ~/.config/libreoffice/4/user/config/mirai/mirai.log`
 - Assurez-vous que le modèle existe sur votre serveur
 
 ### L'extension ne s'affiche pas dans le menu
@@ -138,7 +138,7 @@ cat ~/Library/Application\ Support/LibreOffice/4/user/mirai.json
 Le script `00-clean-install.sh` remet le plugin dans l'état d'une installation fraîche :
 
 - Ferme LibreOffice
-- Réinitialise `config.json` (ne conserve que `bootstrap_url` et `config_path`)
+- Efface les données locales : dossier `config/mirai/`, souche `config.json`, fichiers des anciennes versions, entrées du trousseau macOS (voir `docs/donnees-locales.md`)
 - Supprime les fichiers de logs LibreOffice (`unopkg.log`, `GraphicsRenderTests.log`)
 - Purge le cache temp des extensions (`extensions/tmp/`)
 
@@ -158,8 +158,6 @@ Options disponibles :
 | Option | Description |
 |---|---|
 | `--uninstall` | Désinstalle aussi l'extension Mirai |
-| `--bootstrap-url <url>` | Surcharge l'URL bootstrap dans le config.json réinitialisé (défaut : `http://localhost:3001`) |
-| `--config-path <path>` | Surcharge le config_path (défaut : `/config/libreoffice/config.json?profile=dev`) |
 
 ### Réinstaller manuellement
 

@@ -9,13 +9,13 @@ Aucun LibreOffice requis — les modules UNO sont bouchonnés.
 """
 import base64
 import json
-import os
 import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from tests.stubs.uno_stubs import install, make_job
+from src.mirai import credentials
+from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
 
 install()
 
@@ -33,11 +33,7 @@ def _jwt(claims):
 
 
 def _write_config(config_dir, data):
-    os.makedirs(config_dir, exist_ok=True)
-    path = os.path.join(config_dir, "config.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    return path
+    return seed_user_config(config_dir, data)
 
 
 def _dm_response(**inner_overrides):
@@ -105,7 +101,6 @@ class TestEnsureDeviceManagementStateGuard(_JobCase):
         """Nombre de requêtes émises vers l'endpoint /enroll."""
         _write_config(self.config_dir, config_file)
         self.job._fetch_config = MagicMock(return_value=_dm_response())
-        self.job._sync_keycloak_from_config = MagicMock()
         self.job._ensure_access_token = MagicMock(return_value="tok")
         self.job._token_email = MagicMock(return_value="a@b.c")
         self.job._keycloak_config = MagicMock(return_value={})
@@ -199,10 +194,9 @@ class TestLlmTokenExpiry(_JobCase):
     """D5 : le llmToken est court (TTL DM 3600 s) — son expiration fait foi."""
 
     def test_expired_persisted_token_is_ignored(self):
-        _write_config(self.config_dir, {
-            "llm_base_urls": PROXY_URL,
-            "llm_api_tokens": "payload.signature",
-            "llmTokenExpiresAt": int(time.time()) - 10})
+        _write_config(self.config_dir, {"llm_base_urls": PROXY_URL})
+        credentials.remember(
+            credentials.DM_LLM_TOKEN, "payload.signature", int(time.time()) - 10)
         self.job._schedule_config_refresh = MagicMock()
         self.assertEqual(self.job.get_config("llm_api_tokens", ""), "")
         reasons = [c.kwargs.get("reason")
@@ -210,10 +204,9 @@ class TestLlmTokenExpiry(_JobCase):
         self.assertIn("llm_token_expired", reasons)
 
     def test_valid_persisted_token_is_served(self):
-        _write_config(self.config_dir, {
-            "llm_base_urls": PROXY_URL,
-            "llm_api_tokens": "payload.signature",
-            "llmTokenExpiresAt": int(time.time()) + 3600})
+        _write_config(self.config_dir, {"llm_base_urls": PROXY_URL})
+        credentials.remember(
+            credentials.DM_LLM_TOKEN, "payload.signature", int(time.time()) + 3600)
         self.assertEqual(
             self.job.get_config("llm_api_tokens", ""), "payload.signature")
 
@@ -228,24 +221,20 @@ class TestLlmTokenExpiry(_JobCase):
 class TestPersistClearsRevokedToken(_JobCase):
     """D6 : un `llm_api_tokens:""` renvoyé par le DM doit EFFACER le token local."""
 
-    def test_empty_token_from_dm_clears_disk_value(self):
-        _write_config(self.config_dir, {
-            "llm_api_tokens": "stale.token",
-            "llmTokenExpiresAt": int(time.time()) + 3600})
+    def test_empty_token_from_dm_clears_the_remembered_token(self):
+        credentials.remember(credentials.DM_LLM_TOKEN, "stale.token", int(time.time()) + 3600)
         self.job._persist_bootstrap_config(_dm_response())
-        self.assertEqual(
-            self.job._get_config_from_file("llm_api_tokens", "sentinel"), "")
+        self.assertEqual(credentials.recall(credentials.DM_LLM_TOKEN), "")
 
-    def test_minted_token_and_expiry_are_persisted(self):
-        _write_config(self.config_dir, {})
+    def test_minted_token_is_remembered_in_memory_only(self):
         expires_at = int(time.time()) + 3600
         self.job._persist_bootstrap_config(_dm_response(
             llm_api_tokens="fresh.token", llmToken="fresh.token",
             llmTokenExpiresAt=expires_at))
-        self.assertEqual(
-            self.job._get_config_from_file("llm_api_tokens", ""), "fresh.token")
-        self.assertEqual(
-            self.job._get_config_from_file("llmTokenExpiresAt", 0), expires_at)
+        self.assertEqual(credentials.recall(credentials.DM_LLM_TOKEN), "fresh.token")
+        self.assertEqual(credentials.expires_at(credentials.DM_LLM_TOKEN), expires_at)
+        self.assertNotIn("llm_api_tokens", read_user_config(self.config_dir))
+        self.assertIsNone(credentials.store().get("llm_api_tokens"))
 
 
 class TestNoKeycloakFallbackInProxyMode(_JobCase):

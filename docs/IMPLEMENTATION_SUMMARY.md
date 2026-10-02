@@ -92,12 +92,12 @@
 1. Supprimer `mirai.json` s'il existe
 2. Ouvrir LibreOffice avec l'extension
 3. Vérifier que `extensionUUID` est créé dans `mirai.json`
-4. Vérifier dans `~/log.txt` : "Generated new extension UUID: ..."
+4. Vérifier dans `mirai/mirai.log` : "Generated new extension UUID: ..."
 
 ### Test 2 : Envoi de trace au chargement
 1. Activer `telemetrylogJson: true`
 2. Redémarrer LibreOffice
-3. Vérifier dans `~/log.txt` : "Telemetry trace sent successfully: ExtensionLoaded"
+3. Vérifier dans `mirai/mirai.log` : "Telemetry trace sent successfully: ExtensionLoaded"
 
 ### Test 3 : Traces des actions
 1. Utiliser chaque fonctionnalité (CTRL+Q, E, R, L)
