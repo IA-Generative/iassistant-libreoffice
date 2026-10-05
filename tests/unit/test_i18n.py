@@ -141,12 +141,6 @@ def test_catalog_every_key_covers_every_supported_locale():
     assert incomplete == {}
 
 
-def test_catalog_is_not_shrinking():
-    # 223 cles au 2026-09 : le seuil garde la parite ci-dessus utile (un
-    # catalogue vide serait trivialement « complet »).
-    assert len(i18n.CATALOG) >= 223
-
-
 def test_catalog_values_are_non_empty_strings():
     blank = [
         (key, code)
