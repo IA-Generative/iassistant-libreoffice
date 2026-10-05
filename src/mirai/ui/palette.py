@@ -419,7 +419,8 @@ class _JournalObserver(RunObserver):
         self.acted = False    # un outil a-t-il agi pendant CE run ?
 
     def _tool_label(self, call):
-        return _t(TOOL_LABELS.get(call.name, call.name))
+        key = TOOL_LABELS.get(call.name)
+        return _t(key) if key else call.name
 
     def _capabilities(self):
         """Libellés des outils réellement disponibles ici, sans doublon."""

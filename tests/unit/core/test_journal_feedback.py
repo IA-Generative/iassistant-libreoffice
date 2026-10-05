@@ -127,6 +127,14 @@ def test_replace_paragraphs_has_a_human_label():
     assert _t(TOOL_LABELS["writer_replace_paragraphs"]) == "Réécriture des paragraphes"
 
 
+def test_unknown_tool_name_is_shown_as_is():
+    """Le nom vient du modèle : même s'il coïncide avec une clé du catalogue,
+    il s'affiche tel quel, jamais traduit."""
+    observer, palette = _observer()
+    observer.on_tool_calls([ToolCall(id="c1", name="common.ok", arguments={})])
+    assert "⏳ common.ok…" in palette.journal
+
+
 def test_every_registered_tool_has_a_label():
     """Un outil sans libellé s'affiche sous son nom technique dans le journal —
     c'est le défaut #35. Le test couvre les DEUX applications : la liste des
