@@ -164,36 +164,16 @@ def test_main_thread_install_reports_manager_failure():
     assert job._run_install_on_main_thread("file:///x.oxt", (), None, timeout=2) is False
 
 
-def test_install_and_restart_prefers_main_thread_over_legacy():
-    """Main thread OK → le chemin worker legacy (removePackage/addPackage,
-    vecteur de corruption) n'est PAS invoqué ; LO est fermé proprement."""
+def test_install_and_restart_closes_after_success():
+    """Installation réussie sur le thread principal → LO est fermé proprement."""
     fd, path = tempfile.mkstemp(suffix=".oxt")
     os.close(fd)
     try:
         job = make_job()
         job._run_install_on_main_thread = MagicMock(return_value=True)
-        job._install_oxt_inprocess = MagicMock()
         job._close_after_inprocess_update = MagicMock()
 
         assert job._install_and_restart_in_process(path) is True
-        job._install_oxt_inprocess.assert_not_called()
-        job._close_after_inprocess_update.assert_called_once()
-    finally:
-        os.remove(path)
-
-
-def test_install_and_restart_falls_back_to_legacy_worker_path():
-    """Main thread KO → dernier recours worker (comportement historique)."""
-    fd, path = tempfile.mkstemp(suffix=".oxt")
-    os.close(fd)
-    try:
-        job = make_job()
-        job._run_install_on_main_thread = MagicMock(return_value=False)
-        job._install_oxt_inprocess = MagicMock(return_value=True)
-        job._close_after_inprocess_update = MagicMock()
-
-        assert job._install_and_restart_in_process(path) is True
-        job._install_oxt_inprocess.assert_called_once()
         job._close_after_inprocess_update.assert_called_once()
     finally:
         os.remove(path)
