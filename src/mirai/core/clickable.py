@@ -52,8 +52,9 @@ def clean(line):
         if line.startswith(locuteur):
             line = line[len(locuteur):].strip()
             break
-    # Un intitulé de section se termine par « : » et n'est pas une demande.
-    if line.endswith(":"):
+    # Un intitulé de section se termine par « : » (« ： » en chinois) et n'est
+    # pas une demande.
+    if line.endswith((":", "：")):
         return ""
     return line
 

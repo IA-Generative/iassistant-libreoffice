@@ -6,7 +6,10 @@ illisible. On traduit donc la position du curseur en ligne, puis en demande
 nue, débarrassée de ce qui n'appartient qu'à l'affichage.
 """
 
-from src.mirai.core import clickable
+import pytest
+
+from src.mirai import i18n
+from src.mirai.core import clickable, doc_analysis
 
 SUGGESTIONS = ("1. ▸ Résumer la sélection\n"
                "2. · Reformuler en langage clair\n"
@@ -88,6 +91,13 @@ def test_click_on_an_analysis_item_returns_it():
 
 def test_click_on_the_analysis_title_returns_nothing():
     assert clickable.payload_at(ANALYSE, 0) == ""
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_click_on_the_analysis_title_returns_nothing_in_every_language(code):
+    i18n.set_locale(code)
+    rendered = doc_analysis.render(["Ajouter des intertitres"])
+    assert clickable.payload_at(rendered, 0) == ""
 
 
 def test_click_on_a_blank_line_returns_nothing():
