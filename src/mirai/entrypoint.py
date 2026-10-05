@@ -209,11 +209,7 @@ from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .i18n import t as _t
 from .i18n import (
-    code_for_index as _i18n_code_for_index,
     get_locale as _i18n_get_locale,
-    language_index as _i18n_language_index,
-    language_names as _i18n_language_names,
-    normalize_locale as _i18n_normalize_locale,
     resolve_locale as _i18n_resolve_locale,
     set_locale as _i18n_set_locale,
 )
@@ -837,12 +833,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as e:
             log_to_file(f"Local storage preparation failed: {str(e)}")
 
-        # Resolve the UI language: persisted override first, then LibreOffice's
-        # own UI locale, then the POSIX environment, then French.
+        # The extension speaks LibreOffice's own UI language, like its menu
+        # entries (oxt/Addons.xcu), and English when it does not offer it.
         try:
-            persisted_language = self._get_config_from_file("ui_language", "")
-            resolved_language = _i18n_set_locale(
-                _i18n_normalize_locale(persisted_language) or _i18n_resolve_locale(self.ctx))
+            resolved_language = _i18n_set_locale(_i18n_resolve_locale(self.ctx))
             log_to_file(f"UI language set to: {resolved_language}")
         except Exception as e:
             log_to_file(f"Failed to resolve UI language: {str(e)}")
@@ -10175,8 +10169,7 @@ EDITED VERSION:
         num_fields = len(field_specs)
         total_field_height = num_fields * (LABEL_HEIGHT + EDIT_HEIGHT + VERT_SEP * 2) + TEST_ROW_HEIGHT + (BUTTON_HEIGHT - LABEL_HEIGHT)
         desc_block_height = LABEL_HEIGHT + VERT_SEP + DESC_HEIGHT + VERT_SEP * 2
-        language_block_height = LABEL_HEIGHT + VERT_SEP + LABEL_HEIGHT + VERT_SEP + EDIT_HEIGHT + VERT_SEP * 2 + VERT_SEP
-        HEIGHT = VERT_MARGIN * 2 + IMAGE_HEIGHT + VERT_SEP + total_field_height + desc_block_height + language_block_height + LABEL_HEIGHT + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + EXTRA_BOTTOM
+        HEIGHT = VERT_MARGIN * 2 + IMAGE_HEIGHT + VERT_SEP + total_field_height + desc_block_height + LABEL_HEIGHT + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + EXTRA_BOTTOM
         dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
 
         def add(name, type, x_, y_, width_, height_, props):
@@ -10342,46 +10335,6 @@ EDITED VERSION:
             "Border": 0,
         })
         current_y += DESC_HEIGHT + VERT_SEP
-
-        # Separator before language
-        add("line_before_language", "FixedLine", HORI_MARGIN, current_y,
-            WIDTH - HORI_MARGIN * 2, 2, {})
-        current_y += VERT_SEP
-
-        # Language section header
-        add("section_language", "FixedText", HORI_MARGIN, current_y,
-            WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-                "Label": _t("settings.section_language"), "NoLabel": True,
-                "FontHeight": _UI["font_section"],
-                "TextColor": _UI["primary"],
-                "FontWeight": 150,
-            })
-        current_y += LABEL_HEIGHT + VERT_SEP
-
-        add("label_ui_language", "FixedText", HORI_MARGIN, current_y,
-            WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-                "Label": _t("settings.language_label"), "NoLabel": True,
-                "FontHeight": _UI["font_label"],
-                "TextColor": _UI["text"],
-            })
-        current_y += LABEL_HEIGHT + VERT_SEP
-
-        persisted_language = str(self._get_config_from_file("ui_language", "") or "").strip()
-        current_language = persisted_language or _i18n_get_locale()
-        ui_language_control = add("edit_ui_language", "ListBox", HORI_MARGIN, current_y,
-            WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-                "StringItemList": tuple(_i18n_language_names()),
-                "Dropdown": True,
-                "BackgroundColor": _UI["bg_input"],
-                "TextColor": _UI["text"],
-                "FontHeight": _UI["font_body"],
-            })
-        if ui_language_control is not None:
-            try:
-                ui_language_control.selectItemPos(_i18n_language_index(current_language), True)
-            except Exception as e:
-                log_to_file(f"Language listbox preselect failed: {str(e)}")
-        current_y += EDIT_HEIGHT + VERT_SEP * 2
 
         # Separator before status
         add("line_before_status", "FixedLine", HORI_MARGIN, current_y,
@@ -11027,24 +10980,6 @@ EDITED VERSION:
                             and self._device_management_enabled()):
                         continue
                     result[field["name"]] = control_text
-
-            # Langue de l'interface : persiste puis applique. Les libelles deja
-            # construits dans ce dialogue gardent l'ancienne langue ; le
-            # changement est visible au prochain affichage.
-            try:
-                language_position = ui_language_control.getSelectedItemPos() if ui_language_control is not None else -1
-            except Exception:
-                language_position = -1
-            if language_position >= 0:
-                selected_language = _i18n_code_for_index(language_position)
-                if selected_language:
-                    result["ui_language"] = selected_language
-                    try:
-                        self.set_config("ui_language", selected_language)
-                        _i18n_set_locale(selected_language)
-                        log_to_file(f"UI language saved: {selected_language}")
-                    except Exception as e:
-                        log_to_file(f"UI language save failed: {str(e)}")
         else:
             result = {}
 

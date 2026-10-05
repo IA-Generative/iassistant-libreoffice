@@ -2,7 +2,8 @@
 
 Catalogues Python purs (aucune dependance externe, pas de gettext compile) pour
 les chaines visibles par l'utilisateur dans les boites de dialogue de
-configuration. Le francais est la langue source et la langue de repli.
+configuration. Le francais est la langue source ; l'extension suit la langue
+de LibreOffice, et l'anglais quand elle ne la propose pas.
 
 Ce module vit sous `src/mirai/` et NON sous `core/` ou `ui/` : la regle
 d'architecture `tests/unit/core/test_no_entrypoint_import.py` interdit la
@@ -17,18 +18,10 @@ Usage:
 
 DEFAULT_LOCALE = "fr"
 
+# Langue retenue quand celle de LibreOffice n'est pas proposee par l'extension.
+FALLBACK_LOCALE = "en"
+
 SUPPORTED = ("fr", "en", "es", "pt", "zh")
-
-# Libelles autonymes (identiques dans toutes les langues) pour le selecteur.
-LANGUAGE_LABELS = (
-    ("fr", "Français"),
-    ("en", "English"),
-    ("es", "Español"),
-    ("pt", "Português"),
-    ("zh", "中文（普通话）"),
-)
-
-LANGUAGE_CODES = tuple(code for code, _label in LANGUAGE_LABELS)
 
 
 CATALOG = {
@@ -363,21 +356,6 @@ CATALOG = {
         "es": "No hay ningún modelo disponible (compruebe el endpoint y el token).",
         "pt": "Nenhum modelo disponível (verifique o endpoint e o token).",
         "zh": "没有可用的模型（请检查端点和令牌）。",
-    },
-    # --- Selecteur de langue -------------------------------------------------
-    "settings.language_label": {
-        "fr": "Langue de l'interface :",
-        "en": "Interface language:",
-        "es": "Idioma de la interfaz:",
-        "pt": "Idioma da interface:",
-        "zh": "界面语言：",
-    },
-    "settings.section_language": {
-        "fr": "Langue",
-        "en": "Language",
-        "es": "Idioma",
-        "pt": "Idioma",
-        "zh": "语言",
     },
     # --- Menu contextuel -----------------------------------------------------
     "menu.root": {
@@ -3462,32 +3440,14 @@ def _uno_ui_locale(ctx=None):
         access = provider.createInstanceWithArguments(
             "com.sun.star.configuration.ConfigurationAccess", (node,)
         )
-        for attribute in ("UILocale", "Locale", "oooLocale"):
-            try:
-                value = getattr(access, attribute, None)
-            except Exception:
-                continue
-            resolved = normalize_locale(value)
-            if resolved:
-                return resolved
+        return normalize_locale(getattr(access, "ooLocale", None))
     except Exception:
         return None
-    return None
-
-
-def _env_locale():
-    """Repli sur les variables d'environnement POSIX."""
-    import os
-    for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
-        resolved = normalize_locale(os.environ.get(name, ""))
-        if resolved:
-            return resolved
-    return None
 
 
 def resolve_locale(ctx=None):
-    """Detecte la langue : UNO, puis environnement, puis francais."""
-    return _uno_ui_locale(ctx) or _env_locale() or DEFAULT_LOCALE
+    """Langue de LibreOffice si l'extension la propose, sinon anglais."""
+    return _uno_ui_locale(ctx) or FALLBACK_LOCALE
 
 
 def t(key, **kwargs):
@@ -3502,28 +3462,3 @@ def t(key, **kwargs):
         except Exception:
             return text
     return text
-
-
-def language_index(code):
-    """Index du code dans la liste deroulante des langues (0 par defaut)."""
-    normalized = normalize_locale(code) or DEFAULT_LOCALE
-    try:
-        return LANGUAGE_CODES.index(normalized)
-    except ValueError:
-        return 0
-
-
-def code_for_index(index):
-    """Code de langue correspondant a un index de la liste deroulante."""
-    try:
-        position = int(index)
-    except Exception:
-        return DEFAULT_LOCALE
-    if 0 <= position < len(LANGUAGE_CODES):
-        return LANGUAGE_CODES[position]
-    return DEFAULT_LOCALE
-
-
-def language_names():
-    """Libelles de la liste deroulante, dans l'ordre de LANGUAGE_CODES."""
-    return [label for _code, label in LANGUAGE_LABELS]

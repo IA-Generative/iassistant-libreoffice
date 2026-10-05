@@ -71,19 +71,9 @@ def _reset_credentials():
     credentials.forget_all()
 
 
-_LOCALE_ENV_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
-
-
-def _pin_locale(monkeypatch):
-    # Les libellés de l'IHM sont résolus à la construction du widget, et
-    # `MainJob.__init__` re-résout la langue à chaque instanciation. Sans
-    # verrou, le rendu suivrait la locale du poste (LC_ALL, LANG, …) et les
-    # assertions françaises échoueraient sur un environnement pt_BR ou en_US.
-    # On neutralise donc l'environnement pour retomber sur le français, puis on
-    # force la langue du module (les tests qui veulent une autre langue la
-    # posent eux-mêmes après ce fixture).
-    for name in _LOCALE_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+def _pin_locale():
+    # Chaque test part du français, la langue du LibreOffice que simule
+    # `make_job` par défaut. Un test qui en veut une autre la pose lui-même.
     try:
         from src.mirai import i18n
     except Exception:
@@ -92,13 +82,13 @@ def _pin_locale(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_mainjob_state(monkeypatch):
+def _isolate_mainjob_state():
     _reset_mainjob_flags()
     _reset_credentials()
-    _pin_locale(monkeypatch)
+    _pin_locale()
     _cleanup_shared_config_dir()
     yield
-    _pin_locale(monkeypatch)
+    _pin_locale()
     _reset_mainjob_flags()
     _reset_credentials()
     _cleanup_phantom_dirs()

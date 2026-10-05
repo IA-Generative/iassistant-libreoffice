@@ -6,8 +6,9 @@
          Les anciennes actions (extend/edit/résumé/… ) sont désormais des
          chips de la palette universelle (OpenAssistant).
          Les libellés Title sont dupliqués par locale (xml:lang) : LibreOffice
-         choisit la variante correspondant à son UILocale, faute de quoi la
-         valeur sans xml:lang (français) sert de repli.
+         choisit la variante de sa langue d'interface, et l'anglais à défaut.
+         L'extension suit la même règle pour ses propres libellés
+         (i18n.resolve_locale).
          ══════════════════════════════════════════════════════════════ -->
     <node oor:name="OfficeMenuBar">
       <node oor:name="fr.gouv.interieur.mirai.menubar" oor:op="replace">

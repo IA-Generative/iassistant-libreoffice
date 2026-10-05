@@ -5,7 +5,8 @@ externe : `src/mirai/i18n.py` porte le catalogue et la resolution de langue.
 Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 
 1. aucune cle n'est partiellement traduite (parite des cinq locales) ;
-2. la resolution de langue suit l'ordre persiste -> UNO -> environnement -> fr ;
+2. l'extension parle la langue de LibreOffice, et l'anglais quand elle ne la
+   propose pas ;
 3. toute cle referencee par un appel `_t(...)` existe vraiment, et les cles a
    placeholders s'interpolent sans laisser d'accolade visible ;
 4. les libelles statiques d'`oxt/Addons.xcu` correspondent au catalogue.
@@ -14,7 +15,6 @@ Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 import json
 import os
 import re
-import tempfile
 import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock
 
@@ -33,8 +33,6 @@ from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-_ENV_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
 
 _LOCALE_DEPENDENT_FILES = (
     "src/mirai/entrypoint.py",
@@ -161,13 +159,6 @@ def test_catalog_has_no_obvious_placeholder_typo():
             assert set(re.findall(r"\{(\w+)\}", value)) == reference, (key, code)
 
 
-def test_supported_locales_and_labels_agree():
-    assert i18n.SUPPORTED == ("fr", "en", "es", "pt", "zh")
-    assert i18n.DEFAULT_LOCALE == "fr"
-    assert i18n.LANGUAGE_CODES == i18n.SUPPORTED
-    assert len(i18n.language_names()) == len(i18n.LANGUAGE_CODES)
-
-
 # ---------------------------------------------------------------------------
 # t()
 # ---------------------------------------------------------------------------
@@ -263,102 +254,35 @@ def test_set_locale_falls_back_to_french_on_unknown_input(raw):
     assert i18n.get_locale() == i18n.DEFAULT_LOCALE
 
 
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_language_index_and_code_for_index_are_inverse(code):
-    assert i18n.code_for_index(i18n.language_index(code)) == code
-
-
-@pytest.mark.parametrize("raw", ("de", "", None, 42, -1, 99, "abc", 1.5))
-def test_language_index_falls_back_to_zero(raw):
-    assert i18n.language_index(raw) == 0
-
-
-@pytest.mark.parametrize("raw", (-1, 99, "abc", None))
-def test_code_for_index_falls_back_to_french(raw):
-    assert i18n.code_for_index(raw) == i18n.DEFAULT_LOCALE
-
-
 # ---------------------------------------------------------------------------
-# resolve_locale
+# Langue de l'extension : celle de LibreOffice
 # ---------------------------------------------------------------------------
 
 
-def _clear_locale_env(monkeypatch):
-    for name in _ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+@pytest.mark.parametrize(
+    "libreoffice,expected",
+    (
+        ("fr", "fr"),
+        ("en-US", "en"),
+        ("es", "es"),
+        ("pt-BR", "pt"),
+        ("zh-CN", "zh"),
+    ),
+)
+def test_extension_speaks_the_language_of_libreoffice(libreoffice, expected):
+    make_job(ui_locale=libreoffice)
+    assert i18n.get_locale() == expected
 
 
-def test_resolve_locale_prefers_lc_all(monkeypatch):
-    _clear_locale_env(monkeypatch)
-    monkeypatch.setenv("LC_ALL", "pt_BR.UTF-8")
-    monkeypatch.setenv("LANG", "es_ES.UTF-8")
-    assert i18n.resolve_locale(None) == "pt"
+@pytest.mark.parametrize("libreoffice", ("de", "ja", ""))
+def test_extension_speaks_english_when_it_does_not_offer_the_language(libreoffice):
+    make_job(ui_locale=libreoffice)
+    assert i18n.get_locale() == "en"
 
 
-def test_resolve_locale_falls_back_to_lc_messages_then_lang(monkeypatch):
-    _clear_locale_env(monkeypatch)
-    monkeypatch.setenv("LC_MESSAGES", "es_ES.UTF-8")
-    monkeypatch.setenv("LANG", "zh_CN.UTF-8")
-    assert i18n.resolve_locale(None) == "es"
-
-
-def test_resolve_locale_uses_lang_last(monkeypatch):
-    _clear_locale_env(monkeypatch)
-    monkeypatch.setenv("LANG", "zh_CN.UTF-8")
-    assert i18n.resolve_locale(None) == "zh"
-
-
-def test_resolve_locale_ignores_unsupported_locales(monkeypatch):
-    _clear_locale_env(monkeypatch)
-    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
-    assert i18n.resolve_locale(None) == i18n.DEFAULT_LOCALE
-
-
-def test_resolve_locale_defaults_to_french_without_any_signal(monkeypatch):
-    _clear_locale_env(monkeypatch)
-    assert i18n.resolve_locale(None) == i18n.DEFAULT_LOCALE
-
-
-def test_uno_locale_ignores_non_string_values_from_the_stub():
-    # Les doublures UNO rendent des MagicMock : leur lecture doit echouer
-    # silencieusement, sinon la langue dependrait de l'environnement de test.
-    assert i18n._uno_ui_locale(None) is None
-
-
-# ---------------------------------------------------------------------------
-# Persistance de la langue
-# ---------------------------------------------------------------------------
-
-
-def test_ui_language_is_persisted_and_reread():
-    config_dir = tempfile.mkdtemp()
-    make_job(config_dir=config_dir).set_config("ui_language", "zh")
-    assert make_job(config_dir=config_dir)._get_config_from_file("ui_language", "") == "zh"
-
-
-def test_persisted_language_is_applied_at_startup():
-    config_dir = tempfile.mkdtemp()
-    make_job(config_dir=config_dir).set_config("ui_language", "es")
-    i18n.set_locale("fr")
-    make_job(config_dir=config_dir)
-    assert i18n.get_locale() == "es"
-
-
-def test_startup_falls_back_to_environment_when_nothing_is_persisted(monkeypatch):
-    config_dir = tempfile.mkdtemp()
-    _clear_locale_env(monkeypatch)
-    monkeypatch.setenv("LC_ALL", "pt_BR.UTF-8")
-    make_job(config_dir=config_dir)
-    assert i18n.get_locale() == "pt"
-
-
-def test_startup_falls_back_to_environment_when_the_persisted_language_is_unknown(monkeypatch):
-    config_dir = tempfile.mkdtemp()
-    make_job(config_dir=config_dir).set_config("ui_language", "kl")
-    _clear_locale_env(monkeypatch)
-    monkeypatch.setenv("LC_ALL", "pt_BR.UTF-8")
-    make_job(config_dir=config_dir)
-    assert i18n.get_locale() == "pt"
+def test_extension_speaks_english_when_libreoffice_cannot_tell_its_language():
+    # Hors LibreOffice, les doublures UNO ne rendent aucune langue lisible.
+    assert i18n.resolve_locale(None) == "en"
 
 
 # ---------------------------------------------------------------------------
