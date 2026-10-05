@@ -46,7 +46,7 @@ done
 [ -x "$UNOPKG"  ] || err "unopkg not found at $UNOPKG"
 
 # ── 0. Purge log ─────────────────────────────────────────────────────────────
-: > "$HOME/log.txt" 2>/dev/null || true
+: > "$HOME/Library/Application Support/LibreOffice/4/user/config/mirai/mirai.log" 2>/dev/null || true
 
 # ── 1. Quit LibreOffice if running ───────────────────────────────────────────
 if pgrep -x soffice >/dev/null 2>&1; then

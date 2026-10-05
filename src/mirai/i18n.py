@@ -2668,11 +2668,11 @@ CATALOG = {
         "zh": "✓ 已读取文档 — {count} 段",
     },
     "palette.journal_heading_kept": {
-        "fr": "↳ Titre conservé : « {heading} »",
-        "en": '↳ Heading kept: "{heading}"',
-        "es": "↳ Título conservado: «{heading}»",
-        "pt": "↳ Título conservado: “{heading}”",
-        "zh": "↳ 保留标题：“{heading}”",
+        "fr": "↳ Titre conservé",
+        "en": "↳ Heading kept",
+        "es": "↳ Título conservado",
+        "pt": "↳ Título conservado",
+        "zh": "↳ 保留标题",
     },
     "palette.journal_rewrite_start": {
         "fr": "⚙ Réécriture des paragraphes {first} à {last}",

@@ -86,7 +86,7 @@ class FakeShell:
     def set_config(self, key, value):
         self.config[key] = value
 
-    def user_config_dir(self):
+    def data_dir(self):
         return self._config_dir
 
     # Transport

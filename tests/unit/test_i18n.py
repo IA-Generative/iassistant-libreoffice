@@ -327,17 +327,14 @@ def test_uno_locale_ignores_non_string_values_from_the_stub():
 
 def test_ui_language_is_persisted_and_reread():
     config_dir = tempfile.mkdtemp()
-    job = make_job(config_dir=config_dir)
-    job.set_config("ui_language", "zh")
-    with open(os.path.join(config_dir, "config.json"), encoding="utf-8") as handle:
-        assert json.load(handle)["ui_language"] == "zh"
-    assert job._get_config_from_file("ui_language", "") == "zh"
+    make_job(config_dir=config_dir).set_config("ui_language", "zh")
+    assert make_job(config_dir=config_dir)._get_config_from_file("ui_language", "") == "zh"
 
 
 def test_persisted_language_is_applied_at_startup():
     config_dir = tempfile.mkdtemp()
-    with open(os.path.join(config_dir, "config.json"), "w", encoding="utf-8") as handle:
-        json.dump({"ui_language": "es"}, handle)
+    make_job(config_dir=config_dir).set_config("ui_language", "es")
+    i18n.set_locale("fr")
     make_job(config_dir=config_dir)
     assert i18n.get_locale() == "es"
 

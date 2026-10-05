@@ -71,6 +71,6 @@ de vos documents.
 
 Version
 
-MIrAI IA'ssistant LibreOffice — version 0.0.1.0.31
+MIrAI IA'ssistant LibreOffice — version 0.0.1.0.32
 Programme MIrAI — Ministère de l'Intérieur
 Mars 2026

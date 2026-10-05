@@ -8,6 +8,7 @@ Usage — call install() before importing anything from src.mirai.entrypoint:
     install()
     from src.mirai.entrypoint import MainJob
 """
+import os
 import sys
 import time
 from unittest.mock import MagicMock
@@ -122,6 +123,19 @@ def install():
     })
 
 
+_STARTUP_LAUNCHERS = (
+    "_schedule_config_refresh",
+    "_warmup_secure_flow_async",
+    "_send_telemetry",
+    "_ensure_device_management_state_async",
+    "_schedule_update_reconciliation",
+    "_schedule_native_feed_check",
+    "_schedule_feed_rewrite",
+    "_schedule_enrollment_check",
+    "_schedule_context_menu_registration",
+)
+
+
 def make_job(config_dir=None):
     """
     Instantiate MainJob with a fully mocked UNO context.
@@ -146,18 +160,20 @@ def make_job(config_dir=None):
     ctx.ServiceManager = service_manager
     ctx.getServiceManager.return_value = service_manager
 
-    # Le rafraîchissement de configuration est désarmé AVANT la construction :
-    # `MainJob.__init__` le lance en tâche de fond, et ce thread réécrit
-    # config.json. Le neutraliser après coup laisse la course ouverte — selon la
-    # charge, il écrase la valeur que le test vient d'écrire, et l'échec se
-    # déplace d'un test à l'autre. On patche donc la CLASSE le temps de
+    # Les tâches de fond de démarrage sont désarmées AVANT la construction :
+    # `MainJob.__init__` les lance en threads, et ces threads réécrivent
+    # config.json. Les neutraliser après coup laisse la course ouverte — selon la
+    # charge, l'un d'eux écrase la valeur que le test vient d'écrire, et l'échec
+    # se déplace d'un test à l'autre. On patche donc la CLASSE le temps de
     # l'instanciation, puis on la restaure pour ne rien laisser fuir.
-    original_schedule = MainJob._schedule_config_refresh
-    MainJob._schedule_config_refresh = lambda self, *a, **k: None
+    originals = {name: getattr(MainJob, name) for name in _STARTUP_LAUNCHERS}
+    for name in originals:
+        setattr(MainJob, name, lambda self, *a, **k: None)
     try:
         job = MainJob(ctx)
     finally:
-        MainJob._schedule_config_refresh = original_schedule
+        for name, method in originals.items():
+            setattr(MainJob, name, method)
 
     deadline = time.time() + 2.0
     while getattr(job, "_fetching_config", False) and time.time() < deadline:
@@ -165,3 +181,26 @@ def make_job(config_dir=None):
     job._fetching_config = False
     job._schedule_config_refresh = MagicMock()
     return job
+
+
+def seed_user_config(config_dir, data):
+    """Remplace les réglages utilisateur par `data`, comme les aurait laissés
+    set_config : secrets dans le coffre (mémoire en test), le reste dans
+    <config_dir>/mirai/settings.json."""
+    from src.mirai import credentials, local_config
+    plain = {key: value for key, value in data.items()
+             if key not in credentials.STORED_KEYS and key not in credentials.MEMORY_KEYS}
+    path = os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE)
+    local_config.write_json_atomic(path, plain)
+    scope = local_config.LocalConfig(config_dir, []).transport_scope()
+    for key in credentials.STORED_KEYS:
+        credentials.set_secret(key, data.get(key, ""), scope)
+    for key in credentials.MEMORY_KEYS:
+        credentials.remember(key, data.get(key, ""))
+    return path
+
+
+def read_user_config(config_dir):
+    from src.mirai import local_config
+    return local_config.read_json(
+        os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE))

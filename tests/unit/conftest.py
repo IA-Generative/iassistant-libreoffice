@@ -23,12 +23,24 @@ def _reset_mainjob_flags():
     try:
         from tests.stubs.uno_stubs import install
         install()
+        from src.mirai import log_setup
         from src.mirai.entrypoint import MainJob
     except Exception:
         return
+    log_setup.uninstall()
     MainJob._update_in_progress_cls = False
+    MainJob._storage_ready_cls = False
     MainJob._enrollment_dismissed_cls = False
     MainJob._update_launch_blocked_cls = set()
+    MainJob._feed_rewrite_last_cls = None
+    MainJob._feed_rewrite_last_result_cls = None
+    MainJob._uninstall_listener_cls = None
+    MainJob._self_update_in_flight_cls = False
+    MainJob._wiped_cls = False
+    from src.mirai import credentials, local_config
+    local_config.unfreeze_for_tests()
+    credentials.unfreeze_for_tests()
+    log_setup.unfreeze_for_tests()
 
 
 def _cleanup_phantom_dirs():
@@ -37,16 +49,26 @@ def _cleanup_phantom_dirs():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _cleanup_config_cache():
-    # `config_cache.json` (cache disque du config_data enrichi) est écrit dans
-    # le UserConfig PARTAGÉ des tests (/tmp/test_libreoffice_config). Sans purge,
-    # il fuit d'un test à l'autre (p. ex. un `update` directive persisté puis
-    # relu ailleurs). On le retire avant ET après chaque test.
-    for base in ("/tmp/test_libreoffice_config",):
+def _cleanup_shared_config_dir():
+    # make_job() sans config_dir partage /tmp/test_libreoffice_config : ses
+    # fichiers (réglages, instantané DM, ancien cache) fuiraient d'un test à
+    # l'autre. On les retire avant ET après chaque test.
+    base = "/tmp/test_libreoffice_config"
+    shutil.rmtree(os.path.join(base, "mirai"), ignore_errors=True)
+    for name in ("config_cache.json", "config.json"):
         try:
-            os.remove(os.path.join(base, "config_cache.json"))
+            os.remove(os.path.join(base, name))
         except OSError:
             pass
+
+
+def _reset_credentials():
+    try:
+        from src.mirai import credentials
+    except Exception:
+        return
+    credentials.use_store(credentials.MemoryStore())
+    credentials.forget_all()
 
 
 _LOCALE_ENV_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
@@ -72,10 +94,21 @@ def _pin_locale(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state(monkeypatch):
     _reset_mainjob_flags()
+    _reset_credentials()
     _pin_locale(monkeypatch)
-    _cleanup_config_cache()
+    _cleanup_shared_config_dir()
     yield
     _pin_locale(monkeypatch)
     _reset_mainjob_flags()
+    _reset_credentials()
     _cleanup_phantom_dirs()
-    _cleanup_config_cache()
+    _cleanup_shared_config_dir()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_legacy_home(monkeypatch, tmp_path_factory):
+    # La migration supprime ~/log.txt s'il vient de l'extension : jamais le
+    # vrai dossier personnel du développeur pendant les tests.
+    from src.mirai import local_config
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setattr(local_config, "legacy_home_dir", lambda: str(home))

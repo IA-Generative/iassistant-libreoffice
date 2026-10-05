@@ -193,7 +193,7 @@ def palette_module(monkeypatch):
 def _build(palette_module, app="writer"):
     shell = MagicMock()
     shell.toolkit.return_value = MagicMock()
-    shell.user_config_dir.return_value = "/tmp/mirai-test-palette"
+    shell.data_dir.return_value = "/tmp/mirai-test-palette"
     shell.get_config.side_effect = lambda key, default=None: default
     shell.log = lambda _m: None
 

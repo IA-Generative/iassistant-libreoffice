@@ -1,8 +1,8 @@
 """
 calc_prompt_function.py — UNO CalcAddIn exposing =PROMPT() in LibreOffice Calc.
 
-This module is intentionally self-contained: it does NOT import from entrypoint.py
-so it can be deployed as a standalone UNO component.
+It never imports entrypoint.py; it shares only the stdlib-only modules local_config,
+credentials and log_setup.
 
 Registration:
   - Declared in oxt/META-INF/manifest.xml as a Python UNO component.
@@ -18,20 +18,20 @@ import json
 import logging
 import os
 import ssl
+import sys
 import urllib.error
 import urllib.request
 
 import unohelper
 
-# ---------------------------------------------------------------------------
-# Logging (reuse the same log file as entrypoint.py for consistency)
-# ---------------------------------------------------------------------------
-_log_file_path = os.path.join(os.path.expanduser("~"), "log.txt")
-logging.basicConfig(
-    filename=_log_file_path,
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s",
-)
+# Chargé par pythonloader comme module isolé : la racine de l'OXT est mise sur
+# sys.path pour importer les modules partagés sous LEUR nom de paquet — c'est ce
+# qui partage les jetons en mémoire avec la coquille.
+_EXTENSION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _EXTENSION_ROOT not in sys.path:
+    sys.path.insert(0, _EXTENSION_ROOT)
+
+from src.mirai import credentials, local_config, log_setup  # noqa: E402
 
 
 def _log(message: str) -> None:
@@ -111,22 +111,29 @@ def build_ssl_context(config: dict) -> ssl.SSLContext:
 # standalone (no UNO service manager required once user_config_path is known).
 # ---------------------------------------------------------------------------
 
-def _read_config_file(path: str) -> dict:
-    """Read a JSON config file, returning an empty dict on any error."""
+def _user_config_path(ctx) -> str:
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    return {}
+        path_settings = ctx.getServiceManager().createInstanceWithContext(
+            "com.sun.star.util.PathSettings", ctx)
+        path = getattr(path_settings, "UserConfig", "")
+    except Exception as exc:
+        _log(f"Could not resolve UserConfig path: {exc}")
+        return ""
+    if not isinstance(path, str):
+        return ""
+    if path.startswith("file://"):
+        try:
+            import uno  # disponible dans LibreOffice
+            return str(uno.fileUrlToSystemPath(path))
+        except Exception:
+            return path.replace("file://", "")
+    return path
 
 
 def load_config(ctx) -> dict:
     """
-    Load merged config from the user profile config.json and the extension
-    config.default.json, exactly like MainJob._get_config_from_file.
+    Load the merged config from the extension folder (settings, DM snapshot,
+    embedded defaults).
 
     Args:
         ctx: UNO component context (com.sun.star.uno.XComponentContext).
@@ -134,43 +141,22 @@ def load_config(ctx) -> dict:
     Returns:
         Merged flat config dict.  Always returns a dict (never raises).
     """
-    try:
-        sm = ctx.getServiceManager()
-        path_settings = sm.createInstanceWithContext(
-            "com.sun.star.util.PathSettings", ctx
-        )
-        user_config_path = str(getattr(path_settings, "UserConfig", "") or "")
-        if user_config_path.startswith("file://"):
-            try:
-                import uno  # available at runtime inside LibreOffice
-                user_config_path = str(uno.fileUrlToSystemPath(user_config_path))
-            except Exception:
-                user_config_path = user_config_path.replace("file://", "")
-    except Exception as exc:
-        _log(f"Could not resolve UserConfig path: {exc}")
-        user_config_path = ""
-
-    user_config_file = os.path.join(user_config_path, "config.json") if user_config_path else ""
-    # Look for config.default.json relative to this module (and one level up for OXT layout)
-    package_candidates = [
-        os.path.join(os.path.dirname(__file__), "config.default.json"),
-        os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "config.default.json")
-        ),
-    ]
-
-    package_config: dict = {}
-    for p in package_candidates:
-        if os.path.isfile(p):
-            package_config = _read_config_file(p)
-            if package_config:
-                break
-
-    user_config: dict = _read_config_file(user_config_file) if user_config_file else {}
-
-    merged: dict = {}
-    merged.update(package_config)
-    merged.update(user_config)
+    user_config_path = _user_config_path(ctx)
+    cfg = local_config.LocalConfig(
+        user_config_path, local_config.package_config_candidates(os.path.dirname(__file__)))
+    if cfg.dir:
+        try:
+            log_setup.install(cfg.dir)
+            cfg.migrate_legacy(local_config.legacy_home_dir())
+        except Exception as exc:
+            _log(f"Local storage preparation failed: {exc}")
+    merged = dict(cfg.package())
+    merged.update({key: value for key, value in cfg.dm_settings().items()
+                   if key not in local_config.SECRET_DM_KEYS
+                   and key not in local_config.LOCAL_ONLY_KEYS
+                   and value not in (None, "")})
+    merged.update(cfg.settings())
+    merged.update(cfg.transport())
     return merged
 
 
@@ -274,13 +260,13 @@ def call_llm(
                 pass
         data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body_snippet = ""
+        body = ""
         try:
-            body_snippet = exc.read().decode("utf-8", errors="replace")[:200]
+            body = exc.read().decode("utf-8", errors="replace")
         except Exception:
             pass
-        _log(f"HTTP error {exc.code}: {body_snippet}")
-        return f"#PROMPT_ERROR: HTTP {exc.code} — {exc.reason} {body_snippet}".strip()
+        _log(f"HTTP error {exc.code}: body_len={len(body)}")
+        return f"#PROMPT_ERROR: HTTP {exc.code} — {exc.reason} {body[:200]}".strip()
     except urllib.error.URLError as exc:
         _log(f"URL error: {exc.reason}")
         return f"#PROMPT_ERROR: network error — {exc.reason}"
@@ -306,7 +292,7 @@ def call_llm(
             text = choice.get("text")
             if text is not None:
                 return str(text)
-        _log(f"Unexpected response structure: {json.dumps(data)[:300]}")
+        _log(f"Unexpected response structure: keys={sorted(data)}")
         return f"#PROMPT_ERROR: unexpected response structure"
     except Exception as exc:
         _log(f"Response parse error: {exc}")
@@ -446,7 +432,24 @@ class PromptFunction(unohelper.Base):
         if max_tokens_int < 1:
             max_tokens_int = 2048
 
-        config = self._get_config()
+        config = dict(self._get_config())
+        if not config.get("llm_base_urls"):
+            self._config = None
+            config = dict(self._get_config())
+        if not config.get("llm_base_urls"):
+            self._config = None
+            return ("#PROMPT_ERROR: configuration LLM indisponible — ouvrez l'assistant "
+                    "MIrAI puis recalculez la feuille")
+        scope = local_config.LocalConfig(_user_config_path(self._ctx), []).transport_scope()
+        token = (credentials.recall(credentials.DM_LLM_TOKEN)
+                 or credentials.recall("llm_api_tokens")
+                 or credentials.get_secret("llm_api_tokens", scope)
+                 or str(config.get("llm_api_tokens", "") or "").strip())
+        if not token and local_config._truthy(config.get("enabled")):
+            self._config = None
+            return ("#PROMPT_ERROR: jeton LLM indisponible — ouvrez l'assistant MIrAI "
+                    "puis recalculez la feuille")
+        config["llm_api_tokens"] = token
 
         # Use configured default model if the caller did not specify one
         effective_model = str(model or "").strip() or str(config.get("llm_default_models", "") or "").strip()

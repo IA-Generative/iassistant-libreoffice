@@ -25,8 +25,8 @@ USAGE
 }
 
 log() { printf '%s\n' "$*"; }
-# Sur stderr : `resolve_config_path` est capturé par substitution de commande,
-# un avertissement sur stdout se retrouverait collé dans le chemin du fichier.
+# stderr : warn() est appelé depuis resolve_config_path, dont la sortie stdout
+# est capturée par $(...) — un warning sur stdout corromprait le chemin résolu.
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
 err() { printf 'ERROR: %s\n' "$*" >&2; }
 
@@ -239,6 +239,15 @@ fi
 if [ -f "$ROOT_DIR/dm-config.json" ]; then
   cp "$ROOT_DIR/dm-config.json" "$STAGE_DIR/dm-config.json"
 fi
+
+# ── Mécanisme natif de MAJ LibreOffice (<update-information>, issue #5) ──
+# Bake l'URL du feed update.xml (par tier, dérivée du profil bootstrap embarqué)
+# dans description.xml : le bouton « Vérifier les mises à jour » du Gestionnaire
+# des extensions détecte/télécharge/installe alors en pur in-process (pas de
+# cmd.exe — immunisé WinError 5). Override : MIRAI_UPDATE_FEED_URL.
+python3 "$ROOT_DIR/scripts/inject_update_feed.py" \
+  "$STAGE_DIR/description.xml" "$STAGE_DIR/config.default.json" \
+  || { err "injection <update-information> dans description.xml échouée"; exit 1; }
 
 # Documentation — README, notice, licence
 mkdir -p "$STAGE_DIR/docs"

@@ -10,7 +10,7 @@
   "homepage_url": "https://github.com/IA-Generative/AssistantMiraiLibreOffice",
   "support_email": "fabrique-numerique@interieur.gouv.fr",
   "icon_url": "assets/logo.png",
-  "doc_url": "https://github.com/IA-Generative/AssistantMiraiLibreOffice/blob/master/docs/notice-utilisateur.md",
+  "doc_url": "https://docs.numerique.gouv.fr/docs/32d415eb-27e3-46d6-829b-be8eb12c6d5b/",
   "license": "MPL-2.0",
   "key_features": [
     "Générer la suite d'un texte (Writer)",
@@ -25,6 +25,23 @@
     "Déploiement automatisé avec rollout progressif"
   ],
   "changelog": [
+    {
+      "version": "0.0.1.0.32",
+      "date": "2026-10-02",
+      "changes": [
+        "Mise à jour : une nouvelle version annoncée par le Device Management s'installe par le dialogue natif « Mise à jour des extensions » de LibreOffice, ouvert par l'extension ; l'installation directe par l'extension reste en repli",
+        "Mise à jour : ni script ni invite de commande, compatible avec les postes durcis ; LibreOffice se ferme après l'installation et, si un document n'est pas enregistré, la mise à jour s'active au prochain démarrage",
+        "Mise à jour : une version refusée ou reportée n'est pas reproposée avant 24 h",
+        "Sécurité : les mots de passe et jetons quittent les fichiers du profil LibreOffice ; ils sont confiés au Gestionnaire d'identification de Windows ou au trousseau de macOS, et les jetons de courte durée ne vivent qu'en mémoire",
+        "Sécurité : le journal ne contient plus ni jeton, ni réponse du serveur, ni texte du document",
+        "Sécurité : la clé de télémétrie par défaut n'est plus embarquée dans le code",
+        "Données locales : les fichiers de l'extension et son journal (mirai.log, à la place de log.txt dans le dossier personnel) sont regroupés dans le dossier mirai/ du profil LibreOffice ; l'ancienne disposition est reprise automatiquement",
+        "Désinstallation : retirer l'extension depuis le Gestionnaire des extensions efface ses fichiers et ses secrets ; une mise à jour conserve tout",
+        "Changement d'environnement : une extension construite pour un autre Device Management efface les identifiants de l'ancien et demande un nouvel enrôlement",
+        "Linux : sans coffre système, les secrets restent en mémoire et l'enrôlement se rejoue à chaque session LibreOffice",
+        "Documentation : notice utilisateur en ligne et nouveau document « Données locales » pour la DSI et le support"
+      ]
+    },
     {
       "version": "0.0.1.0.31",
       "date": "2026-09-02",

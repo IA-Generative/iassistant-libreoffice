@@ -2,7 +2,7 @@
 
 Le journal d'actions (onglet « Actions ») est écrit pour l'utilisateur, en
 français, et cite volontiers le document — « Titre conservé : « Rapport
-annuel 2026 » ». Ces lignes vont dans `~/log.txt`, qui ne quitte pas le poste.
+annuel 2026 » ». Ces lignes vont dans le journal de l'extension, dans le profil LibreOffice.
 
 La télémétrie, elle, **part sur le réseau**. Le vocabulaire ci-dessous et le
 filtre d'attributs existent pour qu'aucune phrase du document ne puisse s'y

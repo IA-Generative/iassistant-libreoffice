@@ -7,7 +7,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-LOG="$HOME/log.txt"
+LOG="$HOME/Library/Application Support/LibreOffice/4/user/config/mirai/mirai.log"
+mkdir -p "$(dirname "$LOG")"
 UNOPKG="/Applications/LibreOffice.app/Contents/MacOS/unopkg"
 SOFFICE="/Applications/LibreOffice.app/Contents/MacOS/soffice"
 OXT_TMP="/tmp/mirai_update.oxt"
@@ -59,7 +60,7 @@ log "Launching LibreOffice Writer..."
 "$SOFFICE" --writer &
 
 log "Done — check that MIrAI menus are visible in Writer"
-log "Logs: grep '[TEST-UPDATE]\\|MainJob' ~/log.txt | tail -20"
+log "Logs: grep '[TEST-UPDATE]\\|MainJob' \"$LOG\" | tail -20"
 
 # Cleanup
 rm -f "$OXT_TMP"

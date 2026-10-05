@@ -91,7 +91,8 @@ def test_in_process_install_degrades_gracefully(tmp_path):
     os.close(fd)
     try:
         job = make_job()
-        job._terminate_on_main_thread = MagicMock()  # sécurité
+        job._terminate_on_main_thread = MagicMock()  # sécurité (ne pas SIGTERM le test)
+        job._run_install_on_main_thread = MagicMock(return_value=False)  # main thread KO
         job._install_oxt_inprocess = MagicMock(return_value=False)  # aucune API dispo
         assert job._install_and_restart_in_process(path) is False
         job._terminate_on_main_thread.assert_not_called()
@@ -134,6 +135,7 @@ def test_install_and_restart_closes_after_success():
     os.close(fd)
     try:
         job = make_job()
+        job._run_install_on_main_thread = MagicMock(return_value=False)  # force le legacy
         job._install_oxt_inprocess = MagicMock(return_value=True)
         job._close_after_inprocess_update = MagicMock()  # évite le vrai terminate/SIGTERM
         assert job._install_and_restart_in_process(path) is True

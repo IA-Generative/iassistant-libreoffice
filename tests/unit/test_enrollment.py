@@ -7,13 +7,12 @@ No LibreOffice required — UNO modules are stubbed.
 """
 import base64
 import json
-import os
 import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from tests.stubs.uno_stubs import install, make_job
+from tests.stubs.uno_stubs import install, make_job, seed_user_config
 
 install()
 
@@ -30,12 +29,7 @@ def _make_jwt(payload: dict) -> str:
 
 
 def _write_config(config_dir, data):
-    """Write a config.json into the given config directory."""
-    os.makedirs(config_dir, exist_ok=True)
-    path = os.path.join(config_dir, "config.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    return path
+    return seed_user_config(config_dir, data)
 
 
 def _enrolled(**extra):
@@ -289,15 +283,14 @@ class TestRunFirstEnrollment(unittest.TestCase):
         self.assertFalse(result)
 
     def test_returns_true_when_auth_succeeds(self):
-        """Full flow: config fetch → sync keycloak → auth → success."""
+        """Full flow: config fetch → auth → success."""
         fake_config = {"config": {"keycloakIssuerUrl": "http://test"}}
         fake_token = _make_jwt({"exp": int(time.time()) + 3600})
 
         with patch.object(self.job, '_schedule_config_refresh'):
             with patch.object(self.job, '_fetch_config', return_value=fake_config):
-                with patch.object(self.job, '_sync_keycloak_from_config'):
-                    with patch.object(self.job, '_ensure_access_token', return_value=fake_token):
-                        result = self.job._run_first_enrollment()
+                with patch.object(self.job, '_ensure_access_token', return_value=fake_token):
+                    result = self.job._run_first_enrollment()
         self.assertTrue(result)
 
     def test_returns_false_when_auth_fails(self):
@@ -306,9 +299,8 @@ class TestRunFirstEnrollment(unittest.TestCase):
 
         with patch.object(self.job, '_schedule_config_refresh'):
             with patch.object(self.job, '_fetch_config', return_value=fake_config):
-                with patch.object(self.job, '_sync_keycloak_from_config'):
-                    with patch.object(self.job, '_ensure_access_token', return_value=None):
-                        result = self.job._run_first_enrollment()
+                with patch.object(self.job, '_ensure_access_token', return_value=None):
+                    result = self.job._run_first_enrollment()
         self.assertFalse(result)
 
 

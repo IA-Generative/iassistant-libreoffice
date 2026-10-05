@@ -242,7 +242,7 @@ Si aucun fichier `mirai.json` n'existe, la télémétrie est activée par défau
 }
 ```
 
-Les logs seront écrits dans `~/log.txt` avec le payload JSON complet des traces.
+Les logs seront écrits dans `mirai/mirai.log` avec le payload JSON complet des traces.
 
 ### Vérifier les traces envoyées
 

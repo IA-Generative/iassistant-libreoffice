@@ -101,6 +101,24 @@ def test_embedded_config_is_transport_only(oxt_path):
     )
 
 
+def test_description_has_native_update_feed(oxt_path):
+    """MAJ native LibreOffice : un profil online doit embarquer le
+    bloc <update-information> pointant sur le feed du DM (un <src> par
+    bootstrap_url — failover natif)."""
+    with zipfile.ZipFile(oxt_path) as z:
+        desc = z.read("description.xml").decode("utf-8", "replace")
+        cfg = json.loads(z.read("config.default.json"))
+    if cfg.get("enabled") is False:
+        assert "<update-information>" not in desc
+        return
+    bases = cfg.get("bootstrap_urls") or ([cfg["bootstrap_url"]] if cfg.get("bootstrap_url") else [])
+    if not bases:
+        pytest.skip("profil sans bootstrap_urls — pas de feed natif attendu")
+    assert "<update-information>" in desc
+    assert "/catalog/mirai-libreoffice/update.xml" in desc
+    assert desc.count("<src xlink:href=") >= len(bases)
+
+
 def test_description_version_matches_dm_manifest(oxt_path):
     """La version injectée dans dm-manifest.json doit suivre description.xml."""
     import re
