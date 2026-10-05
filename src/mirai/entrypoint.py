@@ -213,6 +213,7 @@ from .i18n import (
     get_locale as _i18n_get_locale,
     language_index as _i18n_language_index,
     language_names as _i18n_language_names,
+    normalize_locale as _i18n_normalize_locale,
     resolve_locale as _i18n_resolve_locale,
     set_locale as _i18n_set_locale,
 )
@@ -840,7 +841,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # own UI locale, then the POSIX environment, then French.
         try:
             persisted_language = self._get_config_from_file("ui_language", "")
-            resolved_language = _i18n_set_locale(persisted_language or _i18n_resolve_locale(self.ctx))
+            resolved_language = _i18n_set_locale(
+                _i18n_normalize_locale(persisted_language) or _i18n_resolve_locale(self.ctx))
             log_to_file(f"UI language set to: {resolved_language}")
         except Exception as e:
             log_to_file(f"Failed to resolve UI language: {str(e)}")

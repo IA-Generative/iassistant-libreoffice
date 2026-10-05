@@ -355,12 +355,13 @@ def test_startup_falls_back_to_environment_when_nothing_is_persisted(monkeypatch
     assert i18n.get_locale() == "pt"
 
 
-def test_startup_ignores_an_unknown_persisted_language():
+def test_startup_falls_back_to_environment_when_the_persisted_language_is_unknown(monkeypatch):
     config_dir = tempfile.mkdtemp()
-    with open(os.path.join(config_dir, "config.json"), "w", encoding="utf-8") as handle:
-        json.dump({"ui_language": "kl"}, handle)
+    make_job(config_dir=config_dir).set_config("ui_language", "kl")
+    _clear_locale_env(monkeypatch)
+    monkeypatch.setenv("LC_ALL", "pt_BR.UTF-8")
     make_job(config_dir=config_dir)
-    assert i18n.get_locale() in i18n.SUPPORTED
+    assert i18n.get_locale() == "pt"
 
 
 # ---------------------------------------------------------------------------
