@@ -82,8 +82,9 @@ def test_in_process_install_guard_rejects_bad_path():
 
 
 def test_in_process_install_degrades_gracefully(tmp_path):
-    """Fichier réel mais service de déploiement absent → False, aucun restart
-    (l'appelant retombera sur le script puis le message manuel)."""
+    """Fichier réel mais installation en échec sur le thread principal → False,
+    LibreOffice reste ouvert (l'appelant retombera sur le script puis le message
+    manuel)."""
     import os
     import tempfile
 
@@ -93,69 +94,12 @@ def test_in_process_install_degrades_gracefully(tmp_path):
         job = make_job()
         job._terminate_on_main_thread = MagicMock()  # sécurité (ne pas SIGTERM le test)
         job._run_install_on_main_thread = MagicMock(return_value=False)  # main thread KO
-        job._install_oxt_inprocess = MagicMock(return_value=False)  # aucune API dispo
+        job._close_after_inprocess_update = MagicMock()
         assert job._install_and_restart_in_process(path) is False
+        job._close_after_inprocess_update.assert_not_called()
         job._terminate_on_main_thread.assert_not_called()
     finally:
         os.remove(path)
-
-
-# ── Install in-process : PackageManagerFactory via getValueByName (sans import,
-#    thread-safe côté worker) ; l'import `from com.sun.star…` échoue hors thread
-#    principal ("No module named 'com'") — d'où le pré-bind + ce chemin. ─────────
-
-def test_install_oxt_inprocess_uses_package_manager_factory():
-    """Chemin principal : thePackageManagerFactory (getValueByName, pas d'import)
-    → getPackageManager('user') → removePackage PUIS addPackage (remove-avant-add,
-    évite le doublon 'Insert duplicate implementation name …')."""
-    job = make_job()
-    factory = MagicMock(name="thePackageManagerFactory")
-    job.ctx.getValueByName.return_value = factory
-    pkg = factory.getPackageManager.return_value
-
-    assert job._install_oxt_inprocess("file:///x.oxt", (), None, None) is True
-    job.ctx.getValueByName.assert_called_with(
-        "/singletons/com.sun.star.deployment.thePackageManagerFactory"
-    )
-    factory.getPackageManager.assert_called_with("user")
-    pkg.removePackage.assert_called_once()
-    pkg.addPackage.assert_called_once()
-    names = [c[0] for c in pkg.mock_calls]
-    assert names.index("removePackage") < names.index("addPackage"), \
-        "remove doit précéder add"
-
-
-def test_install_and_restart_closes_after_success():
-    """Install in-process OK → _close_after_inprocess_update() est appelé (fermeture,
-    PAS de re-exec), retourne True."""
-    import os
-    import tempfile
-
-    fd, path = tempfile.mkstemp(suffix=".oxt")
-    os.close(fd)
-    try:
-        job = make_job()
-        job._run_install_on_main_thread = MagicMock(return_value=False)  # force le legacy
-        job._install_oxt_inprocess = MagicMock(return_value=True)
-        job._close_after_inprocess_update = MagicMock()  # évite le vrai terminate/SIGTERM
-        assert job._install_and_restart_in_process(path) is True
-        job._close_after_inprocess_update.assert_called_once()
-    finally:
-        os.remove(path)
-
-
-def test_install_oxt_inprocess_false_when_no_api():
-    """Ni factory ni singleton ExtensionManager → False (repli script/manuel)."""
-    import src.mirai.entrypoint as ep
-
-    job = make_job()
-    job.ctx.getValueByName.return_value = None
-    prev = ep._EXT_MGR_SINGLETON
-    ep._EXT_MGR_SINGLETON = None
-    try:
-        assert job._install_oxt_inprocess("file:///x.oxt", (), None, None) is False
-    finally:
-        ep._EXT_MGR_SINGLETON = prev
 
 
 # ── Bouton « Ouvrir le dossier » : ouverture native, sans cmd.exe ────

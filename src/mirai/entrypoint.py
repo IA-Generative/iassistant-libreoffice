@@ -12,16 +12,14 @@ import ssl
 # (com.sun.star.deployment.ExtensionManager) — there is no `theExtensionManager`.
 # pyuno's `from com.sun.star… import …` hook is NOT available on background
 # threads ("No module named 'com'"), so the update worker thread cannot import
-# it itself — it reuses this reference. See _install_oxt_inprocess (which
-# prefers the import-free PackageManagerFactory and uses this only as a
-# fallback).
+# it itself — it reuses this reference. See _run_install_on_main_thread (which
+# uses it when the context lookup of the singleton returns nothing).
 try:
     from com.sun.star.deployment import ExtensionManager as _EXT_MGR_SINGLETON
 except Exception:
     _EXT_MGR_SINGLETON = None
 
-# Extension identifier (matches oxt/description.xml <identifier>). Used to remove a
-# prior registration before re-installing in-process (avoids duplicate components).
+# Extension identifier (matches oxt/description.xml <identifier>).
 _EXTENSION_IDENTIFIER = "fr.gouv.interieur.mirai"
 
 # Feed natif LibreOffice (<update-information>) servi par le DM. Le chemin doit
@@ -2614,65 +2612,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_open_folder_native: {str(exc)}")
             return False
 
-    def _install_oxt_inprocess(self, oxt_url, props, abort, cmd_env):
-        """Install an OXT for the current user, in-process (no child process).
-
-        Runs from the update WORKER thread, where pyuno's `from com.sun.star…
-        import …` hook is NOT available ("No module named 'com'") — confirmed in
-        the field. So we must **not** import here. Order of attempts:
-
-          1. **thePackageManagerFactory** obtained via `ctx.getValueByName` — a plain
-             UNO method call, **no import** → works off the main thread. Its
-             `getPackageManager("user").addPackage(...)` deploys the OXT. Repli de
-             dernier recours seulement : la voie normale est l'installation sur le
-             thread principal (_run_install_on_main_thread).
-          2. The **ExtensionManager singleton pre-bound on the MAIN thread** at module
-             load (`_EXT_MGR_SINGLETON`) → `addExtension`, as a fallback.
-
-        Returns True on success. Any install exception (e.g. a policy denial) is
-        propagated so the caller can log it and fall back; returns False only when
-        **no** deployment API is reachable.
-        """
-        props = props or ()
-        # 1) PackageManagerFactory — import-free, worker-thread safe.
-        factory = None
-        try:
-            factory = self.ctx.getValueByName(
-                "/singletons/com.sun.star.deployment.thePackageManagerFactory"
-            )
-        except Exception as exc:
-            log_to_file(f"_install_oxt_inprocess: PackageManagerFactory lookup failed: {exc}")
-        if factory is not None:
-            pkg_mgr = factory.getPackageManager("user")
-            # Remove-before-add: drop any existing registration of this identifier
-            # first. Re-installing over an ACTIVE extension can otherwise leave a
-            # stale duplicate component ("Insert duplicate implementation name
-            # fr.gouv.interieur.mirai.PromptFunction") that blocks activation.
-            try:
-                pkg_mgr.removePackage(_EXTENSION_IDENTIFIER, "", abort, cmd_env)
-                log_to_file("_install_oxt_inprocess: removed prior package before add")
-            except Exception as rm_exc:
-                log_to_file(f"_install_oxt_inprocess: removePackage (ignored): {rm_exc}")
-            pkg_mgr.addPackage(oxt_url, props, "", abort, cmd_env)
-            log_to_file("_install_oxt_inprocess: installed via thePackageManagerFactory")
-            return True
-        # 2) ExtensionManager singleton pre-bound on the main thread (see module top).
-        if _EXT_MGR_SINGLETON is not None:
-            mgr = None
-            try:
-                mgr = _EXT_MGR_SINGLETON.get(self.ctx)
-            except Exception as exc:
-                log_to_file(f"_install_oxt_inprocess: ExtensionManager.get failed: {exc}")
-            if mgr is not None:
-                # Pas de remove-avant-add : addExtension remplace atomiquement une
-                # extension de même identifiant (VersionException approuvée par le
-                # handler silencieux), comme sur le chemin main-thread.
-                mgr.addExtension(oxt_url, props, "user", abort, cmd_env)
-                log_to_file("_install_oxt_inprocess: installed via ExtensionManager singleton")
-                return True
-        log_to_file("_install_oxt_inprocess: no in-process deployment API available")
-        return False
-
     def _make_silent_command_env(self):
         """XCommandEnvironment silencieux pour l'API de déploiement (approuve la
         VersionException du remplacement même-identifiant, licence déjà
@@ -2792,13 +2731,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         This is the key path for locked-down postes: it spawns **no** child
         process (no cmd.exe / soffice.exe), so it is not affected by the
         AppLocker / Defender-ASR policy that denies the install script (WinError
-        5). Order of attempts:
-
-          1. ExtensionManager.addExtension sur le MAIN thread (voie du
-             Gestionnaire des extensions — remplace proprement, pas de
-             corruption du registre) ;
-          2. legacy : thePackageManagerFactory depuis le worker
-             (_install_oxt_inprocess) — dernier recours seulement.
+        5). L'installation passe par ExtensionManager.addExtension sur le MAIN
+        thread (voie du Gestionnaire des extensions — remplace proprement, pas
+        de corruption du registre).
 
         Returns True on success; any failure returns False so the caller falls
         back to the manual-install message (ou au script si explicitement
@@ -2821,17 +2756,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 props = ()
 
             if not self._run_install_on_main_thread(oxt_url, props, cmd_env):
-                if getattr(self, "_main_thread_install_in_flight", False):
-                    # addExtension tourne encore sur le thread principal : surtout
-                    # pas de second flux (double install = corruption du registre).
-                    # Repli manuel ; la réconciliation au prochain démarrage
-                    # rapportera « installed » si l'install a abouti.
-                    log_to_file("_perform_update: main-thread install still running, not starting a second one")
-                    return False
-                log_to_file("_perform_update: main-thread install unavailable, trying legacy worker path")
-                if not self._install_oxt_inprocess(oxt_url, props, None, cmd_env):
-                    log_to_file("_perform_update: in-process deployment API unavailable")
-                    return False
+                return False
             log_to_file("_perform_update: in-process install succeeded")
 
             # Close LibreOffice cleanly so the user reopens it with the new version

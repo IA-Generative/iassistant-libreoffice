@@ -731,6 +731,22 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     assert "UpdateInstallFailed" not in _events(job)
 
 
+def test_failed_install_keeps_libreoffice_open_and_offers_the_manual_route():
+    """Route dirigée acceptée, installation en échec sur le thread principal :
+    LibreOffice reste ouvert, l'échec est rapporté au DM et la procédure manuelle
+    est proposée."""
+    job = _accepting_job()
+    job._run_install_on_main_thread = MagicMock(return_value=False)
+    job._close_after_inprocess_update = MagicMock()
+    job._notify_update_blocked = MagicMock()
+
+    job._perform_update(dict(DIRECTIVE))
+
+    job._close_after_inprocess_update.assert_not_called()
+    assert [c for c in job._report_update_status.call_args_list if c.args[1] == "failed"]
+    job._notify_update_blocked.assert_called_once()
+
+
 def test_directed_close_deferred_carries_version_and_campaign():
     """UpdateCloseDeferred de la route dirigée doit porter la version et la
     campagne, comme la variante native — sans quoi l'entonnoir ne relie pas une
@@ -742,26 +758,6 @@ def test_directed_close_deferred_carries_version_and_campaign():
     deferred = [c.args[1] for c in job._send_telemetry.call_args_list
                 if c.args[0] == "UpdateCloseDeferred"]
     assert deferred == [{"route": "directed", "version_after": TARGET, "campaign_id": "7"}]
-
-
-def test_install_in_flight_skips_legacy_worker_path():
-    """addExtension encore en cours sur le main thread → pas de repli
-    thePackageManagerFactory depuis le worker (double install)."""
-    job = _job()
-    fd, path = tempfile.mkstemp(suffix=".oxt")
-    os.close(fd)
-    try:
-        def _fake_install(*_a, **_k):
-            job._main_thread_install_in_flight = True
-            return False
-        job._run_install_on_main_thread = _fake_install
-        job._install_oxt_inprocess = MagicMock(return_value=True)
-        job._close_after_inprocess_update = MagicMock()
-        assert job._install_and_restart_in_process(path) is False
-        job._install_oxt_inprocess.assert_not_called()
-        job._close_after_inprocess_update.assert_not_called()
-    finally:
-        os.remove(path)
 
 
 def _job_with_extension_list(pairs):

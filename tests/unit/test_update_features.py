@@ -230,7 +230,7 @@ def test_lo09_perform_update_checksum_ok_stages():
         "bootstrap_url": "http://localhost:9999",
     }.get(k, d))
     job._report_update_status = MagicMock()
-    job._install_oxt_inprocess = MagicMock()  # ne doit PAS être appelé au staging
+    job._install_and_restart_in_process = MagicMock()  # ne doit PAS être appelé au staging
 
     directive = _make_update_directive(
         action="update",
@@ -246,7 +246,7 @@ def test_lo09_perform_update_checksum_ok_stages():
     statuses = [c.args[1] for c in job._report_update_status.call_args_list if len(c.args) > 1]
     assert "deferred" in statuses                  # stagé, install à suivre
     assert "installed" not in statuses             # véridique : pas encore actif
-    job._install_oxt_inprocess.assert_not_called()  # pas d'install au staging
+    job._install_and_restart_in_process.assert_not_called()  # pas d'install au staging
     assert MainJob._update_in_progress_cls is False
 
 
@@ -263,7 +263,6 @@ def test_lo09b_download_fails_over_to_next_bootstrap():
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
         "bootstrap_urls": ["https://onyxia.unreachable/bootstrap", "https://scaleway.ok"],
     }.get(k, d))
-    job._install_oxt_inprocess = MagicMock()
 
     tried = []
 
@@ -312,7 +311,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
         "bootstrap_url": "http://localhost:9999",
     }.get(k, d))
 
-    job._install_oxt_inprocess = MagicMock()
+    job._install_and_restart_in_process = MagicMock()
 
     directive = _make_update_directive(checksum=wrong_checksum)
     job._urlopen = MagicMock(return_value=_response(fake_binary))
@@ -320,7 +319,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
     job._perform_update(directive)
 
     # checksum KO → retour avant tout staging/install
-    job._install_oxt_inprocess.assert_not_called()
+    job._install_and_restart_in_process.assert_not_called()
 
 
 # ── TC-LO-11 : _perform_update libère flag sur exception ─────────────
