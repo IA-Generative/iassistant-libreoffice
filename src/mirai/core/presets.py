@@ -108,13 +108,8 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
 
 
 def _system(specific):
-    """Système hérité de make_api_request : défaut + règle de langue + spécifique.
-
-    La règle de langue est résolue à l'appel (et non à l'import) pour suivre
-    la langue choisie dans l'interface, y compris après un changement à chaud.
-    """
-    base = LEGACY_TEXT_SYSTEM + " " + _t("llm.answer_language")
-    return base + " " + specific if specific else base
+    """Système hérité de make_api_request : défaut + spécifique."""
+    return LEGACY_TEXT_SYSTEM + " " + specific if specific else LEGACY_TEXT_SYSTEM
 
 
 # ── Presets pipeline Writer ─────────────────────────────────────────────
@@ -200,7 +195,8 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
     system_prompt = _system(
         "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
         "en utilisant le minimum de mots nécessaire tout en préservant "
-        "les informations clés.")
+        "les informations clés. Tu réponds TOUJOURS dans la même langue "
+        "que le texte fourni.")
     max_tokens = int(shell.get_config("summarize_selection_max_tokens", 15000))
     llm = _text_client(shell, max_tokens)
 
@@ -245,8 +241,9 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     )
     base_system = (
         "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
-        "dans un langage clair et simple accessible à tous. Tu utilises "
-        "des phrases courtes et des mots courants.")
+        "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
+        "la même langue que le texte fourni. Tu utilises des phrases courtes "
+        "et des mots courants.")
     configured = str(shell.get_config("simplify_selection_system_prompt", "") or "").strip()
     system_prompt = _system((configured + " " + base_system) if configured else base_system)
     max_tokens = len(original) + int(shell.get_config("simplify_selection_max_tokens", 15000))
@@ -434,7 +431,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     prompt = (
         "DONNÉES :\n" + table_text + "\n\n"
         "Analyse ces données : tendances, anomalies, points remarquables.\n"
-        "Sois concis et factuel.\n"
+        "Sois concis et factuel. Réponds dans la même langue que les données.\n"
         + (("Question de l'utilisateur : " + user_text + "\n") if user_text.strip() else "")
         + "ANALYSE :"
     )

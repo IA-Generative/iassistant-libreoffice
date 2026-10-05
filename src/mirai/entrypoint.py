@@ -6456,8 +6456,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         
         # Default system prompt: ask for structured Markdown (converted to native
         # Writer formatting on insertion — see src/mirai/formatting) and enforce
-        # the response language chosen in the UI (see llm.answer_language).
-        # /no_thinking prefix minimises reasoning tokens on Qwen3-style models.
+        # language preservation. /no_thinking prefix minimises reasoning tokens
+        # on Qwen3-style models.
         default_system_prompt = (
             "/no_thinking\n"
             "Mets en forme ta réponse en Markdown standard : **gras**, *italique*, "
@@ -6467,7 +6467,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "(centré, justifié, à droite), à indiquer uniquement avec "
             "<p style=\"text-align:center\">...texte...</p> (ou right/justify) "
             "autour du paragraphe concerné. "
-            + _t("llm.answer_language")
+            "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
+            "fourni par l'utilisateur. Si le texte est en français, réponds en "
+            "français. Si le texte est en anglais, réponds en anglais. Ne change "
+            "jamais la langue."
         )
         if system_prompt:
             system_prompt = default_system_prompt + " " + system_prompt
@@ -8105,7 +8108,9 @@ EDITED VERSION:
             if direction == "reduce":
                 target_words = max(5, int(word_count * 0.65))
                 system = (
-                    "Conserve la langue du texte fourni.\n"
+                    "Tu DOIS répondre dans la MÊME LANGUE que le texte fourni. "
+                    "Si le texte est en français, réponds en français. "
+                    "Si le texte est en anglais, réponds en anglais.\n"
                     "Tu es un rédacteur professionnel. Tu raccourcis le texte fourni "
                     "en conservant le sens, le ton et les informations essentielles. "
                     f"Le texte original fait {word_count} mots. "
@@ -8122,7 +8127,9 @@ EDITED VERSION:
             else:
                 target_words = int(word_count * 1.4)
                 system = (
-                    "Conserve la langue du texte fourni.\n"
+                    "Tu DOIS répondre dans la MÊME LANGUE que le texte fourni. "
+                    "Si le texte est en français, réponds en français. "
+                    "Si le texte est en anglais, réponds en anglais.\n"
                     "Tu es un rédacteur professionnel. Tu développes le texte fourni "
                     "en ajoutant des détails, des précisions ou des formulations plus "
                     "riches tout en conservant le sens et le ton. "

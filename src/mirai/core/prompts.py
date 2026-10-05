@@ -3,13 +3,14 @@
 from ..i18n import t as _t
 
 # Système hérité de make_api_request — conservé pour l'iso-fonctionnalité des
-# presets pipeline (texte brut, /no_thinking pour Qwen3). La règle de langue
-# (llm.answer_language) est ajoutée à l'exécution par core.presets._system()
-# pour suivre la langue choisie dans l'interface.
+# presets pipeline (texte brut, même langue, /no_thinking pour Qwen3).
 LEGACY_TEXT_SYSTEM = (
     "/no_thinking\n"
     "Renvoie uniquement du texte brut. N'utilise pas de markdown, de blocs de "
-    "code ni de symboles de formatage comme **, *, _, ou #."
+    "code ni de symboles de formatage comme **, *, _, ou #. RÈGLE ABSOLUE : tu "
+    "DOIS répondre dans la MÊME LANGUE que le texte fourni par l'utilisateur. "
+    "Si le texte est en français, réponds en français. Si le texte est en "
+    "anglais, réponds en anglais. Ne change jamais la langue."
 )
 
 JSON_TOOL_PROTOCOL = (

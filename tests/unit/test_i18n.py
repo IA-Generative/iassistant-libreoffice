@@ -24,6 +24,11 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
+from src.mirai.core import presets
+from src.mirai.core.context import ToolContext
+from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
+from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _ENV_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
@@ -512,49 +517,55 @@ def test_addons_xcu_has_no_bogus_locale_tag():
 # ---------------------------------------------------------------------------
 # Langue des réponses du LLM
 #
-# Les prompts métier restent en français (décision de conception), mais chaque
-# requête embarque la directive llm.answer_language pour que la RÉPONSE suive
-# la langue choisie dans l'interface. Les tâches qui fixent elles-mêmes la
-# langue (traduction, correction, continuation, remplacement dans le document)
-# priment sur cette directive, qui le dit explicitement.
+# Les prompts métier restent en français (décision de conception). Ce qui est
+# écrit dans le document garde la langue du texte fourni ; ce qui s'adresse à
+# l'utilisateur suit la langue de l'interface (directive llm.answer_language).
+# Une requête ne porte jamais les deux règles.
 # ---------------------------------------------------------------------------
 
 
+def _assert_document_language(system):
+    assert "MÊME LANGUE que le texte fourni" in system
+    assert i18n.t("llm.answer_language") not in system
+
+
 @pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_llm_language_directive_follows_locale(code):
+def test_shell_requests_keep_the_document_language(code):
     job = make_job()
     i18n.set_locale(code)
     request = job.make_api_request("ping", "", 10)
-    messages = json.loads(request.data)["messages"]
-    system = messages[0]["content"]
-    assert i18n.t("llm.answer_language") in system
+    _assert_document_language(json.loads(request.data)["messages"][0]["content"])
 
 
-def test_llm_language_directive_switches_with_the_locale():
-    job = make_job()
-    i18n.set_locale("fr")
-    request = job.make_api_request("ping", "", 10)
-    french = json.loads(request.data)["messages"][0]["content"]
-    i18n.set_locale("zh")
-    request = job.make_api_request("ping", "", 10)
-    chinese = json.loads(request.data)["messages"][0]["content"]
-    assert i18n.CATALOG["llm.answer_language"]["fr"] in french
-    assert i18n.CATALOG["llm.answer_language"]["zh"] in chinese
-    assert french != chinese
+def _writer_target():
+    return FakeWriterDoc(selection_text="The quick brown fox jumps over the lazy dog."), "writer"
 
 
-def test_core_text_pipeline_carries_the_directive():
-    # Le moteur (palette/presets) construit son prompt système à l'exécution :
-    # la directive doit suivre la locale, y compris après un changement à chaud.
-    from src.mirai.core import presets
-
-    for code in i18n.SUPPORTED:
-        i18n.set_locale(code)
-        assert i18n.t("llm.answer_language") in prompts_system(presets)
+def _calc_target():
+    sheet = FakeCalcSheet(grid={(0, 0): "apple", (0, 1): "pear"})
+    return FakeCalcDoc(sheet, selection_ref="A1:A2"), "calc"
 
 
-def prompts_system(presets):
-    return presets._system("consigne spécifique")
+@pytest.mark.parametrize(
+    "runner,make_target",
+    (
+        ("run_extend", _writer_target),
+        ("run_summarize", _writer_target),
+        ("run_simplify", _writer_target),
+        ("run_shorten", _writer_target),
+        ("run_lengthen", _writer_target),
+        ("run_transform", _calc_target),
+        ("run_analyze", _calc_target),
+    ),
+)
+def test_palette_transformations_keep_the_document_language(runner, make_target):
+    i18n.set_locale("en")
+    doc, app = make_target()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("x")) for _ in range(2)])
+    getattr(presets, runner)(
+        ToolContext(None, doc, doc.controller, app, shell), shell, "uppercase", None
+    )
+    _assert_document_language(shell.requests[0]["messages"][0]["content"])
 
 
 @pytest.mark.parametrize(

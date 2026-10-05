@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.mirai import i18n
 from src.mirai.i18n import t as _t
 from tests.stubs.uno_stubs import install
 
@@ -610,6 +611,34 @@ def test_document_rewrite_reports_why_it_did_nothing(palette_module):
     assert palette._run_document_rewrite(
         MagicMock(), "x", ["Titre"], ["Heading 1"]) == {
             "ok": False, "reason": "headings_only"}
+
+
+def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
+    """Sélection ou document entier : le texte réécrit garde sa langue, quelle
+    que soit celle de l'interface."""
+    sent = []
+
+    class _Client:
+        def __init__(self, _shell, max_tokens=None):
+            pass
+
+        def step(self, messages, **_kwargs):
+            sent.append(messages)
+            return SimpleNamespace(error="network_error")
+
+    monkeypatch.setattr(palette_module, "LLMClient", _Client)
+    i18n.set_locale("en")
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    palette._run_selection_rewrite(MagicMock(), "shorten", "Some English text.")
+    palette._run_document_rewrite(
+        MagicMock(), "shorten", ["First paragraph.", "Second paragraph."])
+
+    assert len(sent) == 2
+    for messages in sent:
+        system = messages[0]["content"]
+        assert "MÊME LANGUE que le texte fourni" in system
+        assert i18n.t("llm.answer_language") not in system
 
 
 # ── Refus de lancement ──────────────────────────────────────────────────

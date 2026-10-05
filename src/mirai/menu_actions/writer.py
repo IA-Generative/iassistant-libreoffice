@@ -230,7 +230,8 @@ RÉSUMÉ :
         system_prompt = (
             "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
             "en utilisant le minimum de mots nécessaire tout en préservant "
-            "les informations clés."
+            "les informations clés. Tu réponds TOUJOURS dans la même langue "
+            "que le texte fourni."
         )
         max_tokens = int(job.get_config("summarize_selection_max_tokens", 15000))
         request = job.make_api_request(prompt, system_prompt, max_tokens)
@@ -292,8 +293,9 @@ VERSION REFORMULÉE :
 
         system_prompt = (
             "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
-            "dans un langage clair et simple accessible à tous. Tu utilises "
-            "des phrases courtes et des mots courants."
+            "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
+            "la même langue que le texte fourni. Tu utilises des phrases courtes "
+            "et des mots courants."
         )
         configured_sp = str(job.get_config("simplify_selection_system_prompt", "") or "").strip()
         if configured_sp:
