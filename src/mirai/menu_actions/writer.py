@@ -3,7 +3,6 @@
 import re
 
 from ..formatting import insert_formatted
-from ..i18n import t as _t
 from .shared import apply_settings_result
 
 _RE_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
