@@ -2391,30 +2391,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 if active_frame:
                     toolkit = self.ctx.getServiceManager().createInstance("com.sun.star.awt.Toolkit")
                     parent = active_frame.getContainerWindow()
-                    msg_text = (
-                        f"MIrAI {target_version} est prêt.\n\n"
-                        "Pour l'installer, LibreOffice va se fermer —\n"
-                        "vous le rouvrirez ensuite pour l'activer.\n\n"
-                        "Installer et fermer maintenant ?\n\n"
-                        "(Si vous choisissez Non, la mise à jour sera\n"
-                        "reproposée plus tard. Vous pouvez aussi la\n"
-                        "lancer depuis le menu MIrAI → À propos…)"
-                    )
                     if urgency == "critical":
-                        msg_text = (
-                            f"Une nouvelle version de MIrAI ({target_version})\n"
-                            "avec des améliorations importantes est prête.\n\n"
-                            "Pour l'installer, LibreOffice va se fermer —\n"
-                            "rouvrez-le ensuite pour l'activer.\n\n"
-                            "Installer et fermer maintenant ?\n\n"
-                            "(Si vous choisissez Non, la mise à jour sera\n"
-                            "reproposée plus tard.)"
-                        )
+                        msg_text = _t("update.prompt_critical", version=target_version)
+                    else:
+                        msg_text = _t("update.prompt", version=target_version)
                     msgbox = toolkit.createMessageBox(
                         parent,
                         4,  # MessageBoxType.QUERYBOX
                         MSG_BUTTONS.BUTTONS_YES_NO,
-                        "MIrAI — Mise à jour",
+                        _t("update.title"),
                         msg_text
                     )
                     answer = msgbox.execute()
@@ -2584,35 +2569,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return
             toolkit = self.ctx.getServiceManager().createInstance("com.sun.star.awt.Toolkit")
             parent = active_frame.getContainerWindow()
-            oxt_line = oxt or "le dossier pending_update de votre profil LibreOffice"
-            msg = (
-                f"La mise à jour MIrAI {target_version} a été téléchargée et\n"
-                "vérifiée, mais son installation automatique a été bloquée par\n"
-                "la politique de sécurité de ce poste.\n\n"
-                "Elle ne sera plus reproposée automatiquement — vous pouvez\n"
-                "l'installer vous-même :\n\n"
-                "── Installation manuelle ─────────────────────────\n"
-                "1. Menu  Outils ▸ Gestionnaire des extensions…\n"
-                "2. Si « MIrAI » est déjà dans la liste : sélectionnez-le,\n"
-                "   puis cliquez sur « Supprimer ».\n"
-                "3. Cliquez sur « Ajouter » et sélectionnez le fichier :\n"
-                f"      {oxt_line}\n"
-                "4. Acceptez la licence.\n"
-                "5. Fermez puis rouvrez LibreOffice.\n\n"
-                "(La suppression/ajout se fait dans LibreOffice — pas besoin\n"
-                "de droits administrateur.)\n"
-                "En cas d'échec, contactez votre support / administrateur."
-            )
+            oxt_line = oxt or _t("update.blocked_pending_folder")
+            msg = _t("update.blocked_body", version=target_version, oxt=oxt_line)
             # Quand on connaît le dossier du fichier téléchargé, on propose de
             # l'ouvrir directement (Oui = ouvrir l'explorateur, sans cmd.exe).
             open_folder_offered = bool(folder)
             if open_folder_offered:
                 msg = msg + (
                     "\n\n──────────────────────────────────────────────\n"
-                    "► Pour ouvrir le dossier contenant le fichier téléchargé,\n"
-                    "  cliquez sur « Oui » : l'explorateur de fichiers s'ouvre\n"
-                    "  directement (sans invite de commande). « Non » referme\n"
-                    "  simplement ce message."
+                    + _t("update.blocked_open_folder")
                 )
                 buttons = MSG_BUTTONS.BUTTONS_YES_NO
             else:
@@ -2625,7 +2590,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 parent,
                 box_type,
                 buttons,
-                "MIrAI — Mise à jour bloquée",
+                _t("update.blocked_title"),
                 msg,
             )
             result = box.execute()
@@ -2955,8 +2920,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             toolkit = smgr.createInstance("com.sun.star.awt.Toolkit")
             box = toolkit.createMessageBox(
                 frame.getContainerWindow(), 1, MSG_BUTTONS.BUTTONS_OK,
-                "MIrAI — Mise à jour",
-                "La mise à jour s'activera au prochain démarrage de LibreOffice.")
+                _t("update.title"), _t("update.activates_at_restart"))
             box.execute()
             try:
                 box.dispose()
@@ -3009,10 +2973,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 toolkit = self.ctx.getServiceManager().createInstance("com.sun.star.awt.Toolkit")
                 parent = active_frame.getContainerWindow()
                 box = toolkit.createMessageBox(
-                    parent, 1, MSG_BUTTONS.BUTTONS_OK, "MIrAI — Mise à jour",
-                    "La mise à jour a été installée.\n\n"
-                    "LibreOffice va se fermer pour l'activer.\n"
-                    "Rouvrez-le ensuite."
+                    parent, 1, MSG_BUTTONS.BUTTONS_OK, _t("update.title"),
+                    _t("update.installed_closing")
                 )
                 box.execute()
                 try:

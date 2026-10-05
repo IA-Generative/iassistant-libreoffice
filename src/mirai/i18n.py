@@ -699,6 +699,275 @@ CATALOG = {
         "zh": "无法打开文件夹。",
     },
 
+    # --- Dialogues de mise a jour ---
+    "update.title": {
+        "fr": "MIrAI — Mise à jour",
+        "en": "MIrAI — Update",
+        "es": "MIrAI — Actualización",
+        "pt": "MIrAI — Atualização",
+        "zh": "MIrAI — 更新",
+    },
+    "update.blocked_title": {
+        "fr": "MIrAI — Mise à jour bloquée",
+        "en": "MIrAI — Update blocked",
+        "es": "MIrAI — Actualización bloqueada",
+        "pt": "MIrAI — Atualização bloqueada",
+        "zh": "MIrAI — 更新被阻止",
+    },
+    "update.prompt": {
+        "fr": (
+            "MIrAI {version} est prêt.\n\n"
+            "Pour l'installer, LibreOffice va se fermer —\n"
+            "vous le rouvrirez ensuite pour l'activer.\n\n"
+            "Installer et fermer maintenant ?\n\n"
+            "(Si vous choisissez Non, la mise à jour sera\n"
+            "reproposée plus tard. Vous pouvez aussi la\n"
+            "lancer depuis le menu MIrAI → À propos…)"
+        ),
+        "en": (
+            "MIrAI {version} is ready.\n\n"
+            "To install it, LibreOffice will close —\n"
+            "you will then reopen it to activate the update.\n\n"
+            "Install and close now?\n\n"
+            "(If you choose No, the update will be\n"
+            "offered again later. You can also start it\n"
+            "from the MIrAI → About… menu.)"
+        ),
+        "es": (
+            "MIrAI {version} está listo.\n\n"
+            "Para instalarlo, LibreOffice se cerrará;\n"
+            "vuelva a abrirlo después para activarlo.\n\n"
+            "¿Instalar y cerrar ahora?\n\n"
+            "(Si elige No, la actualización se volverá\n"
+            "a proponer más tarde. También puede iniciarla\n"
+            "desde el menú MIrAI → Acerca de…)"
+        ),
+        "pt": (
+            "O MIrAI {version} está pronto.\n\n"
+            "Para instalá-lo, o LibreOffice será fechado;\n"
+            "reabra-o em seguida para ativá-lo.\n\n"
+            "Instalar e fechar agora?\n\n"
+            "(Se você escolher Não, a atualização será\n"
+            "oferecida novamente mais tarde. Você também pode\n"
+            "iniciá-la pelo menu MIrAI → Sobre…)"
+        ),
+        "zh": (
+            "MIrAI {version} 已准备就绪。\n\n"
+            "安装时 LibreOffice 将关闭，\n"
+            "之后请重新打开以启用新版本。\n\n"
+            "现在安装并关闭吗？\n\n"
+            "（如果选择“否”，稍后会再次提示更新。\n"
+            "您也可以从菜单 MIrAI → 关于… 启动更新。）"
+        ),
+    },
+    "update.prompt_critical": {
+        "fr": (
+            "Une nouvelle version de MIrAI ({version})\n"
+            "avec des améliorations importantes est prête.\n\n"
+            "Pour l'installer, LibreOffice va se fermer —\n"
+            "rouvrez-le ensuite pour l'activer.\n\n"
+            "Installer et fermer maintenant ?\n\n"
+            "(Si vous choisissez Non, la mise à jour sera\n"
+            "reproposée plus tard.)"
+        ),
+        "en": (
+            "A new version of MIrAI ({version})\n"
+            "with important improvements is ready.\n\n"
+            "To install it, LibreOffice will close —\n"
+            "reopen it afterwards to activate the update.\n\n"
+            "Install and close now?\n\n"
+            "(If you choose No, the update will be\n"
+            "offered again later.)"
+        ),
+        "es": (
+            "Una nueva versión de MIrAI ({version})\n"
+            "con mejoras importantes está lista.\n\n"
+            "Para instalarla, LibreOffice se cerrará;\n"
+            "vuelva a abrirlo después para activarla.\n\n"
+            "¿Instalar y cerrar ahora?\n\n"
+            "(Si elige No, la actualización se volverá\n"
+            "a proponer más tarde.)"
+        ),
+        "pt": (
+            "Uma nova versão do MIrAI ({version})\n"
+            "com melhorias importantes está pronta.\n\n"
+            "Para instalá-la, o LibreOffice será fechado;\n"
+            "reabra-o em seguida para ativá-la.\n\n"
+            "Instalar e fechar agora?\n\n"
+            "(Se você escolher Não, a atualização será\n"
+            "oferecida novamente mais tarde.)"
+        ),
+        "zh": (
+            "MIrAI 的新版本（{version}）已准备就绪，\n"
+            "其中包含重要改进。\n\n"
+            "安装时 LibreOffice 将关闭，\n"
+            "之后请重新打开以启用新版本。\n\n"
+            "现在安装并关闭吗？\n\n"
+            "（如果选择“否”，稍后会再次提示更新。）"
+        ),
+    },
+    "update.activates_at_restart": {
+        "fr": "La mise à jour s'activera au prochain démarrage de LibreOffice.",
+        "en": "The update will be activated the next time LibreOffice starts.",
+        "es": "La actualización se activará en el próximo inicio de LibreOffice.",
+        "pt": "A atualização será ativada na próxima inicialização do LibreOffice.",
+        "zh": "更新将在下次启动 LibreOffice 时生效。",
+    },
+    "update.installed_closing": {
+        "fr": (
+            "La mise à jour a été installée.\n\n"
+            "LibreOffice va se fermer pour l'activer.\n"
+            "Rouvrez-le ensuite."
+        ),
+        "en": (
+            "The update has been installed.\n\n"
+            "LibreOffice will close to activate it.\n"
+            "Reopen it afterwards."
+        ),
+        "es": (
+            "La actualización se ha instalado.\n\n"
+            "LibreOffice se cerrará para activarla.\n"
+            "Vuelva a abrirlo después."
+        ),
+        "pt": (
+            "A atualização foi instalada.\n\n"
+            "O LibreOffice será fechado para ativá-la.\n"
+            "Reabra-o em seguida."
+        ),
+        "zh": (
+            "更新已安装。\n\n"
+            "LibreOffice 将关闭以启用更新。\n"
+            "之后请重新打开。"
+        ),
+    },
+    "update.blocked_body": {
+        "fr": (
+            "La mise à jour MIrAI {version} a été téléchargée et\n"
+            "vérifiée, mais son installation automatique a été bloquée par\n"
+            "la politique de sécurité de ce poste.\n\n"
+            "Elle ne sera plus reproposée automatiquement — vous pouvez\n"
+            "l'installer vous-même :\n\n"
+            "── Installation manuelle ─────────────────────────\n"
+            "1. Menu  Outils ▸ Gestionnaire des extensions…\n"
+            "2. Si « MIrAI » est déjà dans la liste : sélectionnez-le,\n"
+            "   puis cliquez sur « Supprimer ».\n"
+            "3. Cliquez sur « Ajouter » et sélectionnez le fichier :\n"
+            "      {oxt}\n"
+            "4. Acceptez la licence.\n"
+            "5. Fermez puis rouvrez LibreOffice.\n\n"
+            "(La suppression/ajout se fait dans LibreOffice — pas besoin\n"
+            "de droits administrateur.)\n"
+            "En cas d'échec, contactez votre support / administrateur."
+        ),
+        "en": (
+            "The MIrAI {version} update was downloaded and\n"
+            "verified, but its automatic installation was blocked by\n"
+            "the security policy of this computer.\n\n"
+            "It will not be offered again automatically — you can\n"
+            "install it yourself:\n\n"
+            "── Manual installation ───────────────────────────\n"
+            "1. Menu  Tools ▸ Extension Manager…\n"
+            "2. If \"MIrAI\" is already in the list: select it,\n"
+            "   then click \"Remove\".\n"
+            "3. Click \"Add\" and select the file:\n"
+            "      {oxt}\n"
+            "4. Accept the license.\n"
+            "5. Close and reopen LibreOffice.\n\n"
+            "(Removing and adding happen inside LibreOffice — no\n"
+            "administrator rights needed.)\n"
+            "If it fails, contact your support / administrator."
+        ),
+        "es": (
+            "La actualización MIrAI {version} se ha descargado y\n"
+            "verificado, pero su instalación automática ha sido bloqueada por\n"
+            "la política de seguridad de este equipo.\n\n"
+            "No se volverá a proponer automáticamente; puede\n"
+            "instalarla usted mismo:\n\n"
+            "── Instalación manual ────────────────────────────\n"
+            "1. Menú  Herramientas ▸ Gestor de extensiones…\n"
+            "2. Si «MIrAI» ya está en la lista: selecciónelo\n"
+            "   y haga clic en «Quitar».\n"
+            "3. Haga clic en «Añadir» y seleccione el archivo:\n"
+            "      {oxt}\n"
+            "4. Acepte la licencia.\n"
+            "5. Cierre y vuelva a abrir LibreOffice.\n\n"
+            "(Quitar y añadir se hace dentro de LibreOffice; no se necesitan\n"
+            "derechos de administrador.)\n"
+            "Si falla, contacte con su soporte / administrador."
+        ),
+        "pt": (
+            "A atualização MIrAI {version} foi baixada e\n"
+            "verificada, mas a instalação automática foi bloqueada pela\n"
+            "política de segurança deste computador.\n\n"
+            "Ela não será mais oferecida automaticamente; você pode\n"
+            "instalá-la por conta própria:\n\n"
+            "── Instalação manual ─────────────────────────────\n"
+            "1. Menu  Ferramentas ▸ Gerenciador de extensões…\n"
+            "2. Se «MIrAI» já estiver na lista: selecione-o\n"
+            "   e clique em «Remover».\n"
+            "3. Clique em «Adicionar» e selecione o arquivo:\n"
+            "      {oxt}\n"
+            "4. Aceite a licença.\n"
+            "5. Feche e reabra o LibreOffice.\n\n"
+            "(Remover e adicionar é feito dentro do LibreOffice; não são\n"
+            "necessários direitos de administrador.)\n"
+            "Em caso de falha, contate seu suporte / administrador."
+        ),
+        "zh": (
+            "MIrAI {version} 更新已下载并通过校验，\n"
+            "但本机的安全策略阻止了自动安装。\n\n"
+            "系统不会再自动提示此更新，您可以自行安装：\n\n"
+            "── 手动安装 ─────────────────────────────────\n"
+            "1. 菜单  工具 ▸ 扩展管理器…\n"
+            "2. 如果列表中已有“MIrAI”：选中它，\n"
+            "   然后点击“移除”。\n"
+            "3. 点击“添加”并选择文件：\n"
+            "      {oxt}\n"
+            "4. 接受许可协议。\n"
+            "5. 关闭并重新打开 LibreOffice。\n\n"
+            "（移除和添加均在 LibreOffice 内完成，无需管理员权限。）\n"
+            "如果失败，请联系您的支持人员或管理员。"
+        ),
+    },
+    "update.blocked_pending_folder": {
+        "fr": "le dossier pending_update de votre profil LibreOffice",
+        "en": "the pending_update folder of your LibreOffice profile",
+        "es": "la carpeta pending_update de su perfil de LibreOffice",
+        "pt": "a pasta pending_update do seu perfil do LibreOffice",
+        "zh": "您的 LibreOffice 配置文件中的 pending_update 文件夹",
+    },
+    "update.blocked_open_folder": {
+        "fr": (
+            "► Pour ouvrir le dossier contenant le fichier téléchargé,\n"
+            "  cliquez sur « Oui » : l'explorateur de fichiers s'ouvre\n"
+            "  directement (sans invite de commande). « Non » referme\n"
+            "  simplement ce message."
+        ),
+        "en": (
+            "► To open the folder containing the downloaded file,\n"
+            "  click \"Yes\": the file explorer opens\n"
+            "  directly (no command prompt). \"No\" simply\n"
+            "  closes this message."
+        ),
+        "es": (
+            "► Para abrir la carpeta que contiene el archivo descargado,\n"
+            "  haga clic en «Sí»: el explorador de archivos se abre\n"
+            "  directamente (sin símbolo del sistema). «No» simplemente\n"
+            "  cierra este mensaje."
+        ),
+        "pt": (
+            "► Para abrir a pasta que contém o arquivo baixado,\n"
+            "  clique em «Sim»: o explorador de arquivos abre\n"
+            "  diretamente (sem prompt de comando). «Não» apenas\n"
+            "  fecha esta mensagem."
+        ),
+        "zh": (
+            "► 要打开包含已下载文件的文件夹，\n"
+            "  请点击“是”：文件资源管理器会直接打开\n"
+            "  （不经过命令提示符）。“否”仅关闭此消息。"
+        ),
+    },
+
     # --- Boite de dialogue Ajuster la longueur ---
     "resize.title": {
         "fr": "MIrAI — Ajuster la longueur",
