@@ -1086,7 +1086,7 @@ CATALOG = {
         "en": "Normalize the format (e.g. first last → FIRST LAST)",
         "es": "Normalizar el formato (ej.: nombre apellido → NOMBRE APELLIDO)",
         "pt": "Normalizar o formato (ex.: nome sobrenome → NOME SOBRENOME)",
-        "zh": "规范化格式（例如：名 姓 → 姓 名）",
+        "zh": "规范化格式（例如：zhang wei → ZHANG WEI）",
     },
     "calc.suggest.8": {
         "fr": "Extraire le premier nombre trouvé",
