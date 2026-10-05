@@ -50,7 +50,8 @@ def build_messages(text):
         # Couper sur une frontière de ligne : un paragraphe tronqué en plein
         # milieu se lit comme une faute de rédaction, et le modèle la signale.
         body = body[:MAX_CHARS].rsplit("\n", 1)[0] or body[:MAX_CHARS]
-    return [{"role": "system", "content": SYSTEM_PROMPT},
+    return [{"role": "system",
+             "content": SYSTEM_PROMPT + " " + _t("llm.answer_language")},
             {"role": "user", "content": body}]
 
 

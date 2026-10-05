@@ -6438,11 +6438,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
 
 
-    def make_api_request(self, prompt, system_prompt="", max_tokens=15000, api_type=None):
+    def make_api_request(self, prompt, system_prompt="", max_tokens=15000, api_type=None,
+                         answer_in_ui_language=False):
         """
         Build a streaming chat/completions request for OpenAI-compatible endpoints.
         The api_type parameter is accepted for backwards compatibility but ignored
         — all requests use the chat/completions format.
+
+        The answer keeps the language of the provided text, since it is written
+        into the document. Pass answer_in_ui_language=True when the answer is
+        read by the user instead (suggestions): it then follows the UI language.
         """
         try:
             max_tokens = int(max_tokens)
@@ -6454,9 +6459,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         api_type = "chat"
         model = str(self.get_config("llm_default_models", ""))
         
+        if answer_in_ui_language:
+            language_rule = _t("llm.answer_language")
+        else:
+            language_rule = (
+                "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
+                "fourni par l'utilisateur. Si le texte est en français, réponds en "
+                "français. Si le texte est en anglais, réponds en anglais. Ne change "
+                "jamais la langue."
+            )
+
         # Default system prompt: ask for structured Markdown (converted to native
-        # Writer formatting on insertion — see src/mirai/formatting) and enforce
-        # language preservation. /no_thinking prefix minimises reasoning tokens
+        # Writer formatting on insertion — see src/mirai/formatting) and set the
+        # answer language. /no_thinking prefix minimises reasoning tokens
         # on Qwen3-style models.
         default_system_prompt = (
             "/no_thinking\n"
@@ -6467,10 +6482,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "(centré, justifié, à droite), à indiquer uniquement avec "
             "<p style=\"text-align:center\">...texte...</p> (ou right/justify) "
             "autour du paragraphe concerné. "
-            "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
-            "fourni par l'utilisateur. Si le texte est en français, réponds en "
-            "français. Si le texte est en anglais, réponds en anglais. Ne change "
-            "jamais la langue."
+            + language_rule
         )
         if system_prompt:
             system_prompt = default_system_prompt + " " + system_prompt
@@ -8752,8 +8764,7 @@ EDITED VERSION:
                 return _fallback_prompts()
             try:
                 system = (
-                    _t("llm.answer_language")
-                    + "\nTu es un assistant qui propose des instructions d’édition de texte. "
+                    "Tu es un assistant qui propose des instructions d’édition de texte. "
                     "Réponds UNIQUEMENT avec une liste numérotée de 8 instructions courtes "
                     "(une par ligne, format: ‘1. instruction’). "
                     "Chaque instruction doit être une consigne d’édition concrète et directe "
@@ -8775,7 +8786,8 @@ EDITED VERSION:
                 # Use non-streaming HTTP call — this runs in a background thread
                 # and stream_request must NOT be called from background threads
                 # (processEventsToIdle crashes LibreOffice).
-                request = self.make_api_request(prompt, system, max_tokens=600, api_type=api_type)
+                request = self.make_api_request(prompt, system, max_tokens=600, api_type=api_type,
+                                                answer_in_ui_language=True)
                 # Override stream=false for a synchronous call
                 import copy as _copy
                 req_data = json.loads(request.data.decode("utf-8"))
@@ -9333,7 +9345,8 @@ EDITED VERSION:
                     "Propose 8 transformations pertinentes pour ces données."
                 )
                 api_type = str(self.get_config("api_type", "completions")).lower()
-                request = self.make_api_request(prompt, system, max_tokens=400, api_type=api_type)
+                request = self.make_api_request(prompt, system, max_tokens=400, api_type=api_type,
+                                                answer_in_ui_language=True)
                 accumulated = []
                 def _collect(chunk):
                     accumulated.append(chunk)

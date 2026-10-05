@@ -839,9 +839,9 @@ def _explain_formula(job, formula, schema_context=""):
     api_type = "chat"
     system = (
         "Tu es un expert LibreOffice Calc. "
-        "On te donne une formule. Réponds avec EXACTEMENT 3 lignes :\n"
         + _t("llm.answer_language")
-        + "\nLigne 1 : une explication courte de ce que fait la formule (1 phrase)\n"
+        + " On te donne une formule. Réponds avec EXACTEMENT 3 lignes :\n"
+        "Ligne 1 : une explication courte de ce que fait la formule (1 phrase)\n"
         "Ligne 2 : commence par 'Alternative : ' suivi d'une formule alternative qui donne le même résultat (ou approchant) avec une syntaxe différente\n"
         "Ligne 3 : commence par 'Note : ' suivi d'un conseil pratique (1 phrase courte)\n"
         "Utilise des POINT-VIRGULES (;) comme séparateurs dans les formules."

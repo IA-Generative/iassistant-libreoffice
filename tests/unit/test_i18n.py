@@ -16,6 +16,7 @@ import os
 import re
 import tempfile
 import xml.etree.ElementTree as ET
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,8 +25,9 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai.core import presets
+from src.mirai.core import doc_analysis, presets, prompts
 from src.mirai.core.context import ToolContext
+from src.mirai.menu_actions import calc
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
@@ -566,6 +568,41 @@ def test_palette_transformations_keep_the_document_language(runner, make_target)
         ToolContext(None, doc, doc.controller, app, shell), shell, "uppercase", None
     )
     _assert_document_language(shell.requests[0]["messages"][0]["content"])
+
+
+def _assert_interface_language(system):
+    assert i18n.t("llm.answer_language") in system
+    assert "MÊME LANGUE" not in system
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_shell_suggestion_requests_follow_the_interface_language(code):
+    job = make_job()
+    i18n.set_locale(code)
+    request = job.make_api_request("ping", "", 10, answer_in_ui_language=True)
+    _assert_interface_language(json.loads(request.data)["messages"][0]["content"])
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_document_suggestions_follow_the_interface_language(code):
+    i18n.set_locale(code)
+    messages = doc_analysis.build_messages("Un paragraphe de démonstration. " * 20)
+    _assert_interface_language(messages[0]["content"])
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_conversation_follows_the_interface_language(code):
+    i18n.set_locale(code)
+    _assert_interface_language(prompts.build_system("writer", None, "native"))
+
+
+def test_formula_explanation_follows_the_interface_language():
+    i18n.set_locale("en")
+    job = MagicMock()
+    calc._explain_formula(job, "=SUM(A1:A3)")
+    system = job.make_chat_request.call_args.args[0][0]["content"]
+    _assert_interface_language(system)
+    assert "EXACTEMENT 3 lignes :\nLigne 1" in system
 
 
 @pytest.mark.parametrize(

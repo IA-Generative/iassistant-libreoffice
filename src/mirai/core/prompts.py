@@ -38,6 +38,8 @@ def build_system(app, registry, mode, preset_extra=""):
         "Tu aides l'utilisateur à travailler sur SON document, via les outils "
         "fournis. Tes réponses finales sont en texte brut, sans markdown. "
         + _t("llm.answer_language") + " "
+        "Les modifications apportées au document avec les outils conservent la "
+        "langue du texte modifié, sauf demande de traduction. "
         "Règles : lis le contexte nécessaire avec les outils de lecture avant "
         "de modifier quoi que ce soit ; fais des modifications minimales et "
         "précises ; si la demande est ambiguë, pose ta question en réponse "

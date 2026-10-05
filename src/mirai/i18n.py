@@ -1940,8 +1940,9 @@ CATALOG = {
     },
     # --- Directive de langue pour les réponses du LLM ---
     # Les prompts métier restent en français (décision de conception) ; cette
-    # directive est injectée dans le prompt système par défaut (make_api_request)
-    # pour que la RÉPONSE suive la langue choisie dans l'interface.
+    # directive est injectée dans les requêtes dont la réponse s'adresse à
+    # l'utilisateur (conversation, suggestions, explications), pour qu'elle
+    # suive la langue choisie dans l'interface.
     "llm.answer_language": {
         "fr": (
             "RÈGLE DE LANGUE : tu DOIS répondre en français, sauf si la tâche "
