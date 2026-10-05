@@ -25,6 +25,7 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
+from src.mirai import entrypoint
 from src.mirai.core import doc_analysis, presets, prompts
 from src.mirai.core.context import ToolContext
 from src.mirai.menu_actions import calc
@@ -440,13 +441,6 @@ def test_no_key_is_left_identical_between_french_and_english_by_accident():
 # ---------------------------------------------------------------------------
 
 
-def _render_callback_html():
-    match = re.search(r'html = (f""".*?""")', _read("src/mirai/entrypoint.py"), re.S)
-    assert match, "callback HTML f-string not found in entrypoint.py"
-    globals_for_eval = {"_t": i18n.t, "_i18n_get_locale": i18n.get_locale}
-    return eval(match.group(1), globals_for_eval)  # noqa: S307 - source du depot
-
-
 _CALLBACK_KEYS = (
     "callback.title",
     "callback.heading",
@@ -460,7 +454,7 @@ _CALLBACK_KEYS = (
 @pytest.mark.parametrize("code", i18n.SUPPORTED)
 def test_callback_page_is_rendered_in_the_current_locale(code):
     i18n.set_locale(code)
-    html = _render_callback_html()
+    html = entrypoint._render_callback_page()
     assert f'<html lang="{code}">' in html
     for key in _CALLBACK_KEYS:
         assert i18n.t(key) in html, key
@@ -469,17 +463,24 @@ def test_callback_page_is_rendered_in_the_current_locale(code):
 @pytest.mark.parametrize("code", i18n.SUPPORTED)
 def test_callback_page_keeps_its_css_intact(code):
     i18n.set_locale(code)
-    html = _render_callback_html()
+    html = entrypoint._render_callback_page()
     assert "body { font-family: Arial, sans-serif;" in html
     assert ".card { background: #fff;" in html
     assert "}}" not in html
 
 
+def test_callback_page_escapes_translated_text(monkeypatch):
+    monkeypatch.setitem(i18n.CATALOG, "callback.heading", {"fr": "<b>A & B</b>"})
+    page = entrypoint._render_callback_page()
+    assert "<b>" not in page
+    assert "&lt;b&gt;A &amp; B&lt;/b&gt;" in page
+
+
 def test_callback_locale_switch_changes_the_page():
     i18n.set_locale("fr")
-    french = _render_callback_html()
+    french = entrypoint._render_callback_page()
     i18n.set_locale("zh")
-    chinese = _render_callback_html()
+    chinese = entrypoint._render_callback_page()
     assert french != chinese
     assert i18n.CATALOG["callback.badge"]["zh"] in chinese
 

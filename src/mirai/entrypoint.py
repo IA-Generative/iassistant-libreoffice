@@ -200,6 +200,7 @@ import uuid
 import time
 import base64
 import hashlib
+import html
 import threading
 import socket
 from .formatting import insert_formatted
@@ -689,6 +690,37 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
         log_to_file(f"Error: {str(e)}")
         log_to_file(f"Type: {type(e).__name__}")
         log_to_file(f"=== End Telemetry Exception ===")
+
+
+def _render_callback_page():
+    """Page shown in the browser once the OAuth redirect has reached the extension."""
+    def text(key):
+        return html.escape(_t(key), quote=False)
+
+    return f"""<!doctype html>
+<html lang="{_i18n_get_locale()}">
+  <head>
+    <meta charset="utf-8"/>
+    <title>{text("callback.title")}</title>
+    <style>
+      body {{ font-family: Arial, sans-serif; margin: 28px; color: #222; background: #f7f8fb; }}
+      .card {{ background: #fff; border: 1px solid #e3e6ef; border-radius: 10px; padding: 18px 20px; max-width: 560px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }}
+      .muted {{ color: #666; }}
+      .ok {{ display: inline-block; margin-top: 6px; padding: 6px 10px; background: #e8f5e9; color: #1b5e20; border-radius: 6px; font-weight: 600; }}
+      .small {{ font-size: 12px; color: #778; margin-top: 10px; }}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>{text("callback.heading")}</h2>
+      <div class="ok">{text("callback.badge")}</div>
+      <p>{text("callback.close_tab")}</p>
+      <p class="muted">{text("callback.if_stuck")}</p>
+      <div class="small">{text("callback.no_action")}</div>
+    </div>
+  </body>
+</html>
+"""
 
 
 # The MainJob is a UNO component derived from unohelper.Base class
@@ -4652,31 +4684,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                html = f"""<!doctype html>
-<html lang="{_i18n_get_locale()}">
-  <head>
-    <meta charset="utf-8"/>
-    <title>{_t("callback.title")}</title>
-    <style>
-      body {{ font-family: Arial, sans-serif; margin: 28px; color: #222; background: #f7f8fb; }}
-      .card {{ background: #fff; border: 1px solid #e3e6ef; border-radius: 10px; padding: 18px 20px; max-width: 560px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }}
-      .muted {{ color: #666; }}
-      .ok {{ display: inline-block; margin-top: 6px; padding: 6px 10px; background: #e8f5e9; color: #1b5e20; border-radius: 6px; font-weight: 600; }}
-      .small {{ font-size: 12px; color: #778; margin-top: 10px; }}
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h2>{_t("callback.heading")}</h2>
-      <div class="ok">{_t("callback.badge")}</div>
-      <p>{_t("callback.close_tab")}</p>
-      <p class="muted">{_t("callback.if_stuck")}</p>
-      <div class="small">{_t("callback.no_action")}</div>
-    </div>
-  </body>
-</html>
-"""
-                self.wfile.write(html.encode("utf-8"))
+                self.wfile.write(_render_callback_page().encode("utf-8"))
 
         bind_host = "" if host in ("localhost", "127.0.0.1") else host
         try:
