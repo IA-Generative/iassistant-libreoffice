@@ -3,7 +3,17 @@
 import unittest
 
 from src.mirai.formatting.ast_nodes import (
-    Blockquote, Bold, Code, CodeBlock, Heading, Italic, Link, ListItem, Paragraph, Table, Text,
+    Blockquote,
+    Bold,
+    Code,
+    CodeBlock,
+    Heading,
+    Italic,
+    Link,
+    ListItem,
+    Paragraph,
+    Table,
+    Text,
 )
 from src.mirai.formatting.markdown_parser import parse_markdown
 
@@ -121,7 +131,7 @@ class TestHorizontalRule(unittest.TestCase):
     def test_hr_is_dropped_not_left_as_text(self):
         blocks = parse_markdown("Avant\n\n---\n\nAprès")
         self.assertEqual(len(blocks), 2)
-        self.assertNotIn("---", "".join(t.value for b in blocks for l in b.lines for t in l))
+        self.assertNotIn("---", "".join(t.value for b in blocks for line in b.lines for t in line))
 
 
 if __name__ == "__main__":

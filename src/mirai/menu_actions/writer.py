@@ -3,7 +3,6 @@
 import re
 
 from ..formatting import insert_formatted
-from .shared import apply_settings_result
 
 _RE_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
@@ -361,16 +360,6 @@ def _open_documentation(job):
         job._log(f"Error opening documentation: {str(e)}")
 
 
-def _open_settings(job, selection):
-    job._send_telemetry("OpenSettings", {"action": "open_settings"})
-    try:
-        result = job.settings_box("Settings")
-        apply_settings_result(job, result)
-    except Exception as e:
-        text_range = selection.getByIndex(0)
-        text_range.setString(text_range.getString() + ":error: " + str(e))
-
-
 def _get_writer_selection(job, model):
     text = model.Text
     ctrl = model.CurrentController
@@ -528,9 +517,7 @@ def handle_writer_action(job, args, model):
     job._log("Processing Writer document")
     text, ctrl, selection, text_range, selected_text = _get_writer_selection(job, model)
     if text_range is None:
-        # Sélection non résoluble : le dire. Auparavant on rendait la main en
-        # silence, et l'utilisateur ne pouvait pas distinguer « rien à traiter »
-        # d'une panne.
+        # Sélection non résoluble : le signaler à l'utilisateur.
         job._log(f"[writer] {args} : aucune plage de texte exploitable")
         job._show_message(
             "Rien à traiter",

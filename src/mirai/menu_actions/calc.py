@@ -3,8 +3,6 @@
 import os
 import re
 
-from .shared import apply_settings_result
-
 _ERR_PREFIX = "#ERREUR: "
 
 
@@ -172,17 +170,6 @@ def _get_cell_error(target_cell) -> str:
     return ""
 
 
-def _open_settings(job):
-    try:
-        result = job.settings_box("Settings")
-        apply_settings_result(job, result)
-    except Exception:
-        pass
-
-
-    # _strip_markdown defined at module level (see top of file)
-
-
 def _safe_set_string(cell, text):
     """Set a Calc cell's string content without losing a leading apostrophe.
 
@@ -286,7 +273,6 @@ def _next_result_header(sheet):
     Scans row 0 for existing headers that start with _RESULT_BASE and returns
     the next name in the series: 'Résultat IA', 'Résultat IA ×2', '×3', …
     """
-    import re
     try:
         num_cols = sheet.getColumns().Count
     except Exception:
@@ -468,7 +454,6 @@ def _fill_formula_down(job, sheet, formula, area):
     so this should never turn a validated formula unsafe, but the check is
     kept here too (defense in depth) rather than trusting the caller.
     """
-    import re
     out_col = area.StartColumn
     num_cols = sheet.getColumns().Count
     filled = 0
@@ -522,7 +507,6 @@ _FORMULA_SYSTEM = (
     "rejected before being applied, regardless of context."
 )
 
-# ── Calc functions reference for context-aware formula generation ────────
 
 _CALC_FUNCTIONS_DB = None  # lazy-loaded
 
@@ -579,7 +563,6 @@ _KEYWORD_MAP = {
     "date": ["DATE", "TODAY", "NOW", "YEAR", "MONTH", "DAY", "DATEDIF", "EDATE", "EOMONTH"],
     "jour": ["DAY", "DAYS", "WEEKDAY", "WORKDAY", "TODAY", "NETWORKDAYS"],
     "mois": ["MONTH", "EOMONTH", "EDATE"],
-    "année": ["YEAR", "YEARFRAC", "YEARS"],
     "année": ["YEAR", "YEARFRAC"],
     "semaine": ["WEEKNUM", "ISOWEEKNUM", "WEEKDAY"],
     "heure": ["HOUR", "TIME", "NOW"],
@@ -681,9 +664,9 @@ def _format_functions_context(matches):
 
 
 def _build_from_selection(job, sheet, raw_selection):
-    """Build (on_generate_fn, schema_ctx) from a raw UNO cell selection.
+    """Build (on_generate, schema_ctx, on_apply) from a raw UNO cell selection.
 
-    Returns (None, None) if the selection has no valid range address.
+    Returns (None, None, None) if the selection has no valid range address.
     Each call creates fresh messages/area state — suitable for both the
     initial open and XSelectionChangeListener updates.
     """
@@ -691,7 +674,7 @@ def _build_from_selection(job, sheet, raw_selection):
     try:
         area_r = raw_selection.getRangeAddress()
     except Exception:
-        return None, None
+        return None, None, None
 
     sr = max(area_r.StartRow, 1)
     tc = sheet.getCellByPosition(area_r.StartColumn, sr)
@@ -1047,18 +1030,6 @@ def handle_calc_action(job, args, model):
         sheet = model.CurrentController.ActiveSheet
         selection = model.CurrentController.Selection
 
-        if args == "settings":
-            job._send_telemetry("OpenSettings", {"context": "calc"})
-            _open_settings(job)
-            return True
-        if args == "AboutDialog":
-            job._send_telemetry("AboutDialog", {"context": "calc"})
-            try:
-                job._show_about_dialog()
-            except Exception as e:
-                job._log(f"AboutDialog error: {e}")
-            return True
-
         # Collect user input before touching the sheet
         user_input = ""
         if args == "EditSelection":
@@ -1067,7 +1038,6 @@ def handle_calc_action(job, args, model):
                 "Modifier la sélection",
                 "",
                 ok_label="Envoyer",
-                cancel_label="Fermer",
                 always_on_top=True,
             )
         elif args == "TransformToColumn":
@@ -1147,10 +1117,7 @@ def handle_calc_action(job, args, model):
         elif args == "AnalyzeRange":
             _analyze_range(job, sheet, col_range, row_range)
     except Exception as exc:
-        # Ce bloc couvrait TOUT le corps de la fonction en `pass` : n'importe
-        # quelle panne d'une action Calc devenait invisible — ni message, ni
-        # trace — et la fonction rendait quand même True. C'était la première
-        # fabrique à « il ne se passe rien ».
+        # Une panne d'action Calc doit être journalisée ET visible.
         import traceback
         job._log(f"[calc] action {args} en échec : {exc}\n{traceback.format_exc()}")
         try:

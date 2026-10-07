@@ -5,7 +5,19 @@ hyperlinks and tables instead of literal Markdown/HTML characters.
 
 import urllib.parse
 
-from .ast_nodes import Blockquote, Bold, Code, CodeBlock, Heading, Italic, Link, ListItem, Paragraph, Table, Text
+from .ast_nodes import (
+    Blockquote,
+    Bold,
+    Code,
+    CodeBlock,
+    Heading,
+    Italic,
+    Link,
+    ListItem,
+    Paragraph,
+    Table,
+    Text,
+)
 
 # com.sun.star.style.ParagraphAdjust values (stable UNO constants).
 _PARA_ADJUST = {"left": 0, "right": 1, "justify": 2, "center": 3}
@@ -44,7 +56,7 @@ def write_blocks(model, text_obj, cursor, blocks, base_char_style=None, base_par
         if index > 0:
             text_obj.insertControlCharacter(cursor, _PARAGRAPH_BREAK, False)
         _write_block(model, text_obj, cursor, block, base_char_style, base_para_style, base_font)
-    _reset_paragraph_style(cursor, base_para_style)
+    _set_para_style(cursor, base_para_style or "Standard")
 
 
 def _write_block(model, text_obj, cursor, block, base_char_style, base_para_style, base_font):
@@ -97,22 +109,24 @@ def _apply_align(cursor, align):
         pass
 
 
-def _reset_paragraph_style(cursor, base_para_style):
-    _set_para_style(cursor, base_para_style or "Standard")
-
-
-def _write_inlines(text_obj, cursor, inlines, base_char_style, base_font, bold=False, italic=False, link_url=None):
+def _write_inlines(text_obj, cursor, inlines, base_char_style, base_font,
+                   bold=False, italic=False, link_url=None):
     for node in inlines:
         if isinstance(node, Text):
-            _write_run(text_obj, cursor, node.value, base_char_style, base_font, bold, italic, False, link_url)
+            _write_run(text_obj, cursor, node.value, base_char_style, base_font,
+                       bold, italic, False, link_url)
         elif isinstance(node, Bold):
-            _write_inlines(text_obj, cursor, node.children, base_char_style, base_font, True, italic, link_url)
+            _write_inlines(text_obj, cursor, node.children, base_char_style, base_font,
+                           True, italic, link_url)
         elif isinstance(node, Italic):
-            _write_inlines(text_obj, cursor, node.children, base_char_style, base_font, bold, True, link_url)
+            _write_inlines(text_obj, cursor, node.children, base_char_style, base_font,
+                           bold, True, link_url)
         elif isinstance(node, Code):
-            _write_run(text_obj, cursor, node.value, base_char_style, base_font, bold, italic, True, link_url)
+            _write_run(text_obj, cursor, node.value, base_char_style, base_font,
+                       bold, italic, True, link_url)
         elif isinstance(node, Link):
-            _write_inlines(text_obj, cursor, node.children, base_char_style, base_font, bold, italic, node.url)
+            _write_inlines(text_obj, cursor, node.children, base_char_style, base_font,
+                           bold, italic, node.url)
 
 
 def _write_run(text_obj, cursor, value, base_char_style, base_font, bold, italic, code, link_url):

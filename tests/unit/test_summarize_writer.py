@@ -14,9 +14,7 @@ install()
 
 from src.mirai.menu_actions.writer import _summarize_selection
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _make_job(stream_chunks):
     """Return a mock job whose stream_request calls the callback with *stream_chunks*."""
@@ -54,9 +52,7 @@ def _make_text_harness():
     return text, selection, text_range, cursor, inserted
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 class TestSummarizeStopPhraseNormal(unittest.TestCase):
     """Happy-path: no stop phrases → all chunks inserted."""
