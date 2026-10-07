@@ -2,9 +2,9 @@
 
 Un seul contexte undo par run d'orchestrateur (ouvert paresseusement par le
 premier tool mutant, fermé dans le finally du run) → l'action complète
-s'annule en un seul Ctrl+Z, comme les fonctions historiques.
+s'annule en un seul Ctrl+Z.
 
-Depuis l'itération 2, le contexte porte aussi le **dispatcher** : c'est le
+Le contexte porte aussi le **dispatcher** : c'est le
 point de passage unique par lequel tout accès au document remonte sur le
 thread principal. Un run vit dans un thread worker ; toucher `model` ou
 `controller` directement depuis là serait un accès VCL sans SolarMutex.
@@ -14,8 +14,7 @@ from __future__ import annotations
 
 
 class ToolContext:
-    def __init__(self, uno_ctx, model, controller, app, shell, dispatcher=None):
-        self.uno_ctx = uno_ctx
+    def __init__(self, model, controller, app, shell, dispatcher=None):
         self.model = model            # document UNO (Writer ou Calc)
         self.controller = controller  # model.CurrentController
         self.app = app                # "writer" | "calc"

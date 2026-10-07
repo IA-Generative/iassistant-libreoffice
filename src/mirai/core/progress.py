@@ -39,10 +39,6 @@ class NullProgress:
         pass
 
     @property
-    def reasoning(self):
-        return ""
-
-    @property
     def tooltip(self):
         return ""
 
@@ -81,8 +77,6 @@ class RunProgress:
         self._activity = activity
         self._phase = activity or "Connexion…"
 
-    # ── Alimentation (thread worker) ────────────────────────────────────
-
     def on_text(self, text):
         with self._lock:
             chunk = text or ""
@@ -114,8 +108,6 @@ class RunProgress:
             if self._activity is None:
                 self._phase = phase
 
-    # ── Lecture (thread principal) ──────────────────────────────────────
-
     @property
     def tokens(self):
         with self._lock:
@@ -127,12 +119,6 @@ class RunProgress:
     def is_exact(self):
         with self._lock:
             return self._exact is not None
-
-    @property
-    def reasoning(self):
-        """Dernières lignes du raisonnement, pour l'infobulle de survol."""
-        with self._lock:
-            return self._reasoning
 
     @property
     def tooltip(self):

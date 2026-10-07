@@ -139,8 +139,7 @@ def replace_paragraphs(ctx, args):
     # `setString` sur une étendue couvrant plusieurs paragraphes applique le
     # style du PREMIER à tout le bloc : un document dont [P1] est un titre se
     # retrouvait intégralement en style titre. Écrire dans chaque paragraphe
-    # séparément préserve le style de chacun — c'est la recette du code
-    # historique (`_run_whole_doc_edit`, remplacement ciblé par paragraphe).
+    # séparément préserve le style de chacun.
     # strict=False assumé : les longueurs diffèrent dès qu'on change le nombre
     # de paragraphes, et le surplus est traité juste après.
     for para, new_text in zip(targets, new_texts, strict=False):

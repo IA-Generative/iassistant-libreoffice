@@ -3,31 +3,14 @@
 import json
 import tempfile
 
-import pytest
-
 from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai.core.shell_facade import (  # noqa: E402  (install() doit précéder l'import)
+from src.mirai.core.shell_facade import (  # install() doit précéder l'import
     MainJobShell,
     clamp_max_tokens,
 )
-
-
-@pytest.fixture(autouse=True)
-def _quiet_mainjob_background(monkeypatch):
-    # Neutralise les threads de fond de MainJob.__init__ (warmup secure flow,
-    # device management, enrollment) : ils réécrivent config.json en
-    # concurrence avec set_config et rendent le test flaky. monkeypatch
-    # restaure les vraies méthodes après chaque test.
-    from src.mirai.entrypoint import MainJob
-    monkeypatch.setattr(MainJob, "_warmup_secure_flow_async",
-                        lambda self: None)
-    monkeypatch.setattr(MainJob, "_ensure_device_management_state_async",
-                        lambda self, *args, **kwargs: None)
-    monkeypatch.setattr(MainJob, "_schedule_enrollment_check",
-                        lambda self: None)
 
 
 def _job_with_config(**config):

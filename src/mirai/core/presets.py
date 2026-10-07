@@ -1,12 +1,12 @@
-"""Les fonctions historiques en presets/chips de la palette.
+"""Presets/chips de la palette.
 
 Deux modes :
-- "pipeline" : Python pilote, le LLM n'est qu'une fonction texte — iso-
-  fonctionnalité stricte avec les actions historiques (marqueurs, stop
-  phrases, retry sur question, colonne Résultat IA…), robuste petits modèles.
+- "pipeline" : Python pilote, le LLM n'est qu'une fonction texte (marqueurs,
+  stop phrases, retry sur question, colonne Résultat IA…), robuste petits
+  modèles.
 - "agentic"  : le LLM pilote les tools (edit, formule, analyse libre).
 
-Chaque preset émet le span télémétrie historique avec {"via": "palette"} pour
+Chaque preset émet son span de télémétrie avec {"via": "palette"} pour
 préserver les tableaux de bord existants.
 """
 
@@ -16,7 +16,8 @@ import os
 import re
 
 from .llm_client import LLMClient
-from .prompts import LEGACY_TEXT_SYSTEM
+from .orchestrator import error_message
+from .prompts import PIPELINE_TEXT_SYSTEM
 from .sinks import CalcCellSink, WriterInsertSink, WriterReplaceSink
 from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
@@ -32,11 +33,11 @@ class Preset:
     label: str                    # libellé de chip (avec pictogramme)
     apps: tuple
     mode: str                     # "pipeline" | "agentic"
-    legacy_span: str = ""         # span télémétrie historique
-    needs_selection: bool = False
     needs_input: bool = False     # requiert une instruction tapée dans le prompt
     input_hint: str = ""
-    runner: object = None         # pipeline : fn(ctx, shell, user_text, tee) -> str
+    # pipeline : fn(ctx, shell, user_text, tee, cancel_event=None,
+    #               dispatcher=None, append_mode=…) -> str
+    runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
     sink_spec: str = "palette"    # agentic : "palette" | "replace_selection" | "auto_edit"
     prompt_template: object = None  # agentic : fn(user_text) -> prompt utilisateur
@@ -46,13 +47,6 @@ def _legacy_telemetry(ctx, span, attrs=None):
     payload = {"via": "palette"}
     payload.update(attrs or {})
     ctx.shell.telemetry(span, payload)
-
-
-def _selection_text(ctx):
-    try:
-        return ctx.controller.getSelection().getByIndex(0).getString()
-    except Exception:
-        return ""
 
 
 def _target_selection_text(ctx):
@@ -94,8 +88,7 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
     remplacer va plus vite, ajouter permet de comparer avant de décider. Le
     choix vient de la case « Ajouter à la suite » de la palette ; ce helper est
     le SEUL endroit qui le traduit en destination, pour qu'aucun preset ne
-    puisse l'ignorer — c'est précisément ce qui était arrivé, la case ne
-    pilotant plus rien depuis le retrait du preset qui l'utilisait.
+    puisse l'ignorer.
     """
     if append_mode:
         return WriterInsertSink(ctx, header, footer, tee=tee, **kwargs)
@@ -103,11 +96,9 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
 
 
 def _system(specific):
-    """Système hérité de make_api_request : défaut + spécifique."""
-    return LEGACY_TEXT_SYSTEM + " " + specific if specific else LEGACY_TEXT_SYSTEM
+    """Système par défaut + consigne spécifique."""
+    return PIPELINE_TEXT_SYSTEM + " " + specific if specific else PIPELINE_TEXT_SYSTEM
 
-
-# ── Presets pipeline Writer ─────────────────────────────────────────────
 
 def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                dispatcher=None):
@@ -139,11 +130,10 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event)
         if step.error:
-            from .orchestrator import error_message
             return error_message(step.error)
 
         if sink.question_detected:
-            # Retry unique avec directive renforcée (comportement historique).
+            # Retry unique avec directive renforcée.
             sink.done = False
             sink.question_detected = False
             sink.accumulated = ""
@@ -158,7 +148,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
             step = llm.step([{"role": "system", "content": retry_system},
                              {"role": "user", "content": retry_prompt}],
                             on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
+                            cancel_event=cancel_event)
             if sink.question_detected:
                 sink.insert_message(
                     "\n[Le modèle n'a pas pu continuer le texte."
@@ -206,7 +196,6 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event)
         if step.error:
-            from .orchestrator import error_message
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
         return "Résumé inséré après la sélection."
@@ -245,7 +234,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     llm = _text_client(shell, max_tokens)
 
     def _on_question(active_sink):
-        # Historique : signaler l'échec sans toucher au texte déjà inséré.
+        # Signaler l'échec sans toucher au texte déjà inséré.
         active_sink.insert_message(
             "[Le modèle a posé une question. Veuillez réessayer.]")
 
@@ -262,7 +251,6 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event)
         if step.error:
-            from .orchestrator import error_message
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
         return "Reformulation insérée après la sélection."
@@ -303,7 +291,6 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event)
         if step.error:
-            from .orchestrator import error_message
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
         return f"Texte ajusté (~{target} mots). Recliquez pour itérer."
@@ -322,8 +309,6 @@ def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
     return _run_resize(ctx, shell, 1.4, "Allonger", tee, cancel_event,
                        append_mode=append_mode)
 
-
-# ── Presets pipeline Calc ───────────────────────────────────────────────
 
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True):
@@ -375,9 +360,8 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
             step = llm.step([{"role": "system", "content": system_prompt},
                              {"role": "user", "content": prompt}],
                             on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
+                            cancel_event=cancel_event)
             if step.error:
-                from .orchestrator import error_message
                 target_cell.setString("#ERREUR: " + step.error)
                 return error_message(step.error)
             sink.finish(step.text, step.streamed)
@@ -456,7 +440,6 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event)
         if step.error:
-            from .orchestrator import error_message
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
         try:
@@ -467,8 +450,6 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     finally:
         ctx.undo_end()
 
-
-# ── Presets agentiques ──────────────────────────────────────────────────
 
 FORMULA_RULES = (
     "Tu génères des formules LibreOffice Calc valides avec les noms de "
@@ -493,20 +474,14 @@ def _load_functions_db():
     if _functions_db_cache is not None:
         return _functions_db_cache
     here = os.path.dirname(__file__)
-    candidates = [
-        os.path.join(here, "..", "..", "..", "config", "calc-functions.json"),
-        os.path.join(here, "..", "..", "config", "calc-functions.json"),
-    ]
-    for candidate in candidates:
-        try:
-            with open(os.path.normpath(candidate), encoding="utf-8") as fh:
-                data = json.load(fh)
-            _functions_db_cache = {k: v for k, v in data.items()
-                                   if not k.startswith("_")}
-            return _functions_db_cache
-        except Exception:
-            continue
-    _functions_db_cache = {}
+    path = os.path.join(here, "..", "..", "..", "config", "calc-functions.json")
+    try:
+        with open(os.path.normpath(path), encoding="utf-8") as fh:
+            data = json.load(fh)
+        _functions_db_cache = {k: v for k, v in data.items()
+                               if not k.startswith("_")}
+    except Exception:
+        _functions_db_cache = {}
     return _functions_db_cache
 
 
@@ -543,58 +518,27 @@ def _formula_extra(ctx, shell, user_text):
     return extra
 
 
-def _edit_extra(ctx, shell, user_text):
-    selection = _selection_text(ctx)
-    if selection.strip():
-        return (
-            "L'utilisateur demande une modification du texte SÉLECTIONNÉ. "
-            "Lis-le avec writer_get_selection si besoin. Réponds directement "
-            "avec la VERSION MODIFIÉE complète du texte sélectionné (texte "
-            "brut, sans commentaire) : elle remplacera la sélection. "
-            "N'utilise writer_find_replace que pour des retouches ponctuelles."
-        )
-    return (
-        "La sélection est vide : la modification porte sur le DOCUMENT ENTIER. "
-        "Lis-le avec writer_get_document_map, puis applique des remplacements "
-        "ciblés avec writer_find_replace (texte exact). Termine par un court "
-        "récapitulatif des changements."
-    )
-
-
-def _edit_prompt(user_text):
-    return "INSTRUCTIONS DE MODIFICATION :\n" + user_text
-
-
 PRESETS = [
     Preset(id="summarize", label="📝 Résumer", apps=("writer",), mode="pipeline",
-           legacy_span="SummarizeSelection", needs_selection=True,
            runner=run_summarize),
     Preset(id="simplify", label="💬 Simplifier", apps=("writer",), mode="pipeline",
-           legacy_span="SimplifySelection", needs_selection=True,
            runner=run_simplify),
     Preset(id="shorten", label="📏− Raccourcir", apps=("writer",), mode="pipeline",
-           legacy_span="ResizeSelection", needs_selection=True, runner=run_shorten),
+           runner=run_shorten),
     Preset(id="lengthen", label="📏+ Allonger", apps=("writer",), mode="pipeline",
-           legacy_span="ResizeSelection", needs_selection=True, runner=run_lengthen),
+           runner=run_lengthen),
     Preset(id="transform", label="🔄 Transformer", apps=("calc",), mode="pipeline",
-           legacy_span="TransformToColumn", needs_selection=True, needs_input=True,
+           needs_input=True,
            input_hint="Décrivez la transformation (ex. « traduire en anglais »)",
            runner=run_transform),
     Preset(id="formula", label="🧮 Formule", apps=("calc",), mode="agentic",
-           legacy_span="GenerateFormula", needs_input=True,
+           needs_input=True,
            input_hint="Décrivez la formule (ex. « moyenne des ventes 2024 »)",
            build_extra=_formula_extra),
     Preset(id="analyze", label="📊 Analyser", apps=("calc",), mode="pipeline",
-           legacy_span="AnalyzeRange", needs_selection=True, runner=run_analyze),
+           runner=run_analyze),
 ]
 
 
 def presets_for(app):
     return [p for p in PRESETS if app in p.apps]
-
-
-def get_preset(preset_id):
-    for preset in PRESETS:
-        if preset.id == preset_id:
-            return preset
-    return None

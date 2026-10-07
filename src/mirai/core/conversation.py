@@ -23,10 +23,6 @@ class ConversationStore:
         self._max_entries = max_exchanges * 2
         self._max_bytes = max_bytes
 
-    @property
-    def path(self):
-        return self._path
-
     def load(self):
         try:
             with open(self._path, encoding="utf-8") as fh:

@@ -23,7 +23,7 @@ from tests.stubs.uno_stubs import install
 
 install()
 
-from src.mirai.entrypoint import otel_attributes  # noqa: E402
+from src.mirai.entrypoint import otel_attributes
 
 
 def _read_otlp_value(value):
@@ -55,7 +55,7 @@ class _RecordingShell:
         self.spans.append((name, dict(attributes or {})))
 
 
-# ── Le défaut d'origine, verrouillé ─────────────────────────────────────
+# Le défaut d'origine, verrouillé
 
 def test_counters_survive_the_wire_as_numbers():
     """Le cas qui arrivait vide en base : des compteurs devenus chaînes."""
@@ -86,7 +86,7 @@ def test_labels_survive_as_text():
                          "assistant.reason": "reasoning_starved"}
 
 
-# ── Chaque nouveauté, du moteur jusqu'au fil ────────────────────────────
+# Chaque nouveauté, du moteur jusqu'au fil
 
 RUN_ATTRIBUTES = {
     "run.kind": "agentic",
@@ -131,10 +131,6 @@ def test_every_declared_step_survives_the_wire(step):
 def test_the_run_duration_is_measured_and_not_hardcoded():
     """Une durée toujours nulle passerait inaperçue : tous les runs de test sont
     instantanés. On en fait durer un pour de vrai.
-
-    Constaté en recette locale le 2026-07-28 : les cinq spans d'un parcours
-    complet portaient `assistant.duration_ms: 0` — plausible avec des branches
-    factices, indistinguable d'un compteur cassé.
     """
     import time
     from unittest.mock import MagicMock
@@ -158,8 +154,7 @@ def test_the_run_duration_is_measured_and_not_hardcoded():
     shell.log = lambda _m: None
     shell.telemetry = lambda name, attrs=None: spans.append((name, dict(attrs or {})))
 
-    palette = palette_module.AssistantPalette(MagicMock(), shell, "writer",
-                                              callbacks={})
+    palette = palette_module.AssistantPalette(MagicMock(), shell, "writer")
 
     def _slow(*_a, **_k):
         time.sleep(0.2)

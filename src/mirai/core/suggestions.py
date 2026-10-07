@@ -1,9 +1,5 @@
-"""Recommandations contextuelles — v1, heuristiques pures.
-
-Pas de LLM, pas d'apprentissage : la proposition se déduit de l'application, de
-l'état de la sélection et de la nature du contenu. C'est un choix assumé du
-garde-fou dette — une v1 qui coûte trois fonctions et se teste hors LibreOffice
-vaut mieux qu'un moteur qu'on ne saurait plus expliquer.
+"""Recommandations contextuelles par heuristiques (application, sélection,
+nature du contenu). Sans LLM.
 
 Ce module ne connaît ni UNO ni la palette : il reçoit une description de la
 situation et rend une liste de suggestions. L'IHM décide quoi en faire.

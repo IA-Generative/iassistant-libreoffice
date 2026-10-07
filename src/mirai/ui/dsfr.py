@@ -1,7 +1,7 @@
 """Primitives DSFR pour dialogs UNO — tokens vérifiés contre @gouvfr/dsfr@1.14.
 
 Contraintes assumées du toolkit awt : coins carrés (conformes DSFR), pas
-d'ombres ni d'animations, focus ring émulé. Les « chips » sont des FixedText
+d'ombres, d'animations ni de focus ring. Les « chips » sont des FixedText
 cliquables — jamais des UnoControlButton, dont les thèmes natifs (gtk3/macOS)
 écrasent BackgroundColor.
 
@@ -13,29 +13,26 @@ import unohelper
 from com.sun.star.awt import XMouseListener
 
 try:
-    from com.sun.star.awt.PosSize import POSSIZE
+    from com.sun.star.awt.PosSize import POS, POSSIZE
 except Exception:
-    POSSIZE = 15
+    POS, POSSIZE = 3, 15
 
 # Tokens DSFR (thème clair) — sous-ensemble « feels DSFR »
 TOKENS = {
     "primary":        0x000091,   # blue-france-sun-113-625
     "primary_hover":  0x1212FF,
-    "primary_active": 0x2323FF,
     "chip_bg":        0xE3E3FD,   # blue-france-925-125 (action low)
     "chip_bg_hover":  0xC1C1FB,
     "bg":             0xFFFFFF,
     "bg_alt":         0xF6F6F6,
     "bg_contrast":    0xEEEEEE,
     "bg_accent":      0xF5F5FE,
-    "text_title":     0x161616,
     "text_body":      0x3A3A3A,
     "text_mention":   0x666666,
     "text_inverted":  0xFFFFFF,
     "border":         0xDDDDDD,
     "error":          0xCE0500,
     "success":        0x18753C,
-    "danger":         0xC9191E,   # red-marianne-425-625 (actionnable)
 }
 
 FONT_CANDIDATES = ("Marianne", "Arial", "Liberation Sans", "Helvetica")
@@ -166,7 +163,7 @@ def add_chip(dialog, model, name, label, x, y, width, height, font, on_click):
 
 
 def add_link(dialog, model, name, label, x, y, width, height, font, on_click):
-    """Lien discret du pied de palette (Réglages, À propos…)."""
+    """Lien discret du pied de palette (Nouvelle conversation)."""
     control, control_model = add_control(
         dialog, model, name, "FixedText", x, y, width, height, {
             "Label": label,

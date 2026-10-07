@@ -2,11 +2,11 @@
 
 from src.mirai.core.selection_info import (
     calc_label,
-    column_letter,
     compact_whitespace,
     middle_ellipsis,
     writer_label,
 )
+from src.mirai.core.tools.calc_tools import col_letter
 
 
 def test_compact_whitespace():
@@ -37,7 +37,7 @@ def test_ellipsis_prefers_word_boundaries():
     assert not tail.startswith(" ")
 
 
-# ── Writer ──────────────────────────────────────────────────────────────
+# Writer
 
 def test_writer_shows_the_selection():
     assert writer_label("Le préfet arrête") == "Sélection : « Le préfet arrête »"
@@ -66,13 +66,13 @@ def test_writer_ignores_whitespace_only_selection():
     assert writer_label("   \n\t ", "paragraphe").startswith("Document entier")
 
 
-# ── Calc ────────────────────────────────────────────────────────────────
+# Calc
 
 def test_column_letters():
-    assert column_letter(0) == "A"
-    assert column_letter(25) == "Z"
-    assert column_letter(26) == "AA"
-    assert column_letter(27) == "AB"
+    assert col_letter(0) == "A"
+    assert col_letter(25) == "Z"
+    assert col_letter(26) == "AA"
+    assert col_letter(27) == "AB"
 
 
 def test_calc_range_label_matches_historic_wording():

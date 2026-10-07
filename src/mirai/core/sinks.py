@@ -4,8 +4,9 @@ Contrat : stream_delta(chunk) reçoit les deltas au fil de l'eau (si le client
 streame en direct) ; finish(text, streamed) clôt le run — si streamed est
 False, le sink écrit le texte complet à ce moment-là. Jamais de perte.
 
-Tous les sinks tournent sur le thread principal (appelés depuis le drain du
-pump SSE) — ils peuvent donc toucher l'UI et le document.
+Les sinks sont appelés depuis le thread worker du run (stream_delta à chaque
+delta, puis finish). Les sinks Writer reportent chaque accès UNO sur le thread
+principal via ctx.on_main.
 """
 
 from .text_filters import (
@@ -13,6 +14,7 @@ from .text_filters import (
     contains_pattern,
     strip_markdown,
 )
+from .tools.calc_tools import safe_set_string
 
 
 class PaletteSink:
@@ -38,8 +40,8 @@ class PaletteSink:
 
 
 class WriterInsertSink:
-    """Insertion streamée dans le document après la sélection, avec les
-    marqueurs historiques, stop phrases et détection de question (portés)."""
+    """Insertion streamée après la sélection : marqueurs d'en-tête/pied,
+    stop phrases et détection de question."""
 
     def __init__(self, ctx, header_marker, footer_marker,
                  question_patterns=None, on_question=None,
@@ -128,8 +130,8 @@ class WriterInsertSink:
 
 
 class WriterReplaceSink:
-    """Remplace la sélection par le texte final (accumulé), puis resélectionne
-    pour permettre l'itération (comportement du pad Ajuster historique)."""
+    """Remplace la sélection par le texte final accumulé, puis la resélectionne
+    pour permettre l'itération."""
 
     def __init__(self, ctx, tee=None):
         self.ctx = ctx
@@ -158,8 +160,7 @@ class WriterReplaceSink:
 
 
 class CalcCellSink:
-    """Accumule et écrit (markdown nettoyé) dans une cellule à chaque delta —
-    comportement des écritures streamées historiques de Calc."""
+    """Accumule et réécrit la cellule (markdown nettoyé) à chaque delta."""
 
     def __init__(self, cell, tee=None):
         self.cell = cell
@@ -167,14 +168,12 @@ class CalcCellSink:
         self.accumulated = ""
 
     def stream_delta(self, chunk):
-        from .tools.calc_tools import safe_set_string
         self.accumulated += chunk
         safe_set_string(self.cell, strip_markdown(self.accumulated))
         if self.tee:
             self.tee(chunk)
 
     def finish(self, text, streamed):
-        from .tools.calc_tools import safe_set_string
         final = self.accumulated or text or ""
         if final:
             safe_set_string(self.cell, strip_markdown(final))

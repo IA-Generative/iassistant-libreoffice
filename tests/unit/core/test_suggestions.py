@@ -7,7 +7,7 @@ def _labels(items):
     return [s.label for s in items]
 
 
-# ── Writer ──────────────────────────────────────────────────────────────
+# Writer
 
 def test_long_selection_proposes_summarising():
     items = suggest("writer", selected_text="x" * 800)
@@ -42,7 +42,7 @@ def test_suggestions_are_capped():
     assert len(suggest("writer", selected_text="x" * 800, limit=3)) == 3
 
 
-# ── Calc ────────────────────────────────────────────────────────────────
+# Calc
 
 def test_numeric_range_proposes_analysis():
     items = suggest("calc", cell_count=10, values=["12", "45,5", "7", "103"])
@@ -60,7 +60,7 @@ def test_no_selection_in_calc_proposes_a_formula():
     assert any("formule" in label.lower() for label in _labels(items))
 
 
-# ── Détection numérique ─────────────────────────────────────────────────
+# Détection numérique
 
 def test_looks_numeric_accepts_common_formats():
     assert looks_numeric(["1 200", "45,5", "-3", "12%", "8 €"])
@@ -80,7 +80,7 @@ def test_looks_numeric_needs_more_than_one_value():
     assert not looks_numeric([])
 
 
-# ── Rendu ───────────────────────────────────────────────────────────────
+# Rendu
 
 def test_render_marks_immediate_actions():
     text = render([Suggestion("Résumer", preset_id="summarize"),

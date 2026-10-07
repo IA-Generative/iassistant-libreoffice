@@ -52,12 +52,7 @@ ERROR_MESSAGES = {
                  "quelques instants."),
     "network_error": ("Le serveur IA est injoignable. Vérifiez votre "
                       "connexion réseau puis réessayez."),
-    # Le flux s'est terminé sans erreur mais n'a rien livré : ni texte, ni appel
-    # d'outil, et aucun outil n'avait agi plus tôt dans le run. Constaté en
-    # recette le 2026-08-04 — le relais renvoyait pourtant un tool call complet
-    # (229 chunks), le plugin n'en a rien récupéré. Sans cette garde le run se
-    # déclarait RÉUSSI avec un texte vide : écran muet côté utilisateur, et
-    # `assistant.ok=true` côté télémétrie, donc invisible dans les tableaux.
+    # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
     "empty_response": ("L'assistant n'a rien produit. Réessayez — si cela "
                        "persiste, signalez-le."),
 }
@@ -209,8 +204,6 @@ class Orchestrator:
                     "ne modifierait rien.")
         return ("PORTÉE : aucune plage sélectionnée — appuie-toi sur la vue "
                 "d'ensemble de la feuille avant d'agir.")
-
-    # ── Exécution des outils ────────────────────────────────────────────
 
     @property
     def cancelled(self):

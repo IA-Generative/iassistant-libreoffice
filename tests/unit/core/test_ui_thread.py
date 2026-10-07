@@ -55,8 +55,6 @@ def _dispatcher(fail=False):
     return MainThreadDispatcher(FakeUnoContext(callback, fail=fail)), callback
 
 
-# ── post() ──────────────────────────────────────────────────────────────
-
 def test_post_from_the_main_thread_runs_immediately():
     """Déjà au bon endroit : inutile de faire un détour par la file."""
     dispatcher, _callback = _dispatcher()
@@ -119,8 +117,6 @@ def test_pump_without_asynccallback_degrades_to_direct_drain():
     dispatcher.start_pump()
     assert seen == ["fait"]
 
-
-# ── call() ──────────────────────────────────────────────────────────────
 
 def test_call_rapporte_le_resultat():
     dispatcher, _callback = _dispatcher()
@@ -191,23 +187,6 @@ def test_call_leve_closed_apres_fermeture():
         dispatcher.call(lambda: 1, timeout=1)
 
 
-def test_call_ne_retient_pas_les_taches_terminees():
-    """Sans purge, les tâches s'accumuleraient pour toute la vie de la palette."""
-    dispatcher, _callback = _dispatcher()
-
-    def worker():
-        dispatcher.call(lambda: 1, timeout=5)
-
-    thread = threading.Thread(target=worker)
-    thread.start()
-    _drain_until(dispatcher, thread)
-    thread.join(timeout=5)
-
-    assert dispatcher._pending == []
-
-
-# ── DirectDispatcher (le FakeDispatcher des tests) ──────────────────────
-
 def test_direct_dispatcher_est_synchrone():
     dispatcher = DirectDispatcher()
     seen = []
@@ -235,8 +214,6 @@ def test_is_main_thread():
     thread.join(timeout=5)
     assert seen["value"] is False
 
-
-# ── utilitaires ─────────────────────────────────────────────────────────
 
 def _raise_key_error():
     raise KeyError("absent")

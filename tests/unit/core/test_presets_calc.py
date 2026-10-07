@@ -19,7 +19,7 @@ from tests.stubs.fake_shell import (
 
 
 def _ctx(doc, shell):
-    return ToolContext(None, doc, doc.controller, "calc", shell)
+    return ToolContext(doc, doc.controller, "calc", shell)
 
 
 def test_transform_writes_adjacent_free_column():
@@ -111,7 +111,7 @@ def test_formula_agentic_applies_and_explains():
         ])
     ctx = _ctx(doc, shell)
     registry = register_all(ToolRegistry())
-    preset = presets.get_preset("formula")
+    preset = next(p for p in presets.PRESETS if p.id == "formula")
     extra = preset.build_extra(ctx, shell, "prix fois quantité")
     sink = PaletteSink()
     orchestrator = Orchestrator(LLMClient(shell), registry, ctx)

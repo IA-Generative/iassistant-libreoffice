@@ -1,10 +1,11 @@
-"""Modèle d'exécution de l'itération 2 : worker + marshalling + annulation.
+"""Modèle d'exécution : worker + marshalling + annulation.
 
 Ces tests verrouillent la propriété qui justifie toute la refonte : pendant un
 run, **rien** ne touche UNO depuis le thread de fond, et le thread principal
 n'est jamais immobilisé.
 """
 
+import queue
 import threading
 
 from src.mirai.core.context import ToolContext
@@ -26,15 +27,10 @@ class RecordingDispatcher(DirectDispatcher):
     def __init__(self):
         super().__init__()
         self.calls = []
-        self.posts = []
 
     def call(self, fn, timeout=30.0):
         self.calls.append(threading.current_thread().name)
         return super().call(fn, timeout=timeout)
-
-    def post(self, fn):
-        self.posts.append(threading.current_thread().name)
-        return super().post(fn)
 
 
 class FakeDoc:
@@ -102,16 +98,16 @@ def _registry(on_call=None):
         name="writer_insert_text", description="test", apps=("writer",),
         parameters={"type": "object", "properties": {}},
         handler=on_call or (
-            lambda args, ctx: ToolResult(call_id="", ok=True, content="ok"))))
+            lambda ctx, args: ToolResult(call_id="", ok=True, content="ok"))))
     return registry
 
 
 def _context(shell, dispatcher, doc=None):
-    return ToolContext(None, doc or object(), object(), "writer", shell,
+    return ToolContext(doc or object(), object(), "writer", shell,
                        dispatcher=dispatcher)
 
 
-# ── Marshalling ─────────────────────────────────────────────────────────
+# Marshalling
 
 def test_tools_are_executed_through_the_dispatcher():
     """Un tool touche le document : il doit passer par le thread principal."""
@@ -151,7 +147,7 @@ class ThreadPinnedDispatcher:
     """
 
     def __init__(self):
-        self._queue = __import__("queue").Queue()
+        self._queue = queue.Queue()
         self._closed = False
         self.thread = threading.Thread(target=self._serve, name="main-uno",
                                        daemon=True)
@@ -178,10 +174,9 @@ class ThreadPinnedDispatcher:
         return True
 
     def call(self, fn, timeout=30.0):
-        import queue as _q
         if self._closed:
             raise RuntimeError("fermé")
-        result_queue = _q.Queue(maxsize=1)
+        result_queue = queue.Queue(maxsize=1)
         self._queue.put((fn, result_queue))
         status, payload = result_queue.get(timeout=timeout)
         if status == "error":
@@ -246,7 +241,7 @@ def test_undo_context_is_opened_on_the_main_thread():
     assert doc.violations == [], f"undo touché hors thread principal : {doc.violations}"
 
 
-# ── Annulation ──────────────────────────────────────────────────────────
+# Annulation
 
 def test_cancel_event_is_passed_down_to_the_llm():
     cancel = threading.Event()
@@ -279,7 +274,7 @@ def test_cancel_between_tool_calls_skips_the_rest():
     cancel = threading.Event()
     executed = []
 
-    def _handler(args, ctx):
+    def _handler(ctx, args):
         executed.append(args)
         cancel.set()          # on annule pendant le premier outil
         return ToolResult(call_id="", ok=True, content="ok")
@@ -299,7 +294,7 @@ def test_cancel_between_tool_calls_skips_the_rest():
     assert len(executed) == 1, "le second outil ne doit pas s'exécuter"
 
 
-# ── Fermeture pendant un run ────────────────────────────────────────────
+# Fermeture pendant un run
 
 def test_closed_dispatcher_interrupts_the_run():
     """Fermer la palette pendant une génération ne doit rien casser."""

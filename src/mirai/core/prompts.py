@@ -1,8 +1,8 @@
 """Prompts système du moteur (français) + protocole d'outils du mode JSON."""
 
-# Système hérité de make_api_request — conservé pour l'iso-fonctionnalité des
-# presets pipeline (texte brut, même langue, /no_thinking pour Qwen3).
-LEGACY_TEXT_SYSTEM = (
+# Prompt système des chemins pipeline (presets, réécriture de la sélection ou
+# du document) : texte brut, même langue, /no_thinking pour Qwen3.
+PIPELINE_TEXT_SYSTEM = (
     "/no_thinking\n"
     "Renvoie uniquement du texte brut. N'utilise pas de markdown, de blocs de "
     "code ni de symboles de formatage comme **, *, _, ou #. RÈGLE ABSOLUE : tu "
