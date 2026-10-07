@@ -31,7 +31,6 @@ class _XSelectionChangeListener: pass
 class _XCommandEnvironment: pass
 class _XInteractionHandler: pass
 class _XCallback:        pass
-class _XContextMenuInterceptor: pass
 
 
 def install():
@@ -83,7 +82,6 @@ def install():
     com_sun_star_frame = MagicMock()
 
     com_sun_star_ui = MagicMock()
-    com_sun_star_ui.XContextMenuInterceptor = _XContextMenuInterceptor
 
     sys.modules.update({
         "uno": uno,
@@ -115,7 +113,6 @@ _STARTUP_LAUNCHERS = (
     "_schedule_native_feed_check",
     "_schedule_feed_rewrite",
     "_schedule_enrollment_check",
-    "_schedule_context_menu_registration",
 )
 
 

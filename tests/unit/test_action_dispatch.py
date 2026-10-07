@@ -91,7 +91,7 @@ def test_shell_action_failure_is_visible():
 
 def test_unknown_action_is_not_a_shell_action():
     job, _rec = _job()
-    assert job._handle_shell_action("SummarizeSelection") is False
+    assert job._handle_shell_action("ExtendSelection") is False
 
 
 # ── R-05 : sélection vide n'avale plus tout ─────────────────────────────
@@ -99,7 +99,7 @@ def test_unknown_action_is_not_a_shell_action():
 def test_empty_selection_tells_the_user():
     job, rec = _job()
 
-    assert handle_writer_action(job, "SummarizeSelection", _WriterModel()) is True
+    assert handle_writer_action(job, "ExtendSelection", _WriterModel()) is True
     assert rec.messages, "sélection vide : l'utilisateur doit être prévenu"
     assert "curseur" in rec.messages[0][1].lower()
 
@@ -114,7 +114,7 @@ def test_writer_handler_ignores_shell_actions():
 
 def test_writer_handler_still_refuses_non_writer_documents():
     job, _rec = _job()
-    assert handle_writer_action(job, "SummarizeSelection", object()) is False
+    assert handle_writer_action(job, "ExtendSelection", object()) is False
 
 
 # ── R-07 : les pannes Calc ne sont plus muettes ─────────────────────────

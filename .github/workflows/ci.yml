@@ -23,17 +23,5 @@ jobs:
       - name: Install test runner
         run: pip install pytest
 
-      # Six tests de tests/unit/test_summarize_writer.py échouent : NameError
-      # sur _strip_think_blocks dans src/mirai/menu_actions/writer.py (chemin
-      # legacy du menu contextuel Writer). Désélectionnés test par test pour ne
-      # masquer aucun nouvel échec du fichier ; retirer ces lignes une fois le
-      # NameError corrigé.
       - name: Tests unitaires + intégration + build smoke
-        run: |
-          python -m pytest tests/unit tests/integration -q \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseNormal::test_all_chunks_inserted" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseAtEndOfChunk::test_text_before_stop_phrase_is_present" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseMidChunk::test_end_of_document_phrase_passes_through" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseMidChunk::test_partial_chunk_before_stop_phrase_is_inserted" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseMidChunk::test_stop_phrase_first_chunk_not_empty" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseNoLeakAfterDetection::test_no_leak_after_stop_phrase"
+        run: python -m pytest tests/unit tests/integration -q
