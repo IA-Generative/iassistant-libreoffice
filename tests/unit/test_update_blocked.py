@@ -11,6 +11,7 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
+from src.mirai import i18n
 from src.mirai.entrypoint import MainJob
 
 
@@ -185,3 +186,26 @@ def test_notify_update_blocked_uses_infobox_without_folder(tmp_path):
 
     args = toolkit.createMessageBox.call_args.args
     assert args[1] == 1, "doit rester un INFOBOX (1) quand il n'y a pas de dossier à ouvrir"
+
+
+def test_notify_update_blocked_follows_the_interface_language():
+    import os
+    import tempfile
+
+    d = tempfile.mkdtemp()
+    oxt = os.path.join(d, "mirai_update.oxt")
+    open(oxt, "w").close()
+
+    job = make_job()
+    i18n.set_locale("en")
+    job._open_folder_native = MagicMock()
+    toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
+    toolkit.createMessageBox.return_value.execute.return_value = 3
+
+    job._notify_update_blocked("0.0.1.0.18", os.path.join(d, "mirai_update.bat"))
+
+    title, message = toolkit.createMessageBox.call_args.args[3:5]
+    assert title == "MIrAI — Update blocked"
+    assert "Manual installation" in message
+    assert "0.0.1.0.18" in message
+    assert oxt in message

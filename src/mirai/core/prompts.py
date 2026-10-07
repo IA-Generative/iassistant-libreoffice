@@ -1,5 +1,7 @@
 """Prompts système du moteur (français) + protocole d'outils du mode JSON."""
 
+from ..i18n import t as _t
+
 # Prompt système des chemins pipeline (presets, réécriture de la sélection ou
 # du document) : texte brut, même langue, /no_thinking pour Qwen3.
 PIPELINE_TEXT_SYSTEM = (
@@ -34,8 +36,10 @@ def build_system(app, registry, mode, preset_extra=""):
         "Tu es MIrAI, l'assistant intégré à LibreOffice "
         + _APP_LABELS.get(app, app) + " du ministère de l'Intérieur. "
         "Tu aides l'utilisateur à travailler sur SON document, via les outils "
-        "fournis. Réponds toujours dans la langue de l'utilisateur (français "
-        "par défaut). Tes réponses finales sont en texte brut, sans markdown.",
+        "fournis. Tes réponses finales sont en texte brut, sans markdown. "
+        + _t("llm.answer_language") + " "
+        "Les modifications apportées au document avec les outils conservent la "
+        "langue du texte modifié, sauf demande de traduction. "
         "Règles : lis le contexte nécessaire avec les outils de lecture avant "
         "de modifier quoi que ce soit ; fais des modifications minimales et "
         "précises ; si la demande est ambiguë, pose ta question en réponse "

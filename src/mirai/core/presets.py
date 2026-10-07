@@ -15,6 +15,7 @@ import json
 import os
 import re
 
+from ..i18n import t as _t
 from .llm_client import LLMClient
 from .orchestrator import error_message
 from .prompts import PIPELINE_TEXT_SYSTEM
@@ -30,17 +31,25 @@ from .tools import calc_tools
 @dataclasses.dataclass
 class Preset:
     id: str
-    label: str                    # libellé de chip (avec pictogramme)
+    label_key: str               # cle i18n du libellé de chip (avec pictogramme)
     apps: tuple
     mode: str                     # "pipeline" | "agentic"
     needs_input: bool = False     # requiert une instruction tapée dans le prompt
-    input_hint: str = ""
+    input_hint_key: str = ""
     # pipeline : fn(ctx, shell, user_text, tee, cancel_event=None,
     #               dispatcher=None, append_mode=…) -> str
     runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
     sink_spec: str = "palette"    # agentic : "palette" | "replace_selection" | "auto_edit"
     prompt_template: object = None  # agentic : fn(user_text) -> prompt utilisateur
+
+    @property
+    def label(self):
+        return _t(self.label_key)
+
+    @property
+    def input_hint(self):
+        return _t(self.input_hint_key)
 
 
 def _legacy_telemetry(ctx, span, attrs=None):
@@ -73,10 +82,6 @@ def _target_selection_text(ctx):
         return ""
 
 
-_NO_TARGET_HINT = ("Placez le curseur dans un paragraphe ou sélectionnez "
-                   "du texte.")
-
-
 def _text_client(shell, max_tokens):
     return LLMClient(shell, max_tokens=max_tokens)
 
@@ -107,7 +112,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                       {"action": "extend_selection",
                        "text_length": str(len(base_text))})
     if not base_text:
-        return _NO_TARGET_HINT
+        return _t("sel.no_target")
 
     configured = str(shell.get_config("extend_selection_system_prompt", "") or "").strip()
     directive = (
@@ -123,7 +128,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
         ctx, "\n\n---début-du-texte-généré---\n", "\n---fin-du-texte-généré---\n",
         question_patterns=EXTEND_QUESTION_PATTERNS, tee=tee)
 
-    ctx.undo_begin("Générer la suite")
+    ctx.undo_begin(_t("preset.undo_extend"))
     try:
         step = llm.step([{"role": "system", "content": system_prompt},
                          {"role": "user", "content": base_text}],
@@ -154,7 +159,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                     "\n[Le modèle n'a pas pu continuer le texte."
                     " Essayez de sélectionner plus de contexte.]")
         sink.finish(step.text, step.streamed)
-        return "Suite générée dans le document."
+        return _t("preset.done_extend")
     finally:
         ctx.undo_end()
 
@@ -166,7 +171,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                       {"action": "summarize_selection",
                        "text_length": str(len(original))})
     if not original.strip():
-        return _NO_TARGET_HINT
+        return _t("sel.no_target")
 
     prompt = (
         "TEXTE À RÉSUMER :\n" + original + "\n\n"
@@ -189,7 +194,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                      "\n\n---début-du-résumé---\n", "\n---fin-du-résumé---\n",
                      tee=tee, stop_phrases=STOP_PHRASES)
 
-    ctx.undo_begin("Résumer")
+    ctx.undo_begin(_t("preset.undo_summarize"))
     try:
         step = llm.step([{"role": "system", "content": system_prompt},
                          {"role": "user", "content": prompt}],
@@ -198,7 +203,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        return "Résumé inséré après la sélection."
+        return _t("preset.done_summarize")
     finally:
         ctx.undo_end()
 
@@ -210,7 +215,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                       {"action": "simplify_selection",
                        "text_length": str(len(original))})
     if not original.strip():
-        return _NO_TARGET_HINT
+        return _t("sel.no_target")
 
     prompt = (
         "TEXTE À REFORMULER :\n" + original + "\n\n"
@@ -244,7 +249,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                      question_patterns=SIMPLIFY_QUESTION_PATTERNS,
                      on_question=_on_question, stop_phrases=STOP_PHRASES)
 
-    ctx.undo_begin("Reformuler")
+    ctx.undo_begin(_t("preset.undo_simplify"))
     try:
         step = llm.step([{"role": "system", "content": system_prompt},
                          {"role": "user", "content": prompt}],
@@ -253,7 +258,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        return "Reformulation insérée après la sélection."
+        return _t("preset.done_simplify")
     finally:
         ctx.undo_end()
 
@@ -265,7 +270,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                       {"action": "resize_selection",
                        "text_length": str(len(original))})
     if not original.strip():
-        return _NO_TARGET_HINT
+        return _t("sel.no_target")
 
     word_count = len(original.split())
     target = max(1, int(round(word_count * ratio)))
@@ -293,20 +298,20 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        return f"Texte ajusté (~{target} mots). Recliquez pour itérer."
+        return _t("preset.resized", target=target)
     finally:
         ctx.undo_end()
 
 
 def run_shorten(ctx, shell, user_text, tee, cancel_event=None,
                 dispatcher=None, append_mode=False):
-    return _run_resize(ctx, shell, 0.65, "Raccourcir", tee, cancel_event,
+    return _run_resize(ctx, shell, 0.65, _t("preset.undo_shorten"), tee, cancel_event,
                        append_mode=append_mode)
 
 
 def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=False):
-    return _run_resize(ctx, shell, 1.4, "Allonger", tee, cancel_event,
+    return _run_resize(ctx, shell, 1.4, _t("preset.undo_lengthen"), tee, cancel_event,
                        append_mode=append_mode)
 
 
@@ -319,7 +324,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
     _legacy_telemetry(ctx, "TransformToColumn",
                       {"context": "calc", "rows": str(len(row_range))})
     if not user_text.strip():
-        return "Tapez d'abord l'instruction de transformation dans le prompt."
+        return _t("preset.need_transform_input")
 
     system_prompt = _system(
         "Tu es un assistant de transformation de données. "
@@ -340,7 +345,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
             pass
 
     transformed = 0
-    ctx.undo_begin("Transformer en colonne")
+    ctx.undo_begin(_t("preset.undo_transform"))
     try:
         for row in row_range:
             parts = [sheet.getCellByPosition(col, row).getString()
@@ -384,8 +389,8 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                 col_obj.Width = 15000
         except Exception:
             pass
-        return (f"{transformed} ligne(s) transformée(s) en colonne "
-                f"{calc_tools.col_letter(out_col)}.")
+        return _t("preset.done_transform", count=transformed,
+                  col=calc_tools.col_letter(out_col))
     finally:
         ctx.undo_end()
 
@@ -405,7 +410,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
         rows.append(" | ".join(cells))
     table_text = "\n".join(rows).strip()
     if not has_data:
-        return "Sélectionnez d'abord la plage de données à analyser."
+        return _t("preset.need_range")
 
     prompt = (
         "DONNÉES :\n" + table_text + "\n\n"
@@ -422,7 +427,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
 
     out_row = area.EndRow + 2
     target_cell = sheet.getCellByPosition(area.StartColumn, out_row)
-    ctx.undo_begin("Analyser la plage")
+    ctx.undo_begin(_t("preset.undo_analyze"))
     try:
         try:
             merged = sheet.getCellRangeByPosition(
@@ -446,7 +451,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
             sheet.getRows().getByIndex(out_row).OptimalHeight = True
         except Exception:
             pass
-        return "Analyse écrite sous la sélection."
+        return _t("preset.done_analyze")
     finally:
         ctx.undo_end()
 
@@ -519,24 +524,26 @@ def _formula_extra(ctx, shell, user_text):
 
 
 PRESETS = [
-    Preset(id="summarize", label="📝 Résumer", apps=("writer",), mode="pipeline",
+    Preset(id="summarize", label_key="preset.summarize", apps=("writer",),
+           mode="pipeline",
            runner=run_summarize),
-    Preset(id="simplify", label="💬 Simplifier", apps=("writer",), mode="pipeline",
+    Preset(id="simplify", label_key="preset.simplify", apps=("writer",),
+           mode="pipeline",
            runner=run_simplify),
-    Preset(id="shorten", label="📏− Raccourcir", apps=("writer",), mode="pipeline",
-           runner=run_shorten),
-    Preset(id="lengthen", label="📏+ Allonger", apps=("writer",), mode="pipeline",
-           runner=run_lengthen),
-    Preset(id="transform", label="🔄 Transformer", apps=("calc",), mode="pipeline",
-           needs_input=True,
-           input_hint="Décrivez la transformation (ex. « traduire en anglais »)",
+    Preset(id="shorten", label_key="preset.shorten", apps=("writer",),
+           mode="pipeline", runner=run_shorten),
+    Preset(id="lengthen", label_key="preset.lengthen", apps=("writer",),
+           mode="pipeline", runner=run_lengthen),
+    Preset(id="transform", label_key="preset.transform", apps=("calc",),
+           mode="pipeline", needs_input=True,
+           input_hint_key="preset.transform_hint",
            runner=run_transform),
-    Preset(id="formula", label="🧮 Formule", apps=("calc",), mode="agentic",
-           needs_input=True,
-           input_hint="Décrivez la formule (ex. « moyenne des ventes 2024 »)",
+    Preset(id="formula", label_key="preset.formula", apps=("calc",),
+           mode="agentic", needs_input=True,
+           input_hint_key="preset.formula_hint",
            build_extra=_formula_extra),
-    Preset(id="analyze", label="📊 Analyser", apps=("calc",), mode="pipeline",
-           runner=run_analyze),
+    Preset(id="analyze", label_key="preset.analyze", apps=("calc",),
+           mode="pipeline", runner=run_analyze),
 ]
 
 

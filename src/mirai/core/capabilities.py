@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import json
 
+from ..i18n import t as _t
 from .tool_calls import ToolResult
 
 CONFIG_KEY = "assistant_model_capabilities"
@@ -86,17 +87,12 @@ class Capabilities:
     def summary(self) -> str:
         """Phrase destinée à l'utilisateur — sans jargon d'implémentation."""
         if not self.accepts_tools:
-            return ("Ce modèle n'accepte pas les outils. Les modifications "
-                    "passeront par un chemin direct, piloté par l'extension.")
+            return _t("caps.no_tools")
         if not self.calls_tool:
-            return ("Ce modèle n'utilise pas les outils qu'on lui propose. "
-                    "Les modifications passeront par un chemin direct.")
+            return _t("caps.no_calls")
         if not self.chains:
-            return ("Ce modèle sait lire le document mais n'enchaîne pas avec "
-                    "l'écriture. Les modifications passeront par un chemin "
-                    "direct, piloté par l'extension — c'est plus fiable.")
-        return ("Ce modèle enchaîne lecture et écriture : le mode agentique "
-                "est pleinement utilisable.")
+            return _t("caps.no_chains")
+        return _t("caps.full")
 
     def to_dict(self):
         return dataclasses.asdict(self)
