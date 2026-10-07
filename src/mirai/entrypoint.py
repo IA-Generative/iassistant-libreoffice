@@ -193,6 +193,7 @@ import uuid
 import time
 import base64
 import hashlib
+import html
 import threading
 import socket
 import platform
@@ -204,6 +205,12 @@ from . import credentials, feed_rewrite, local_config, log_setup
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
 from .menu_actions.shared import apply_settings_result
+from .i18n import t as _t
+from .i18n import (
+    get_locale as _i18n_get_locale,
+    resolve_locale as _i18n_resolve_locale,
+    set_locale as _i18n_set_locale,
+)
 from .security_flow import (
     SecureBootstrapFlow,
     FileJsonStore,
@@ -219,11 +226,13 @@ _current_user_agent = _DEFAULT_USER_AGENT
 CONTEXT_MENU_IGNORED = 0
 CONTEXT_MENU_EXECUTE_MODIFIED = 2
 
+# (cle de traduction i18n, URL de commande) — le libelle est resolu au moment
+# de l'insertion dans le menu, pour suivre la langue courante.
 MIRAI_CONTEXT_MENU_ITEMS = (
-    ("Résumer la sélection", "service:fr.gouv.interieur.mirai.do?SummarizeSelection&src=context"),
-    ("Reformuler", "service:fr.gouv.interieur.mirai.do?SimplifySelection&src=context"),
-    ("Corriger", "service:fr.gouv.interieur.mirai.do?CorrectSelection&src=context"),
-    ("Traduire", "service:fr.gouv.interieur.mirai.do?TranslateSelection&src=context"),
+    ("menu.summarize", "service:fr.gouv.interieur.mirai.do?SummarizeSelection&src=context"),
+    ("menu.reformulate", "service:fr.gouv.interieur.mirai.do?SimplifySelection&src=context"),
+    ("menu.correct", "service:fr.gouv.interieur.mirai.do?CorrectSelection&src=context"),
+    ("menu.translate", "service:fr.gouv.interieur.mirai.do?TranslateSelection&src=context"),
 )
 
 
@@ -261,11 +270,11 @@ class MirAIContextMenuInterceptor(unohelper.Base, XContextMenuInterceptor):
 
     def _insert_mirai_submenu(self, container):
         submenu = self._create_menu_service(container, "com.sun.star.ui.ActionTriggerContainer")
-        for index, (label, command_url) in enumerate(MIRAI_CONTEXT_MENU_ITEMS):
-            submenu.insertByIndex(index, self._create_action_trigger(submenu, label, command_url))
+        for index, (label_key, command_url) in enumerate(MIRAI_CONTEXT_MENU_ITEMS):
+            submenu.insertByIndex(index, self._create_action_trigger(submenu, _t(label_key), command_url))
         root_entry = self._create_action_trigger(
             container,
-            "MirAI",
+            _t("menu.root"),
             "service:fr.gouv.interieur.mirai.do?MenuSeparator&src=context",
             submenu,
         )
@@ -653,6 +662,37 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
         log_to_file("=== End Telemetry Exception ===")
 
 
+def _render_callback_page():
+    """Page shown in the browser once the OAuth redirect has reached the extension."""
+    def text(key):
+        return html.escape(_t(key), quote=False)
+
+    return f"""<!doctype html>
+<html lang="{_i18n_get_locale()}">
+  <head>
+    <meta charset="utf-8"/>
+    <title>{text("callback.title")}</title>
+    <style>
+      body {{ font-family: Arial, sans-serif; margin: 28px; color: #222; background: #f7f8fb; }}
+      .card {{ background: #fff; border: 1px solid #e3e6ef; border-radius: 10px; padding: 18px 20px; max-width: 560px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }}
+      .muted {{ color: #666; }}
+      .ok {{ display: inline-block; margin-top: 6px; padding: 6px 10px; background: #e8f5e9; color: #1b5e20; border-radius: 6px; font-weight: 600; }}
+      .small {{ font-size: 12px; color: #778; margin-top: 10px; }}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>{text("callback.heading")}</h2>
+      <div class="ok">{text("callback.badge")}</div>
+      <p>{text("callback.close_tab")}</p>
+      <p class="muted">{text("callback.if_stuck")}</p>
+      <div class="small">{text("callback.no_action")}</div>
+    </div>
+  </body>
+</html>
+"""
+
+
 class MainJob(unohelper.Base, XJobExecutor, XJob):
     _uninstall_listener_cls = None
     _self_update_in_flight_cls = False
@@ -760,6 +800,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._prepare_local_storage()
         except Exception as e:
             log_to_file(f"Local storage preparation failed: {str(e)}")
+
+        # The extension speaks LibreOffice's own UI language, like its menu
+        # entries (oxt/Addons.xcu), and English when it does not offer it.
+        try:
+            resolved_language = _i18n_set_locale(_i18n_resolve_locale(self.ctx))
+            log_to_file(f"UI language set to: {resolved_language}")
+        except Exception as e:
+            log_to_file(f"Failed to resolve UI language: {str(e)}")
 
         # Initialise User-Agent with real plugin + LibreOffice versions
         try:
@@ -2256,30 +2304,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 if active_frame:
                     toolkit = self.ctx.getServiceManager().createInstance("com.sun.star.awt.Toolkit")
                     parent = active_frame.getContainerWindow()
-                    msg_text = (
-                        f"MIrAI {target_version} est prêt.\n\n"
-                        "Pour l'installer, LibreOffice va se fermer —\n"
-                        "vous le rouvrirez ensuite pour l'activer.\n\n"
-                        "Installer et fermer maintenant ?\n\n"
-                        "(Si vous choisissez Non, la mise à jour sera\n"
-                        "reproposée plus tard. Vous pouvez aussi la\n"
-                        "lancer depuis le menu MIrAI → À propos…)"
-                    )
                     if urgency == "critical":
-                        msg_text = (
-                            f"Une nouvelle version de MIrAI ({target_version})\n"
-                            "avec des améliorations importantes est prête.\n\n"
-                            "Pour l'installer, LibreOffice va se fermer —\n"
-                            "rouvrez-le ensuite pour l'activer.\n\n"
-                            "Installer et fermer maintenant ?\n\n"
-                            "(Si vous choisissez Non, la mise à jour sera\n"
-                            "reproposée plus tard.)"
-                        )
+                        msg_text = _t("update.prompt_critical", version=target_version)
+                    else:
+                        msg_text = _t("update.prompt", version=target_version)
                     msgbox = toolkit.createMessageBox(
                         parent,
                         4,  # MessageBoxType.QUERYBOX
                         MSG_BUTTONS.BUTTONS_YES_NO,
-                        "MIrAI — Mise à jour",
+                        _t("update.title"),
                         msg_text
                     )
                     answer = msgbox.execute()
@@ -2421,35 +2454,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return
             toolkit = self.ctx.getServiceManager().createInstance("com.sun.star.awt.Toolkit")
             parent = active_frame.getContainerWindow()
-            oxt_line = oxt or "le dossier pending_update de votre profil LibreOffice"
-            msg = (
-                f"La mise à jour MIrAI {target_version} a été téléchargée et\n"
-                "vérifiée, mais son installation automatique a été bloquée par\n"
-                "la politique de sécurité de ce poste.\n\n"
-                "Elle ne sera plus reproposée automatiquement — vous pouvez\n"
-                "l'installer vous-même :\n\n"
-                "── Installation manuelle ─────────────────────────\n"
-                "1. Menu  Outils ▸ Gestionnaire des extensions…\n"
-                "2. Si « MIrAI » est déjà dans la liste : sélectionnez-le,\n"
-                "   puis cliquez sur « Supprimer ».\n"
-                "3. Cliquez sur « Ajouter » et sélectionnez le fichier :\n"
-                f"      {oxt_line}\n"
-                "4. Acceptez la licence.\n"
-                "5. Fermez puis rouvrez LibreOffice.\n\n"
-                "(La suppression/ajout se fait dans LibreOffice — pas besoin\n"
-                "de droits administrateur.)\n"
-                "En cas d'échec, contactez votre support / administrateur."
-            )
+            oxt_line = oxt or _t("update.blocked_pending_folder")
+            msg = _t("update.blocked_body", version=target_version, oxt=oxt_line)
             # Quand on connaît le dossier du fichier téléchargé, on propose de
             # l'ouvrir directement (Oui = ouvrir l'explorateur, sans cmd.exe).
             open_folder_offered = bool(folder)
             if open_folder_offered:
                 msg = msg + (
                     "\n\n──────────────────────────────────────────────\n"
-                    "► Pour ouvrir le dossier contenant le fichier téléchargé,\n"
-                    "  cliquez sur « Oui » : l'explorateur de fichiers s'ouvre\n"
-                    "  directement (sans invite de commande). « Non » referme\n"
-                    "  simplement ce message."
+                    + _t("update.blocked_open_folder")
                 )
                 buttons = MSG_BUTTONS.BUTTONS_YES_NO
             else:
@@ -2462,7 +2475,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 parent,
                 box_type,
                 buttons,
-                "MIrAI — Mise à jour bloquée",
+                _t("update.blocked_title"),
                 msg,
             )
             result = box.execute()
@@ -2718,8 +2731,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             toolkit = smgr.createInstance("com.sun.star.awt.Toolkit")
             box = toolkit.createMessageBox(
                 frame.getContainerWindow(), 1, MSG_BUTTONS.BUTTONS_OK,
-                "MIrAI — Mise à jour",
-                "La mise à jour s'activera au prochain démarrage de LibreOffice.")
+                _t("update.title"), _t("update.activates_at_restart"))
             box.execute()
             try:
                 box.dispose()
@@ -2772,10 +2784,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 toolkit = self.ctx.getServiceManager().createInstance("com.sun.star.awt.Toolkit")
                 parent = active_frame.getContainerWindow()
                 box = toolkit.createMessageBox(
-                    parent, 1, MSG_BUTTONS.BUTTONS_OK, "MIrAI — Mise à jour",
-                    "La mise à jour a été installée.\n\n"
-                    "LibreOffice va se fermer pour l'activer.\n"
-                    "Rouvrez-le ensuite."
+                    parent, 1, MSG_BUTTONS.BUTTONS_OK, _t("update.title"),
+                    _t("update.installed_closing")
                 )
                 box.execute()
                 try:
@@ -3852,32 +3862,18 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             wizard_steps = [
                 {
-                    "title": "Bienvenue dans IA'ssistant by MIrAI",
-                    "text": (
-                        "Votre assistant IA pour LibreOffice est presque prêt !\n\n"
-                        "IA'ssistant vous aide à rédiger, reformuler, résumer\n"
-                        "et enrichir vos documents en toute simplicité.\n\n"
-                        "Pour activer les fonctionnalités IA, une courte\n"
-                        "procédure d'enrôlement sécurisé est nécessaire.\n\n"
-                        "Cela ne prend que quelques secondes."
-                    ),
-                    "btn_next": "Commencer",
-                    "btn_cancel": "Plus tard",
-                    "step_label": "Étape 1/5 — Présentation",
+                    "title": _t("enroll.welcome"),
+                    "text": _t("enroll.step1_text"),
+                    "btn_next": _t("enroll.start"),
+                    "btn_cancel": _t("enroll.later"),
+                    "step_label": _t("enroll.step1_label"),
                 },
                 {
-                    "title": "Connexion sécurisée",
-                    "text": (
-                        "Cliquez sur « Ouvrir le navigateur » pour vous connecter.\n\n"
-                        "  • Votre navigateur s'ouvrira sur la page de connexion MIrAI\n"
-                        "  • Après connexion, revenez dans LibreOffice\n"
-                        "  • L'enrôlement se fera automatiquement\n\n"
-                        "Vos données restent protégées :\n"
-                        "aucun mot de passe n'est stocké par le plugin."
-                    ),
-                    "btn_next": "Ouvrir le navigateur",
-                    "btn_cancel": "Annuler",
-                    "step_label": "Étape 2/5 — Authentification",
+                    "title": _t("enroll.step2_title"),
+                    "text": _t("enroll.step2_text"),
+                    "btn_next": _t("enroll.open_browser"),
+                    "btn_cancel": _t("common.cancel"),
+                    "step_label": _t("enroll.step2_label"),
                 },
             ]
 
@@ -3887,7 +3883,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             dialog_model = create("com.sun.star.awt.UnoControlDialogModel", ctx)
             dialog.setModel(dialog_model)
             dialog.setVisible(False)
-            dialog.setTitle("IA'ssistant by MIrAI")
+            dialog.setTitle(_t("enroll.welcome"))
             dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
 
             def add_control(name, ctrl_type, x, y, w, h, props):
@@ -4110,9 +4106,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as e:
             log_to_file(f"Enrollment wizard failed, falling back to confirm: {str(e)}")
             proceed = self._confirm_message(
-                "Connexion MIrAI requise",
-                "Vous allez être redirigé vers la page de connexion MIrAI.\n\n"
-                "Voulez-vous continuer ?"
+                _t("msg.connection_required_title"),
+                _t("msg.connection_redirect_short")
             )
             return proceed, None, None, None, None
 
@@ -4437,31 +4432,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                html = """<!doctype html>
-<html lang="fr">
-  <head>
-    <meta charset="utf-8"/>
-    <title>Authentification terminée</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 28px; color: #222; background: #f7f8fb; }
-      .card { background: #fff; border: 1px solid #e3e6ef; border-radius: 10px; padding: 18px 20px; max-width: 560px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
-      .muted { color: #666; }
-      .ok { display: inline-block; margin-top: 6px; padding: 6px 10px; background: #e8f5e9; color: #1b5e20; border-radius: 6px; font-weight: 600; }
-      .small { font-size: 12px; color: #778; margin-top: 10px; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h2>Authentification terminée</h2>
-      <div class="ok">Connexion validée</div>
-      <p>Vous pouvez fermer cet onglet et revenir à LibreOffice.</p>
-      <p class="muted">Si LibreOffice ne réagit pas, attendez quelques secondes puis relancez l’action.</p>
-      <div class="small">Aucune action supplémentaire n’est requise ici.</div>
-    </div>
-  </body>
-</html>
-"""
-                self.wfile.write(html.encode("utf-8"))
+                self.wfile.write(_render_callback_page().encode("utf-8"))
 
         # Écoute sur toutes les interfaces ; redirect_uri est déjà garanti local par le contrôle en tête.
         bind_host = ""
@@ -4553,9 +4524,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if isinstance(allowed, list) and allowed:
             if redirect_uri not in allowed:
                 self._show_message(
-                    "Configuration Keycloak invalide",
-                    "redirect_uri n'est pas autorisé.\n\n"
-                    "Vérifiez keycloak_allowed_redirect_uri."
+                    _t("msg.kc_invalid_title"),
+                    _t("msg.kc_invalid_body")
                 )
                 return None
         valid = self._validate_redirect_uri(redirect_uri)
@@ -4567,9 +4537,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not auth_endpoint or not token_endpoint:
             log_to_file("Keycloak auth endpoints missing; cannot open browser")
             self._show_message(
-                "Configuration Keycloak incomplète",
-                "Impossible d'ouvrir la page d'authentification : endpoints Keycloak manquants.\n\n"
-                "Vérifiez keycloakIssuerUrl / keycloakRealm."
+                _t("msg.kc_incomplete_title"),
+                _t("msg.kc_endpoints_missing")
             )
             return None
 
@@ -4577,8 +4546,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not client_id:
             log_to_file("Keycloak client_id missing; cannot open browser")
             self._show_message(
-                "Configuration Keycloak incomplète",
-                "Impossible d'ouvrir la page d'authentification : client_id manquant."
+                _t("msg.kc_incomplete_title"),
+                _t("msg.kc_client_id_missing")
             )
             return None
 
@@ -4586,9 +4555,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not redirect_uri:
             log_to_file("Keycloak redirect_uri missing; cannot open browser")
             self._show_message(
-                "Configuration Keycloak incomplète",
-                "Impossible d'ouvrir la page d'authentification : redirect_uri manquant.\n\n"
-                "Exemple : http://localhost:28443/callback"
+                _t("msg.kc_incomplete_title"),
+                _t("msg.kc_redirect_missing")
             )
             return None
 
@@ -4598,10 +4566,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             proceed, wiz_dialog, wiz_toolkit, wiz_update, wiz_state = self._show_enrollment_wizard()
         else:
             proceed = self._confirm_message(
-                "Connexion MIrAI requise",
-                "Vous allez être redirigé vers la page de connexion MIrAI dans votre navigateur.\n\n"
-                "Après la connexion, revenez à LibreOffice.\n\n"
-                "Voulez-vous continuer ?"
+                _t("msg.connection_required_title"),
+                _t("msg.connection_required_body")
             )
         if not proceed:
             log_to_file("Keycloak auth canceled by user before browser open")
@@ -4648,12 +4614,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         if wiz_dialog and wiz_update and wiz_toolkit:
             wiz_update(
-                "Connexion en cours...",
-                "Votre navigateur est ouvert sur la page de connexion.\n\n"
-                "Connectez-vous puis revenez dans LibreOffice.",
-                "Étape 4/5 — Connexion",
+                _t("enroll.auth_wait_title"),
+                _t("enroll.auth_wait_text"),
+                _t("enroll.step4_label"),
                 4,
-                btn_cancel="Annuler",
+                btn_cancel=_t("common.cancel"),
             )
 
             class _WizAuthCancelListener(unohelper.Base, XActionListener):
@@ -4675,9 +4640,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 tick_state["i"] += 1
                 dots = "." * ((tick_state["i"] % 3) + 1)
                 try:
-                    wiz_dialog.getControl("wiz_text").getModel().Label = (
-                        f"En attente de la connexion{dots}\n\n"
-                        "Connectez-vous dans le navigateur puis revenez."
+                    wiz_dialog.getControl("wiz_text").getModel().Label = _t(
+                        "enroll.auth_waiting", dots=dots
                     )
                     pump_events(wiz_toolkit)
                 except Exception:
@@ -4698,13 +4662,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     dlg.setPosSize(0, 0, 300, 120, SIZE)
                     lbl_m = dlg_model.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
                     dlg_model.insertByName("auth_wait_label", lbl_m)
-                    lbl_m.Label = "Authentification Keycloak..."
+                    lbl_m.Label = _t("enroll.auth_progress", dots="...")
                     lbl_m.NoLabel = True
                     lbl = dlg.getControl("auth_wait_label")
                     lbl.setPosSize(10, 24, 280, 20, POSSIZE)
                     btn_m = dlg_model.createInstance("com.sun.star.awt.UnoControlButtonModel")
                     dlg_model.insertByName("auth_wait_cancel", btn_m)
-                    btn_m.Label = "Annuler"
+                    btn_m.Label = _t("common.cancel")
                     btn = dlg.getControl("auth_wait_cancel")
                     btn.setPosSize(100, 72, 100, 26, POSSIZE)
                     frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
@@ -4740,9 +4704,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 dots = "." * ((tick_state["i"] % 3) + 1)
                 try:
                     if auth_cancel_event.is_set():
-                        wait_label.getModel().Label = "Annulation..."
+                        wait_label.getModel().Label = _t("enroll.cancelling")
                     else:
-                        wait_label.getModel().Label = f"Authentification Keycloak{dots}"
+                        wait_label.getModel().Label = _t("enroll.auth_progress", dots=dots)
                     pump_events(wait_toolkit)
                 except Exception:
                     pass
@@ -4780,7 +4744,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             """Affiche une erreur dans le wizard, attend Fermer, ferme le dialog."""
             if not wiz_dialog or not wiz_update or not wiz_toolkit:
                 return
-            wiz_update(title, text, "Étape 4/5 — Connexion", 4, btn_next="Fermer")
+            wiz_update(title, text, _t("enroll.step4_label"), 4, btn_next=_t("common.close"))
             wiz_state["cancelled"] = False
             step_snap = wiz_state["step"]
             while wiz_state["step"] == step_snap:
@@ -4791,25 +4755,26 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if error == "cancelled_by_user":
             log_to_file("Authorization code flow cancelled by user")
             _wiz_show_error_and_wait(
-                "Connexion annulée",
-                "L'authentification a été annulée.\n\nVous pouvez réessayer via le menu MIrAI.",
+                _t("enroll.cancelled_title"),
+                _t("enroll.cancelled_text"),
             )
             return None
         if not code:
             log_to_file(f"Authorization code flow failed: {error}")
             if wiz_dialog:
                 err_txt = (
-                    "Délai dépassé. Vérifiez la redirection et réessayez."
+                    _t("enroll.timeout_text")
                     if error == "timeout"
-                    else f"Erreur : {error or 'inconnue'}. Vérifiez la configuration."
+                    else _t(
+                        "enroll.error_config_text",
+                        error=error or _t("enroll.unknown_error"),
+                    )
                 )
-                _wiz_show_error_and_wait("Connexion échouée", err_txt)
+                _wiz_show_error_and_wait(_t("enroll.failed_conn_title"), err_txt)
             elif error == "timeout":
                 self._show_message(
-                    "Connexion expirée",
-                    "Le login Keycloak a expiré avant le retour navigateur.\n\n"
-                    f"Redirection attendue:\n{redirect_uri}\n\n"
-                    "Vérifiez la redirection et relancez Login."
+                    _t("msg.kc_expired_title"),
+                    _t("msg.kc_expired_body", redirect_uri=redirect_uri),
                 )
             return None
         log_to_file("Authorization code received, exchanging for token")
@@ -4832,9 +4797,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             try:
                 if wiz_dialog and wiz_update and wiz_toolkit and wiz_state:
                     wiz_update(
-                        "Enrôlement en cours...",
-                        "Enregistrement de votre poste auprès du service MIrAI...",
-                        "Étape 5/5 — Enrôlement",
+                        _t("enroll.enrolling_title"),
+                        _t("enroll.enrolling_text"),
+                        _t("enroll.step5_enroll_label"),
                         5,
                     )
                     enroll_result = {"done": False, "success": False, "error": ""}
@@ -4846,7 +4811,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                 self._get_config_from_file("enrolled", False)
                             )
                             if not enroll_result["success"]:
-                                enroll_result["error"] = "Non confirmé par le serveur"
+                                enroll_result["error"] = _t("enroll.not_confirmed")
                         except Exception as exc:
                             enroll_result["success"] = False
                             enroll_result["error"] = str(exc)
@@ -4860,8 +4825,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         tick_i[0] += 1
                         dots = "." * ((tick_i[0] % 3) + 1)
                         try:
-                            wiz_dialog.getControl("wiz_text").getModel().Label = (
-                                f"Enregistrement en cours{dots}"
+                            wiz_dialog.getControl("wiz_text").getModel().Label = _t(
+                                "enroll.enrolling_progress", dots=dots
                             )
                             pump_events(wiz_toolkit)
                         except Exception:
@@ -4872,36 +4837,21 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     step_snap = wiz_state["step"]
                     if enroll_result["success"]:
                         wiz_update(
-                            "Enrôlement terminé !",
-                            "L'IA est intégrée directement dans vos documents\n"
-                            "Writer et Calc, accessible depuis le menu MIrAI.\n\n"
-                            "Writer :\n"
-                            "  • Étendre — prolonger votre texte avec l'IA\n"
-                            "  • Modifier — reformuler ou corriger une sélection\n"
-                            "  • Résumer — condenser un passage\n"
-                            "  • Simplifier — rendre un texte plus accessible\n\n"
-                            "Calc :\n"
-                            "  • Transformer — appliquer une consigne à chaque cellule\n"
-                            "  • Formule IA — générer une formule par description\n"
-                            "  • Analyser — obtenir une synthèse de vos données\n"
-                            "  • =PROMPT() — interroger l'IA dans une cellule\n\n\n"
-                            "       Menu MIrAI → 📚 Documentation pour en savoir plus.",
-                            "Étape 5/5 — Terminé",
+                            _t("enroll.done_title"),
+                            _t("enroll.done_text"),
+                            _t("enroll.step5_done_label"),
                             5,
-                            btn_next="🚀 Commencer à utiliser",
+                            btn_next=_t("enroll.done_button"),
                             title_color=_UI["success"],
                         )
                     else:
-                        error_msg = enroll_result["error"] or "Erreur inconnue"
+                        error_msg = enroll_result["error"] or _t("enroll.unknown_error")
                         wiz_update(
-                            "Enrôlement échoué",
-                            f"L'enrôlement a échoué.\n"
-                            f"Raison : {error_msg}\n\n"
-                            "Consultez le menu MIrAI → 📚 Documentation\n"
-                            "pour obtenir de l'aide.",
-                            "Étape 5/5 — Erreur",
+                            _t("enroll.failed_title"),
+                            _t("enroll.failed_text", reason=error_msg),
+                            _t("enroll.step5_error_label"),
                             5,
-                            btn_next="Fermer",
+                            btn_next=_t("common.close"),
                             title_color=_UI["error"],
                         )
 
@@ -5600,7 +5550,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
-    def proxy_settings_box(self, title="Proxy", x=None, y=None):
+    def proxy_settings_box(self, title=None, x=None, y=None):
         WIDTH = 640
         HORI_MARGIN = 16
         VERT_MARGIN = 12
@@ -5620,7 +5570,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
         dialog.setModel(dialog_model)
         dialog.setVisible(False)
-        dialog.setTitle(title)
+        dialog.setTitle(title or _t("proxy.title"))
 
         def add(name, type, x_, y_, width_, height_, props):
             try:
@@ -5657,7 +5607,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y = VERT_MARGIN
         # Section header
         add("label_proxy", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": "Paramètres proxy", "NoLabel": True,
+            "Label": _t("proxy.section"), "NoLabel": True,
             "FontHeight": _UI["font_section"],
             "TextColor": _UI["primary"],
             "FontWeight": 150,
@@ -5665,7 +5615,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y += LABEL_HEIGHT + VERT_SEP
 
         add("label_enabled", "FixedText", HORI_MARGIN, current_y, 200, LABEL_HEIGHT, {
-            "Label": "Utiliser un proxy :", "NoLabel": True,
+            "Label": _t("proxy.enabled"), "NoLabel": True,
             "FontHeight": _UI["font_label"],
             "TextColor": _UI["text"],
         })
@@ -5674,7 +5624,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y += LABEL_HEIGHT + VERT_SEP
 
         add("label_url", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": "Proxy (host:port) :", "NoLabel": True,
+            "Label": _t("proxy.url"), "NoLabel": True,
             "FontHeight": _UI["font_label"],
             "TextColor": _UI["text"],
         })
@@ -5685,7 +5635,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y += EDIT_HEIGHT + VERT_SEP * 2
 
         add("label_user", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": "Login proxy (optionnel) :", "NoLabel": True,
+            "Label": _t("proxy.username"), "NoLabel": True,
             "FontHeight": _UI["font_label"],
             "TextColor": _UI["text_secondary"],
         })
@@ -5696,7 +5646,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y += EDIT_HEIGHT + VERT_SEP * 2
 
         add("label_pass", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": "Mot de passe proxy (optionnel) :", "NoLabel": True,
+            "Label": _t("proxy.password"), "NoLabel": True,
             "FontHeight": _UI["font_label"],
             "TextColor": _UI["text_secondary"],
         })
@@ -5708,7 +5658,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y += EDIT_HEIGHT + VERT_SEP * 2
 
         add("label_insecure", "FixedText", HORI_MARGIN, current_y, 260, LABEL_HEIGHT, {
-            "Label": "Autoriser HTTPS sans vérification (-k) :", "NoLabel": True,
+            "Label": _t("proxy.insecure"), "NoLabel": True,
             "FontHeight": _UI["font_label"],
             "TextColor": _UI["text"],
         })
@@ -5721,11 +5671,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             WIDTH - HORI_MARGIN * 2, 2, {})
         current_y += VERT_SEP
 
-        lo_text = "Proxy LibreOffice : "
+        lo_text = _t("proxy.lo_prefix")
         if lo["enabled"] and lo["host"]:
             lo_text += f"{lo['host']}:{lo['port']}" if lo["port"] else lo["host"]
         else:
-            lo_text += "désactivé"
+            lo_text += _t("proxy.lo_disabled")
         add("label_lo", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
             "Label": lo_text, "NoLabel": True,
             "FontHeight": _UI["font_small"],
@@ -5734,11 +5684,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         current_y += LABEL_HEIGHT + VERT_SEP * 2
 
         btn_test = add("btn_test", "Button", HORI_MARGIN, current_y, BUTTON_WIDTH + 20, BUTTON_HEIGHT, {
-            "Label": "Tester connexion", "Name": "test_proxy",
+            "Label": _t("proxy.test_button"), "Name": "test_proxy",
             "FontHeight": _UI["font_small"],
         })
         btn_copy = add("btn_copy", "Button", HORI_MARGIN + BUTTON_WIDTH + 30, current_y, BUTTON_WIDTH + 40, BUTTON_HEIGHT, {
-            "Label": "Copier depuis LibreOffice", "Name": "copy_lo",
+            "Label": _t("proxy.copy_lo"), "Name": "copy_lo",
             "FontHeight": _UI["font_small"],
         })
         current_y += BUTTON_HEIGHT + VERT_SEP * 2
@@ -5750,12 +5700,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         add("btn_ok", "Button", WIDTH - HORI_MARGIN - BUTTON_WIDTH * 2 - HORI_SEP, current_y,
             BUTTON_WIDTH, BUTTON_HEIGHT, {
-                "PushButtonType": OK, "DefaultButton": True, "Label": "Enregistrer",
+                "PushButtonType": OK, "DefaultButton": True, "Label": _t("common.save"),
                 "FontHeight": _UI["font_label"],
             })
         add("btn_cancel", "Button", WIDTH - HORI_MARGIN - BUTTON_WIDTH, current_y,
             BUTTON_WIDTH, BUTTON_HEIGHT, {
-                "PushButtonType": CANCEL, "Label": "Annuler",
+                "PushButtonType": CANCEL, "Label": _t("common.cancel"),
                 "FontHeight": _UI["font_label"],
             })
 
@@ -5805,9 +5755,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                             "allow_insecure_ssl": bool(chk_insecure.getModel().State),
                         }
                         ok, message = self.outer._test_proxy_connection(proxy_cfg)
-                        self.outer._show_message("Test proxy", message if ok else f"Échec: {message}")
+                        self.outer._show_message(_t("proxy.test_title"), message if ok else _t("proxy.test_failed", detail=message))
                     except Exception as e:
-                        self.outer._show_message("Test proxy", f"Échec: {str(e)}")
+                        self.outer._show_message(_t("proxy.test_title"), _t("proxy.test_failed", detail=str(e)))
             def disposing(self, event):
                 return
 
@@ -6195,11 +6145,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         return anon_ok, auth_ok
 
-    def make_api_request(self, prompt, system_prompt="", max_tokens=15000, api_type=None):
+    def make_api_request(self, prompt, system_prompt="", max_tokens=15000, api_type=None,
+                         answer_in_ui_language=False):
         """
         Build a streaming chat/completions request for OpenAI-compatible endpoints.
         The api_type parameter is accepted for backwards compatibility but ignored
         — all requests use the chat/completions format.
+
+        The answer keeps the language of the provided text, since it is written
+        into the document. Pass answer_in_ui_language=True when the answer is
+        read by the user instead (suggestions): it then follows the UI language.
         """
         try:
             max_tokens = int(max_tokens)
@@ -6211,9 +6166,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         api_type = "chat"
         model = str(self.get_config("llm_default_models", ""))
 
+        if answer_in_ui_language:
+            language_rule = _t("llm.answer_language")
+        else:
+            language_rule = (
+                "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
+                "fourni par l'utilisateur. Si le texte est en français, réponds en "
+                "français. Si le texte est en anglais, réponds en anglais. Ne change "
+                "jamais la langue."
+            )
+
         # Default system prompt: ask for structured Markdown (converted to native
-        # Writer formatting on insertion — see src/mirai/formatting) and enforce
-        # language preservation. /no_thinking prefix minimises reasoning tokens
+        # Writer formatting on insertion — see src/mirai/formatting) and set the
+        # answer language. /no_thinking prefix minimises reasoning tokens
         # on Qwen3-style models.
         default_system_prompt = (
             "/no_thinking\n"
@@ -6224,10 +6189,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "(centré, justifié, à droite), à indiquer uniquement avec "
             "<p style=\"text-align:center\">...texte...</p> (ou right/justify) "
             "autour du paragraphe concerné. "
-            "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
-            "fourni par l'utilisateur. Si le texte est en français, réponds en "
-            "français. Si le texte est en anglais, réponds en anglais. Ne change "
-            "jamais la langue."
+            + language_rule
         )
         if system_prompt:
             system_prompt = default_system_prompt + " " + system_prompt
@@ -6532,9 +6494,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 if item is _ERROR_401:
                     try:
                         self._show_message_and_open_settings(
-                            "Token invalide",
-                            "Votre token n'est plus valide.\n\n"
-                            "Voulez-vous ouvrir les préférences pour le vérifier ?"
+                            _t("msg.token_invalid_title"),
+                            _t("msg.token_invalid_body")
                         )
                     except Exception:
                         pass
@@ -6546,15 +6507,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     # Quota atteint : respecter retry_after (pas de réessai
                     # automatique) et l'afficher à l'utilisateur.
                     try:
-                        delay = f"{int(item[1])} secondes" if item[1] else "quelques instants"
+                        delay = (
+                            _t("msg.delay_seconds", seconds=int(item[1]))
+                            if item[1]
+                            else _t("msg.delay_moment")
+                        )
                     except (TypeError, ValueError):
-                        delay = "quelques instants"
+                        delay = _t("msg.delay_moment")
                     try:
                         self._show_message(
-                            "Quota de requêtes atteint",
-                            "Le quota de requêtes vers l'assistant IA est atteint "
-                            "pour le moment.\n\n"
-                            f"Merci de réessayer dans {delay}.")
+                            _t("msg.quota_title"),
+                            _t("msg.quota_body", delay=delay))
                     except Exception:
                         pass
                     continue
@@ -6573,7 +6536,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     #License: Creative Commons Attribution-ShareAlike 3.0 Unported License,
     #License: The Document Foundation  https://creativecommons.org/licenses/by-sa/3.0/
     #begin sharealike section
-    def input_box(self,message, title="", default="", x=None, y=None, ok_label="OK", always_on_top=False):
+    def input_box(self,message, title="", default="", x=None, y=None, ok_label=None, cancel_label=None, always_on_top=False):
         """ Shows dialog with input box.
             @param message message to show on the dialog
             @param title window title
@@ -6582,6 +6545,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             @param y optional dialog position in twips
             @return string if OK button pushed, otherwise zero length string
         """
+        ok_label = ok_label or _t("common.send")
+        cancel_label = cancel_label or _t("common.cancel")
         WIDTH = 720
         HORI_MARGIN = VERT_MARGIN = 8
         BUTTON_WIDTH = 100
@@ -6786,7 +6751,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Edit the whole document chunk-by-chunk with surgical FIND/REPLACE."""
         chunks = self._chunk_doc_paragraphs(doc)
         if not chunks:
-            self._show_message("Modification", "Document vide.")
+            self._show_message(_t("msg.edit_title"), _t("msg.document_empty"))
             return
 
         log_to_file(f"WholeDocEdit: {len(chunks)} chunk(s)")
@@ -6794,6 +6759,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         system_prompt = (
             "Tu es un éditeur de texte professionnel. "
             "Tu appliques les instructions sans poser de question. "
+            "Les remplacements conservent la langue du texte remplacé. "
             "Tu réponds UNIQUEMENT avec des blocs <<<FIND>>>...<<<REPLACE>>>...<<<END>>>. "
             "Si aucune modification n'est nécessaire, réponds uniquement : <<<NOCHANGE>>>"
         )
@@ -6814,7 +6780,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     dlg_m = _cr("com.sun.star.awt.UnoControlDialogModel")
                     dlg.setModel(dlg_m)
                     dlg.setVisible(False)
-                    dlg.setTitle("MIrAI – Édition du document")
+                    dlg.setTitle(_t("msg.edit_doc_title"))
                     dlg.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
                     try:
                         dlg_m.BackgroundColor = _UI["bg_accent"]
@@ -6983,8 +6949,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return
         if total_replacements == 0:
             self._show_message(
-                "Modification",
-                "Aucune modification applicable trouvée dans le document.")
+                _t("msg.edit_title"),
+                _t("msg.no_change"))
 
     def _run_edit_selection(self, text, text_range, user_input):
         original_text = text_range.getString()
@@ -7283,8 +7249,8 @@ EDITED VERSION:
                 return
             if aborted["value"]:
                 self._show_message(
-                    "Modification",
-                    "Le modèle a tenté de poser une question. Reformulez la demande de manière plus directive."
+                    _t("msg.edit_title"),
+                    _t("msg.ask_instead")
                 )
                 return
             # Strip think/reasoning blocks (e.g. deepseek-r1)
@@ -7295,8 +7261,8 @@ EDITED VERSION:
 
             if not accumulated_text.strip():
                 self._show_message(
-                    "Modification",
-                    "Aucune réponse reçue du modèle. Vérifiez le token et réessayez."
+                    _t("msg.edit_title"),
+                    _t("msg.no_answer")
                 )
                 return
 
@@ -7362,7 +7328,7 @@ EDITED VERSION:
         dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
         dialog.setModel(dialog_model)
         dialog.setVisible(False)
-        dialog.setTitle("À propos de l'IA'ssistant MIrAI")
+        dialog.setTitle(_t("about.title"))
         dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
         try:
             dialog_model.BackgroundColor = _UI["bg"]
@@ -7405,7 +7371,7 @@ EDITED VERSION:
         # Title
         add("about_title", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 22,
-            {"Label": "MIrAI — IA'ssistant LibreOffice",
+            {"Label": _t("about.window_title"),
              "FontHeight": 16, "FontWeight": 200,
              "TextColor": _UI["primary"], "Align": 1})
         y += 26
@@ -7414,7 +7380,7 @@ EDITED VERSION:
         version = self._get_extension_version() or "0.1.0"
         add("about_version", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 16,
-            {"Label": f"Version {version}",
+            {"Label": _t("about.version", version=version),
              "FontHeight": _UI["font_label"],
              "TextColor": _UI["text_secondary"], "Align": 1})
         y += 22
@@ -7425,11 +7391,7 @@ EDITED VERSION:
         y += 12
 
         # Description (non-editable label, smaller text, white bg)
-        desc_line1 = (
-            "Extension LibreOffice intégrant un assistant IA dans Writer et Calc. "
-            "Sélectionnez du texte et utilisez le menu MIrAI pour générer, modifier, "
-            "résumer, reformuler ou ajuster la longueur de vos documents."
-        )
+        desc_line1 = _t("about.desc")
         add("about_desc1", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 30,
             {"Label": desc_line1, "NoLabel": True, "MultiLine": True,
@@ -7438,7 +7400,7 @@ EDITED VERSION:
         y += 32
         add("about_desc2", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 12,
-            {"Label": "Programme MIrAI — Ministère de l'Intérieur", "NoLabel": True,
+            {"Label": _t("about.program"), "NoLabel": True,
              "FontHeight": 7, "FontSlant": 2,
              "TextColor": _UI["text_light"]})
         y += 18
@@ -7451,19 +7413,12 @@ EDITED VERSION:
         # Changelog title
         add("about_changelog_title", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 16,
-            {"Label": "Derniers ajouts",
+            {"Label": _t("about.changelog_title"),
              "FontHeight": _UI["font_section"], "FontWeight": 150,
              "TextColor": _UI["primary"]})
         y += 20
 
-        changelog = (
-            "• Ajuster la longueur — mini-dialogue − / + pour réduire ou développer\n"
-            "• Suggestions IA contextuelles dans le dialogue d'édition\n"
-            "• Analyse de plage Calc avec nettoyage markdown\n"
-            "• Déploiement automatisé avec rollout progressif\n"
-            "• Notice utilisateur double persona (novice / expert)\n"
-            "• Filtrage robuste du raisonnement LLM (blocs <think>)"
-        )
+        changelog = _t("about.changelog")
         add("about_changelog", "Edit",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, CHANGELOG_HEIGHT,
             {"Text": changelog, "MultiLine": True, "ReadOnly": True,
@@ -7481,7 +7436,7 @@ EDITED VERSION:
         # Check updates button
         _mascot_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16.png")
         btn_update_props = {
-            "Label": "  Mises à jour",
+            "Label": _t("about.updates_button"),
             "FontHeight": _UI["font_small"],
             "FontWeight": 150,
             "TextColor": _UI["btn_primary_fg"],
@@ -7498,7 +7453,7 @@ EDITED VERSION:
         # Close button
         btn_close = add("about_btn_close", "Button",
             WIDTH - HORI_MARGIN - BTN_WIDTH, btn_y, BTN_WIDTH, BTN_HEIGHT,
-            {"Label": "Fermer",
+            {"Label": _t("common.close"),
              "FontHeight": _UI["font_small"],
              "TextColor": _UI["text_secondary"],
              "BackgroundColor": _UI["bg_section"]})
@@ -7509,7 +7464,7 @@ EDITED VERSION:
         btn_open_folder = add("about_btn_open_folder", "Button",
             (HORI_MARGIN + BTN_WIDTH + WIDTH - HORI_MARGIN - BTN_WIDTH) // 2 - 48,
             btn_y, 96, BTN_HEIGHT,
-            {"Label": "Ouvrir dossier",
+            {"Label": _t("about.open_folder"),
              "FontHeight": _UI["font_small"],
              "TextColor": _UI["text_secondary"],
              "BackgroundColor": _UI["bg_section"]})
@@ -7535,7 +7490,7 @@ EDITED VERSION:
                 elif source == btn_update:
                     if update_status:
                         try:
-                            update_status.getModel().Label = "Vérification en cours..."
+                            update_status.getModel().Label = _t("about.checking")
                             update_status.getModel().TextColor = _UI["primary"]
                         except Exception:
                             pass
@@ -7552,7 +7507,7 @@ EDITED VERSION:
                                     open(os.path.join(pend, "mirai_update.oxt"), "a").close()
                                     if update_status:
                                         update_status.getModel().Label = (
-                                            "Self-test : boîte « mise à jour bloquée »"
+                                            _t("about.selftest_blocked")
                                         )
                                         update_status.getModel().TextColor = _UI["info"]
                                     about_self._notify_update_blocked(
@@ -7569,7 +7524,7 @@ EDITED VERSION:
                                 return
                             if isinstance(update_dir, dict) and update_dir.get("action") in ("update", "rollback"):
                                 target = update_dir.get("target_version", "?")
-                                update_status.getModel().Label = f"Version {target} disponible. Mise à jour lancée..."
+                                update_status.getModel().Label = _t("about.update_available", target=target)
                                 update_status.getModel().TextColor = _UI["info"]
                                 # Wait for update to finish (max 60s)
                                 for _ in range(120):
@@ -7577,24 +7532,24 @@ EDITED VERSION:
                                     if not MainJob._update_in_progress_cls:
                                         break
                                 if MainJob._update_in_progress_cls:
-                                    update_status.getModel().Label = f"Téléchargement de la v{target} en cours..."
+                                    update_status.getModel().Label = _t("about.downloading", target=target)
                                     update_status.getModel().TextColor = _UI["info"]
                                 else:
                                     new_ver = about_self._get_extension_version() or "?"
                                     if new_ver == target:
-                                        update_status.getModel().Label = f"v{target} installée. Redémarrez LibreOffice."
+                                        update_status.getModel().Label = _t("about.installed_restart", target=target)
                                         update_status.getModel().TextColor = _UI["success"]
                                     else:
-                                        update_status.getModel().Label = f"Échec du téléchargement de la v{target}."
+                                        update_status.getModel().Label = _t("about.download_failed", target=target)
                                         update_status.getModel().TextColor = _UI["error"]
                             else:
                                 current = about_self._get_extension_version() or "?"
-                                update_status.getModel().Label = f"Version {current} — à jour."
+                                update_status.getModel().Label = _t("about.uptodate", current=current)
                                 update_status.getModel().TextColor = _UI["success"]
                         except Exception as e:
                             if update_status:
                                 try:
-                                    update_status.getModel().Label = f"Erreur : {str(e)[:50]}"
+                                    update_status.getModel().Label = _t("common.error", detail=str(e)[:50])
                                     update_status.getModel().TextColor = _UI["error"]
                                 except Exception:
                                     pass
@@ -7608,8 +7563,8 @@ EDITED VERSION:
                         ok = about_self._open_folder_native(folder)
                         if update_status:
                             update_status.getModel().Label = (
-                                "Dossier ouvert." if ok
-                                else "Impossible d'ouvrir le dossier."
+                                _t("about.folder_opened") if ok
+                                else _t("about.folder_failed")
                             )
                             update_status.getModel().TextColor = (
                                 _UI["success"] if ok else _UI["error"]
@@ -7729,7 +7684,7 @@ EDITED VERSION:
         dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
         dialog.setModel(dialog_model)
         dialog.setVisible(False)
-        dialog.setTitle("MIrAI — Ajuster la longueur")
+        dialog.setTitle(_t("resize.title"))
         dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
         try:
             dialog_model.BackgroundColor = _UI["bg"]
@@ -7764,7 +7719,7 @@ EDITED VERSION:
             "resize_status", "FixedText",
             HORI_MARGIN, VERT_MARGIN,
             WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT,
-            {"Label": "Sélectionnez du texte puis cliquez − ou +",
+            {"Label": _t("resize.hint"),
              "NoLabel": True,
              "FontHeight": _UI["font_small"],
              "TextColor": _UI["text_secondary"],
@@ -7837,7 +7792,7 @@ EDITED VERSION:
             if not original or len(original.strip()) < 5:
                 if status_label:
                     try:
-                        status_label.getModel().Label = "Sélectionnez du texte à ajuster."
+                        status_label.getModel().Label = _t("resize.no_selection")
                         status_label.getModel().TextColor = _UI["warning"]
                     except Exception:
                         pass
@@ -7846,7 +7801,7 @@ EDITED VERSION:
             # Update status label
             if status_label:
                 try:
-                    label = "Mirai réduit..." if direction == "reduce" else "Mirai développe..."
+                    label = _t("resize.reduce_running") if direction == "reduce" else _t("resize.expand_running")
                     status_label.getModel().Label = label
                     status_label.getModel().TextColor = _UI["primary"]
                 except Exception:
@@ -7941,14 +7896,14 @@ EDITED VERSION:
                 if not raw:
                     if status_label:
                         try:
-                            status_label.getModel().Label = "Aucun résultat. Réessayez."
+                            status_label.getModel().Label = _t("resize.no_result")
                             status_label.getModel().TextColor = _UI["warning"]
                         except Exception:
                             pass
                     return
 
                 # Replace the selection in-place with undo grouping
-                undo_label = "Réduire" if direction == "reduce" else "Développer"
+                undo_label = _t("resize.undo_reduce") if direction == "reduce" else _t("resize.undo_expand")
                 mgr = None
                 try:
                     mgr = mdl.getUndoManager()
@@ -7981,7 +7936,10 @@ EDITED VERSION:
                 sign = "+" if delta > 0 else ""
                 if status_label:
                     try:
-                        status_label.getModel().Label = f"OK ({new_word_count} mots, {sign}{delta}). Ctrl+Z pour annuler."
+                        status_label.getModel().Label = _t(
+                            "resize.ok_format",
+                            new_word_count=new_word_count, sign=sign, delta=delta,
+                        )
                         status_label.getModel().TextColor = _UI["success"]
                     except Exception:
                         pass
@@ -7989,7 +7947,7 @@ EDITED VERSION:
                 log_to_file(f"ResizeSelection failed: {str(e)}")
                 if status_label:
                     try:
-                        status_label.getModel().Label = f"Erreur : {str(e)[:60]}"
+                        status_label.getModel().Label = _t("common.error", detail=str(e)[:60])
                         status_label.getModel().TextColor = _UI["error"]
                     except Exception:
                         pass
@@ -8131,7 +8089,7 @@ EDITED VERSION:
         dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
         dialog.setModel(dialog_model)
         dialog.setVisible(False)
-        dialog.setTitle("MIrAI — Modifier la sélection")
+        dialog.setTitle(_t("edit.title"))
         dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
         try:
             dialog_model.BackgroundColor = _UI["bg"]
@@ -8223,7 +8181,7 @@ EDITED VERSION:
             except Exception:
                 selected = ""
             if not selected:
-                return "Sélectionner une portion de texte à modifier... ou placer le curseur à l'emplacement où vous souhaitez insérer le nouveau texte"
+                return _t("edit.intro")
             snippet = " ".join(selected.split())
             max_len = 90
             if len(snippet) > max_len:
@@ -8232,13 +8190,13 @@ EDITED VERSION:
                 head = snippet[:head_len].rsplit(" ", 1)[0] or snippet[:head_len]
                 tail = snippet[-tail_len:].split(" ", 1)[-1] or snippet[-tail_len:]
                 snippet = head.rstrip() + " ... ... ... " + tail.lstrip()
-            warning = " ⚠ plusieurs styles fusionnés" if _has_multiple_styles() else ""
-            return f"Sélection {snippet}{warning}"
+            warning = _t("edit.warning_mixed_styles") if _has_multiple_styles() else ""
+            return _t("edit.selection_prefix", snippet=snippet, warning=warning)
 
         PROMPT_BTN_WIDTH = 150
         label_max_width = WIDTH - HORI_MARGIN * 2 - PROMPT_BTN_WIDTH - HORI_SEP
         add("label_edit", "FixedText", HORI_MARGIN, VERT_MARGIN, label_max_width, LABEL_HEIGHT, {
-            "Label": "Editer avec l'IA", "NoLabel": True,
+            "Label": _t("edit.button"), "NoLabel": True,
             "FontHeight": _UI["font_section"],
             "TextColor": _UI["primary"],
             "FontWeight": 150,
@@ -8322,7 +8280,7 @@ EDITED VERSION:
 
         # Send button with mascot icon
         send_btn_props = {
-            "Label": "  Envoyer",
+            "Label": "  " + _t("common.send"),
             "FontHeight": _UI["font_label"],
             "FontWeight": 150,
             "TextColor": _UI["btn_primary_fg"],
@@ -8361,7 +8319,7 @@ EDITED VERSION:
             suggest_y + 12,
             WIDTH - HORI_MARGIN * 2,
             SUGGEST_LABEL_HEIGHT,
-            {"Label": "Suggestions...", "NoLabel": True,
+            {"Label": _t("common.suggestions"), "NoLabel": True,
              "FontHeight": _UI["font_small"],
              "TextColor": _UI["text_secondary"],
              "FontSlant": 2,
@@ -8389,7 +8347,7 @@ EDITED VERSION:
 
         # Regen button aligned to the right of the list, with mascot
         regen_props = {
-            "Label": "  Nouvelles suggestions",
+            "Label": _t("common.new_suggestions"),
             "FontHeight": _UI["font_small"],
             "FontWeight": 150,
             "TextColor": _UI["text_secondary"],
@@ -8442,7 +8400,7 @@ EDITED VERSION:
             VERT_MARGIN + 4,
             PROMPT_BTN_WIDTH,
             LABEL_HEIGHT,
-            {"Label": "Ouvrir prompt.txt",
+            {"Label": _t("edit.open_prompt"),
              "FontHeight": _UI["font_small"],
              "Tabstop": True,
              "TextColor": _UI["text_secondary"],
@@ -8470,33 +8428,25 @@ EDITED VERSION:
             value = " ".join((text_value or "").split())
             return value[:limit].rstrip()
 
-        _FALLBACK_PROMPTS = [
-            "Corrige l’orthographe et la grammaire.",
-            "Reformule en style formel et concis.",
-            "Simplifie pour un public non spécialiste.",
-            "Rends le texte plus clair avec des phrases courtes.",
-            "Transforme en style administratif.",
-            "Rends la formulation plus positive et professionnelle.",
-            "Réorganise pour améliorer la logique et la structure.",
-            "Supprime les répétitions et les tournures lourdes.",
-            "Rends le texte plus convaincant sans changer le sens.",
-            "Résume le contenu en gardant l’essentiel.",
-        ]
+        _FALLBACK_PROMPT_KEYS = tuple(
+            "edit.suggest.%d" % position for position in range(1, 11)
+        )
+
+        def _fallback_prompts():
+            return [_t(key) for key in _FALLBACK_PROMPT_KEYS]
 
         def _generate_prompt_suggestions(text_value):
             """Generate contextual suggestions via the LLM, fallback to static list."""
             snippet = _extract_snippet(text_value, limit=1500)
             if not snippet or len(snippet.strip()) < 10:
-                return list(_FALLBACK_PROMPTS)
+                return _fallback_prompts()
             try:
                 system = (
-                    "LANGUE OBLIGATOIRE : français. Tu ne dois JAMAIS répondre en anglais "
-                    "ni dans aucune autre langue que le français.\n"
                     "Tu es un assistant qui propose des instructions d’édition de texte. "
                     "Réponds UNIQUEMENT avec une liste numérotée de 8 instructions courtes "
-                    "en français (une par ligne, format: ‘1. instruction’). "
+                    "(une par ligne, format: ‘1. instruction’). "
                     "Chaque instruction doit être une consigne d’édition concrète et directe "
-                    "(verbe à l’impératif en français). "
+                    "(verbe à l’impératif). "
                     "Adapte les suggestions au contenu, au style et au domaine du texte. "
                     "Ne répète pas le texte. Pas de commentaire. Pas d’explication."
                 )
@@ -8508,13 +8458,14 @@ EDITED VERSION:
                     f"1. Corrige les fautes d’orthographe et de grammaire.\n"
                     f"2. Reformule en style plus concis.\n"
                     f"3. Simplifie le vocabulaire technique.\n\n"
-                    f"Tes 8 instructions en français :"
+                    f"Tes 8 instructions :"
                 )
                 api_type = str(self.get_config("api_type", "completions")).lower()
                 # Use non-streaming HTTP call — this runs in a background thread
                 # and stream_request must NOT be called from background threads
                 # (processEventsToIdle crashes LibreOffice).
-                request = self.make_api_request(prompt, system, max_tokens=600, api_type=api_type)
+                request = self.make_api_request(prompt, system, max_tokens=600, api_type=api_type,
+                                                answer_in_ui_language=True)
                 # Override stream=false for a synchronous call
                 req_data = json.loads(request.data.decode("utf-8"))
                 req_data["stream"] = False
@@ -8534,7 +8485,7 @@ EDITED VERSION:
                     raw = ""
                 raw = raw.strip()
                 if not raw:
-                    return list(_FALLBACK_PROMPTS)
+                    return _fallback_prompts()
                 # Strip chain-of-thought blocks (<think>…</think>)
                 raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).lstrip("\n")
                 # Parse numbered lines only: "1. ...", "2. ...", etc.
@@ -8554,10 +8505,10 @@ EDITED VERSION:
                     log_to_file(f"AI suggestions generated: {len(lines)} items")
                     return lines[:10]
                 log_to_file(f"AI suggestions too few ({len(lines)}), using fallback")
-                return list(_FALLBACK_PROMPTS)
+                return _fallback_prompts()
             except Exception as e:
                 log_to_file(f"AI suggestion generation failed: {str(e)}")
-                return list(_FALLBACK_PROMPTS)
+                return _fallback_prompts()
 
         # Loading animation state
         _loading_anim = {"active": False, "thread": None}
@@ -8566,10 +8517,10 @@ EDITED VERSION:
             """Animate the suggestions label while LLM generates."""
             _loading_anim["active"] = True
             frames = [
-                "Mirai prépare des suggestions",
-                "Mirai prépare des suggestions .",
-                "Mirai prépare des suggestions . .",
-                "Mirai prépare des suggestions . . .",
+                _t("edit.prepare_suggestions", dots=""),
+                _t("edit.prepare_suggestions", dots=" ."),
+                _t("edit.prepare_suggestions", dots=" . ."),
+                _t("edit.prepare_suggestions", dots=" . . ."),
             ]
             def _animate():
                 idx = 0
@@ -8584,7 +8535,7 @@ EDITED VERSION:
                 # Restore default label when done
                 try:
                     if label_suggestions_control:
-                        label_suggestions_control.getModel().Label = "Suggestions"
+                        label_suggestions_control.getModel().Label = _t("edit.suggestions_plain")
                 except Exception:
                     pass
             t = threading.Thread(target=_animate, daemon=True)
@@ -8607,7 +8558,7 @@ EDITED VERSION:
                 _start_loading_animation()
                 if suggestions_list:
                     try:
-                        suggestions_list.addItems(("Génération en cours...",), 0)
+                        suggestions_list.addItems((_t("edit.generating"),), 0)
                     except Exception:
                         pass
                 text_value = ""
@@ -8635,7 +8586,7 @@ EDITED VERSION:
                 suggestions = _generate_prompt_suggestions(text_value)
                 _stop_loading_animation()
             else:
-                suggestions = list(_FALLBACK_PROMPTS)
+                suggestions = _fallback_prompts()
             if suggestions_list:
                 try:
                     suggestions_list.removeItems(0, suggestions_list.getItemCount())
@@ -8807,20 +8758,14 @@ EDITED VERSION:
         except Exception:
             pass
 
-    _FALLBACK_CALC_TRANSFORM_PROMPTS = [
-        "Traduire en anglais",
-        "Mettre la première lettre en majuscule",
-        "Résumer en une phrase courte",
-        "Extraire les mots-clés (séparés par des virgules)",
-        "Classifier comme Positif / Négatif / Neutre",
-        "Corriger l'orthographe et la grammaire",
-        "Normaliser le format (ex: prénom nom → PRÉNOM NOM)",
-        "Extraire le premier nombre trouvé",
-        "Détecter la langue (ex: FR / EN / DE)",
-        "Reformuler de façon plus formelle",
-    ]
+    _FALLBACK_CALC_TRANSFORM_PROMPT_KEYS = tuple(
+        "calc.suggest.%d" % position for position in range(1, 11)
+    )
 
-    def _show_calc_input_dialog(self, context_label="", title="MIrAI — Transformer les cellules", ok_label="Transformer", cell_content="") -> str:
+    def _fallback_calc_prompts(self):
+        return [_t(key) for key in self._FALLBACK_CALC_TRANSFORM_PROMPT_KEYS]
+
+    def _show_calc_input_dialog(self, context_label="", title="", ok_label="", cell_content="") -> str:
         """DSFR-styled modal input dialog for Calc actions.
 
         Mirrors the visual structure of _show_edit_selection_dialog:
@@ -8829,6 +8774,8 @@ EDITED VERSION:
 
         Returns the instruction string entered by the user, or "" on cancel.
         """
+        title = title or _t("calc.title")
+        ok_label = ok_label or _t("calc.ok_button")
         WIDTH = 740
         HORI_MARGIN = 14
         VERT_MARGIN = 12
@@ -8906,7 +8853,7 @@ EDITED VERSION:
 
         # Section header
         add("label_title", "FixedText", HORI_MARGIN, VERT_MARGIN, label_max_width, LABEL_HEIGHT, {
-            "Label": ok_label + " les cellules", "NoLabel": True,
+            "Label": ok_label + _t("calc.title_suffix"), "NoLabel": True,
             "FontHeight": _UI["font_section"],
             "TextColor": _UI["primary"],
             "FontWeight": 150,
@@ -8998,7 +8945,7 @@ EDITED VERSION:
             HORI_MARGIN, suggest_y - VERT_SEP // 2, WIDTH - HORI_MARGIN * 2, 6, {})
         add("label_suggestions", "FixedText",
             HORI_MARGIN, suggest_y + 12, WIDTH - HORI_MARGIN * 2, SUGGEST_LABEL_HEIGHT, {
-            "Label": "Suggestions...", "NoLabel": True,
+            "Label": _t("common.suggestions"), "NoLabel": True,
             "FontHeight": _UI["font_small"],
             "TextColor": _UI["text_secondary"],
             "FontSlant": 2,
@@ -9018,7 +8965,7 @@ EDITED VERSION:
         def _generate_calc_suggestions(content):
             """Generate contextual Calc transform suggestions via LLM, fallback to static list."""
             if not content or len(content.strip()) < 3:
-                return list(self._FALLBACK_CALC_TRANSFORM_PROMPTS)
+                return self._fallback_calc_prompts()
             try:
                 system = (
                     "Tu es un assistant de transformation de données pour un tableur. "
@@ -9034,14 +8981,15 @@ EDITED VERSION:
                     "Propose 8 transformations pertinentes pour ces données."
                 )
                 api_type = str(self.get_config("api_type", "completions")).lower()
-                request = self.make_api_request(prompt, system, max_tokens=400, api_type=api_type)
+                request = self.make_api_request(prompt, system, max_tokens=400, api_type=api_type,
+                                                answer_in_ui_language=True)
                 accumulated = []
                 def _collect(chunk):
                     accumulated.append(chunk)
                 self.stream_request(request, api_type, _collect)
                 raw = "".join(accumulated).strip()
                 if not raw:
-                    return list(self._FALLBACK_CALC_TRANSFORM_PROMPTS)
+                    return self._fallback_calc_prompts()
                 lines = []
                 for line in raw.split("\n"):
                     line = line.strip()
@@ -9052,9 +9000,9 @@ EDITED VERSION:
                         lines.append(cleaned)
                 if len(lines) >= 3:
                     return lines[:10]
-                return list(self._FALLBACK_CALC_TRANSFORM_PROMPTS)
+                return self._fallback_calc_prompts()
             except Exception:
-                return list(self._FALLBACK_CALC_TRANSFORM_PROMPTS)
+                return self._fallback_calc_prompts()
 
         def _set_suggestions_ui(suggestions):
             if not suggestions_list:
@@ -9079,12 +9027,12 @@ EDITED VERSION:
             return None
 
         cached = _load_cached_suggestions()
-        _set_suggestions_ui(cached if cached else list(self._FALLBACK_CALC_TRANSFORM_PROMPTS))
+        _set_suggestions_ui(cached if cached else self._fallback_calc_prompts())
 
         def _bg_ai_suggestions():
             try:
                 suggestions = _generate_calc_suggestions(cell_content)
-                if suggestions and suggestions != list(self._FALLBACK_CALC_TRANSFORM_PROMPTS):
+                if suggestions and suggestions != self._fallback_calc_prompts():
                     try:
                         self.set_config("calc_transform_suggestions_cache", suggestions)
                     except Exception:
@@ -9095,7 +9043,7 @@ EDITED VERSION:
         threading.Thread(target=_bg_ai_suggestions, daemon=True).start()
 
         regen_props = {
-            "Label": "  Nouvelles suggestions",
+            "Label": _t("common.new_suggestions"),
             "FontHeight": _UI["font_small"],
             "FontWeight": 150,
             "TextColor": _UI["text_secondary"],
@@ -9250,7 +9198,7 @@ EDITED VERSION:
         on_generate=None,
         on_apply=None,
         schema_builder=None,
-        title: str = "MIrAI — Assistant Formule",
+        title: str = "",
     ) -> None:
         """Non-modal multi-turn formula assistant dialog with preview.
 
@@ -9274,6 +9222,7 @@ EDITED VERSION:
         """
         if history_lines is None:
             history_lines = []
+        title = title or _t("formula.title")
 
         WIDTH = 700
         HORI_MARGIN = 14
@@ -9340,7 +9289,7 @@ EDITED VERSION:
         y = VERT_MARGIN
 
         _add("lbl_header", "FixedText", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": "🤖 MIrAI — Assistant Formule",
+            "Label": _t("formula.header"),
             "FontHeight": _UI["font_section"],
             "FontWeight": BOLD,
             "TextColor": _UI["text_on_dark"],
@@ -9349,7 +9298,7 @@ EDITED VERSION:
         y += LABEL_HEIGHT + VERT_SEP
 
         _add("lbl_input", "FixedText", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": "Votre demande :",
+            "Label": _t("formula.request_label"),
             "FontHeight": _UI["font_label"],
             "FontWeight": BOLD,
             "TextColor": _UI["text"],
@@ -9371,7 +9320,7 @@ EDITED VERSION:
         btn_x_send = btn_x_apply - BUTTON_WIDTH - 8
 
         _add("btn_send", "Button", btn_x_send, y, BUTTON_WIDTH, BUTTON_HEIGHT, {
-            "Label": "⚡ Prévisualiser",
+            "Label": _t("formula.preview"),
             "PushButtonType": 0,
             "DefaultButton": True,
             "FontHeight": _UI["font_label"],
@@ -9379,7 +9328,7 @@ EDITED VERSION:
             "TextColor": _UI["btn_primary_fg"],
         })
         _add("btn_apply", "Button", btn_x_apply, y, APPLY_WIDTH, BUTTON_HEIGHT, {
-            "Label": "✓ Appliquer",
+            "Label": _t("formula.apply"),
             "PushButtonType": 0,
             "FontHeight": _UI["font_label"],
             "BackgroundColor": _UI["success"],
@@ -9388,7 +9337,7 @@ EDITED VERSION:
         y += BUTTON_HEIGHT + VERT_SEP
 
         _add("txt_detail", "Edit", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, DETAIL_HEIGHT, {
-            "Text": "La formule et son explication apparaîtront ici après la prévisualisation.",
+            "Text": _t("formula.detail_placeholder"),
             "MultiLine": True,
             "ReadOnly": True,
             "VScroll": True,
@@ -9401,7 +9350,7 @@ EDITED VERSION:
         y += DETAIL_HEIGHT + VERT_SEP
 
         _add("lbl_ctx", "FixedText", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, CONTEXT_HEIGHT, {
-            "Label": schema_context or "Aucun contexte disponible",
+            "Label": schema_context or _t("formula.no_context"),
             "FontHeight": _UI["font_small"],
             "TextColor": _UI["text_secondary"],
             "BackgroundColor": _UI["bg_section"],
@@ -9411,20 +9360,20 @@ EDITED VERSION:
 
         lbl_hist_w = WIDTH - HORI_MARGIN * 2 - 90 - 8 - 120 - 8
         _add("lbl_hist", "FixedText", HORI_MARGIN, y, lbl_hist_w, LABEL_HEIGHT, {
-            "Label": "Conversation :",
+            "Label": _t("formula.conversation"),
             "FontHeight": _UI["font_label"],
             "FontWeight": BOLD,
             "TextColor": _UI["text"],
         })
         btn_clear_x = HORI_MARGIN + lbl_hist_w + 8
         _add("btn_clear", "Button", btn_clear_x, y, 90, LABEL_HEIGHT, {
-            "Label": "Vider…",
+            "Label": _t("formula.clear"),
             "PushButtonType": 0,
             "FontHeight": _UI["font_small"],
         })
         btn_open_x = btn_clear_x + 90 + 8
         _add("btn_open_prompts", "Button", btn_open_x, y, 120, LABEL_HEIGHT, {
-            "Label": "Ouvrir prompts…",
+            "Label": _t("formula.open_prompts"),
             "PushButtonType": 0,
             "FontHeight": _UI["font_small"],
         })
@@ -9462,14 +9411,14 @@ EDITED VERSION:
                         btn = dlg.getControl("btn_send")
                         lbl = dlg.getControl("lbl_input")
                         if busy:
-                            btn.getModel().Label = "⏳ Mirai réfléchit..."
+                            btn.getModel().Label = _t("formula.thinking")
                             btn.setEnable(False)
-                            lbl.getModel().Label = label or "Mirai génère la formule..."
+                            lbl.getModel().Label = label or _t("formula.generating")
                             lbl.getModel().TextColor = _UI["primary"]
                         else:
-                            btn.getModel().Label = "⚡ Prévisualiser"
+                            btn.getModel().Label = _t("formula.preview")
                             btn.setEnable(True)
-                            lbl.getModel().Label = "Votre demande :"
+                            lbl.getModel().Label = _t("formula.request_label")
                             lbl.getModel().TextColor = _UI["text"]
                     except Exception:
                         pass
@@ -9483,7 +9432,7 @@ EDITED VERSION:
                     if on_apply_fn is None:
                         return
                     try:
-                        _set_busy(True, "Application de la formule...")
+                        _set_busy(True, _t("formula.applying"))
                         result_lines = on_apply_fn()
                         state["history_lines"].extend(result_lines or [])
                         dlg.getControl("lst_history").getModel().StringItemList = tuple(state["history_lines"])
@@ -9534,7 +9483,7 @@ EDITED VERSION:
                     mb = _cr("com.sun.star.awt.Toolkit")
                     frame2 = _cr("com.sun.star.frame.Desktop").getCurrentFrame()
                     win2 = frame2.getContainerWindow() if frame2 else None
-                    mbox = mb.createMessageBox(win2, 3, 3, "Confirmer", "Vider l'historique des demandes ?")
+                    mbox = mb.createMessageBox(win2, 3, 3, _t("common.confirm"), _t("formula.clear_history_question"))
                     if mbox.execute() == 2:  # YES = 2
                         try:
                             _hist = _job._prompts_calc_path()
@@ -9733,7 +9682,7 @@ EDITED VERSION:
         except Exception:
             pass
         dialog.setVisible(False)
-        dialog.setTitle(title or "MIrAI — Paramètres")
+        dialog.setTitle(title or _t("app.title"))
 
         def _mask_value(value):
             try:
@@ -9805,7 +9754,7 @@ EDITED VERSION:
             try:
                 label_model = wait_model.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
                 wait_model.insertByName("wait_label", label_model)
-                label_model.Label = "Contacte MIrAI..."
+                label_model.Label = _t("settings.connecting")
                 label_model.NoLabel = True
                 try:
                     label_model.FontHeight = _UI["font_label"]
@@ -9835,7 +9784,7 @@ EDITED VERSION:
             for i in range(steps):
                 try:
                     dots = "." * ((i % 3) + 1)
-                    label.getModel().Label = f"Contacte MIrAI{dots}"
+                    label.getModel().Label = f'{_t("settings.connecting_base")}{dots}'
                     pump_events(toolkit)
                 except Exception:
                     pass
@@ -9862,9 +9811,9 @@ EDITED VERSION:
                 pass
 
         field_specs = [
-            {"name": "endpoint", "label": "OWUI Endpoint:", "value": endpoint_value, "type": "text"},
-            {"name": "api_key", "label": "Token OWUI:", "value": api_key_value, "type": "password"},
-            {"name": "model", "label": "Model:", "value": current_model, "type": "list", "items": models},
+            {"name": "endpoint", "label": _t("settings.endpoint_label"), "value": endpoint_value, "type": "text"},
+            {"name": "api_key", "label": _t("settings.api_key_label"), "value": api_key_value, "type": "password"},
+            {"name": "model", "label": _t("settings.model_label"), "value": current_model, "type": "list", "items": models},
         ]
 
         num_fields = len(field_specs)
@@ -9945,7 +9894,7 @@ EDITED VERSION:
                 # Section header: Connexion
                 add("section_connexion", "FixedText", HORI_MARGIN, current_y,
                     WIDTH - HORI_MARGIN * 2 - 90, LABEL_HEIGHT, {
-                        "Label": "Connexion", "NoLabel": True,
+                        "Label": _t("settings.section_connection"), "NoLabel": True,
                         "FontHeight": _UI["font_section"],
                         "TextColor": _UI["primary"],
                         "FontWeight": 150,
@@ -9955,7 +9904,7 @@ EDITED VERSION:
                 proxy_btn_x = WIDTH - HORI_MARGIN - proxy_btn_width
                 add("btn_proxy", "Button", proxy_btn_x, current_y - 2,
                     proxy_btn_width, proxy_btn_height, {
-                        "Label": "Proxy",
+                        "Label": _t("settings.proxy_button"),
                         "Name": "proxy_settings",
                         "Tabstop": True,
                         "Enabled": True,
@@ -9979,7 +9928,7 @@ EDITED VERSION:
             })
             if field.get("name") == "api_key":
                 add("toggle_api_key", "Button", HORI_MARGIN + label_width + HORI_SEP, current_y, 90, BUTTON_HEIGHT, {
-                    "Label": "Révéler", "NoLabel": True,
+                    "Label": _t("settings.show"), "NoLabel": True,
                     "FontHeight": _UI["font_small"],
                 })
             current_y += (BUTTON_HEIGHT if field.get("name") == "api_key" else LABEL_HEIGHT) + VERT_SEP
@@ -10015,12 +9964,12 @@ EDITED VERSION:
             current_y += EDIT_HEIGHT + VERT_SEP * 2
             if field.get("name") == "api_key":
                 add("btn_test_token", "Button", HORI_MARGIN, current_y - VERT_SEP, 150, BUTTON_HEIGHT, {
-                    "Label": "♻️ Rafraîchir le token", "Name": "test_token", "NoLabel": True,
+                    "Label": _t("settings.refresh_token"), "Name": "test_token", "NoLabel": True,
                     "FontHeight": _UI["font_small"],
                 })
                 current_y += TEST_ROW_HEIGHT
 
-        description_label = "Description du modèle :"
+        description_label = _t("settings.model_desc_label")
         add("label_model_desc", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
             "Label": description_label, "NoLabel": True,
             "FontHeight": _UI["font_label"],
@@ -10048,12 +9997,12 @@ EDITED VERSION:
 
         def _status_style(anon_ok, auth_ok, email_value):
             if auth_ok:
-                return ("Connecté", _UI["status_ok"])
+                return (_t("settings.status_connected"), _UI["status_ok"])
             if anon_ok and not auth_ok:
-                return ("Anonyme OK", _UI["status_warn"])
+                return (_t("settings.status_anonymous"), _UI["status_warn"])
             if not anon_ok and not auth_ok and email_value is None:
-                return ("Non testé", _UI["status_neutral"])
-            return ("Non accessible", _UI["status_fail"])
+                return (_t("settings.status_untested"), _UI["status_neutral"])
+            return (_t("settings.status_unreachable"), _UI["status_fail"])
 
         status_label, status_color = _status_style(anon_ok, auth_ok, email)
         status_text = f"{status_label}" + (f" ({email})" if email else "")
@@ -10061,7 +10010,7 @@ EDITED VERSION:
         # Status section header
         add("section_status", "FixedText", HORI_MARGIN, current_y,
             WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-                "Label": "État de la connexion", "NoLabel": True,
+                "Label": _t("settings.section_status"), "NoLabel": True,
                 "FontHeight": _UI["font_section"],
                 "TextColor": _UI["primary"],
                 "FontWeight": 150,
@@ -10089,13 +10038,13 @@ EDITED VERSION:
         reload_width = 210
         add("btn_keycloak", "Button", HORI_MARGIN, current_y,
             keycloak_width, BUTTON_HEIGHT, {
-                "Label": "🔐 Login SSO", "Name": "keycloak_login",
+                "Label": _t("settings.sso_login"), "Name": "keycloak_login",
                 "Tabstop": True, "Enabled": True, "NoLabel": True,
                 "FontHeight": _UI["font_small"],
             })
         add("btn_reload_config", "Button", HORI_MARGIN + keycloak_width + HORI_SEP,
             current_y, reload_width, BUTTON_HEIGHT, {
-                "Label": "🔄 Recharger la configuration", "Name": "reload_config",
+                "Label": _t("settings.reload_config"), "Name": "reload_config",
                 "Tabstop": True, "Enabled": True, "NoLabel": True,
                 "FontHeight": _UI["font_small"],
             })
@@ -10105,12 +10054,12 @@ EDITED VERSION:
         ok_cancel_width = BUTTON_WIDTH
         add("btn_ok", "Button", WIDTH - HORI_MARGIN - ok_cancel_width * 2 - HORI_SEP, current_y,
             ok_cancel_width, BUTTON_HEIGHT, {
-                "PushButtonType": OK, "DefaultButton": True, "Label": "Enregistrer",
+                "PushButtonType": OK, "DefaultButton": True, "Label": _t("common.save"),
                 "FontHeight": _UI["font_label"],
             })
         add("btn_cancel", "Button", WIDTH - HORI_MARGIN - ok_cancel_width, current_y,
             ok_cancel_width, BUTTON_HEIGHT, {
-                "PushButtonType": CANCEL, "Label": "Annuler",
+                "PushButtonType": CANCEL, "Label": _t("common.cancel"),
                 "FontHeight": _UI["font_label"],
             })
         dialog.setPosSize(0, 0, WIDTH, current_y + BUTTON_HEIGHT + 16, SIZE)
@@ -10188,30 +10137,25 @@ EDITED VERSION:
             conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val, True)
             if not conn_ok:
                 proxy_cfg = self._get_proxy_config()
-                err = conn_detail.get("error", "inconnue")
+                err = conn_detail.get("error", _t("settings.token_error_unknown"))
                 url = conn_detail.get("url", endpoint_val)
                 if proxy_cfg.get("enabled"):
                     self._show_message(
-                        "API",
-                        "Endpoint OWUI injoignable via le proxy.\n\n"
-                        f"URL testée: {url}\n"
-                        f"Détail: {err}\n\n"
-                        "Vérifiez le proxy (bouton Proxy > Tester connexion)."
+                        _t("settings.models_failed_title"),
+                        _t("settings.token_error_proxy", url=url, detail=err)
                     )
                 else:
                     self._show_message(
-                        "API",
-                        "Endpoint OWUI injoignable.\n\n"
-                        f"URL testée: {url}\n"
-                        f"Détail: {err}"
+                        _t("settings.models_failed_title"),
+                        _t("settings.token_error_unreachable", url=url, detail=err)
                     )
                 log_to_file(f"Token test: connectivity failed url={url} err={err}")
                 return
             anon_ok, auth_ok = _update_api_status_label(endpoint_val, effective_api_key)
             if not auth_ok:
                 self._show_message(
-                    "API",
-                    "Token invalide, absent, ou refusé."
+                    _t("settings.models_failed_title"),
+                    _t("settings.token_invalid")
                 )
                 log_to_file("Token test: auth failed")
                 return
@@ -10226,8 +10170,8 @@ EDITED VERSION:
             models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, True, include_info=True)
             if not models:
                 self._show_message(
-                    "API",
-                    "Aucun modèle disponible (vérifiez l'endpoint et le token)."
+                    _t("settings.models_failed_title"),
+                    _t("settings.no_models")
                 )
                 log_to_file("Token test: models empty")
                 return
@@ -10252,7 +10196,7 @@ EDITED VERSION:
                 self.set_config("llm_default_models", selected)
             except Exception:
                 pass
-            desc = model_descriptions.get(selected) or f"ID: {selected}"
+            desc = model_descriptions.get(selected) or _t("settings.id_prefix", value=selected)
             try:
                 model_desc_control.getModel().Text = desc
             except Exception:
@@ -10295,7 +10239,7 @@ EDITED VERSION:
                     except Exception:
                         pass
                     try:
-                        self.toggle_control.getModel().Label = "Révéler" if self.api_key_masked else "Masquer"
+                        self.toggle_control.getModel().Label = _t("settings.show") if self.api_key_masked else _t("settings.hide")
                     except Exception:
                         pass
                     return
@@ -10332,7 +10276,7 @@ EDITED VERSION:
                     _test_token_and_refresh()
                 elif command == "proxy_settings":
                     try:
-                        self.outer.proxy_settings_box("Proxy")
+                        self.outer.proxy_settings_box()
                     except Exception:
                         pass
 
@@ -10359,7 +10303,7 @@ EDITED VERSION:
 
                     label_model = dialog_model.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
                     dialog_model.insertByName("reload_label", label_model)
-                    label_model.Label = "Connexion à Mirai..."
+                    label_model.Label = _t("settings.reload_title")
                     label_model.NoLabel = True
                     try:
                         label_model.FontHeight = _UI["font_label"]
@@ -10371,7 +10315,7 @@ EDITED VERSION:
 
                     btn_model = dialog_model.createInstance("com.sun.star.awt.UnoControlButtonModel")
                     dialog_model.insertByName("reload_cancel", btn_model)
-                    btn_model.Label = "Annuler"
+                    btn_model.Label = _t("common.cancel")
                     try:
                         btn_model.FontHeight = _UI["font_small"]
                     except Exception:
@@ -10425,7 +10369,7 @@ EDITED VERSION:
                     dots_i += 1
                     dots = "." * ((dots_i % 3) + 1)
                     if label:
-                        label.getModel().Label = f"Connexion à Mirai{dots}"
+                        label.getModel().Label = f'{_t("settings.reload_title_base")}{dots}'
                     if toolkit:
                         pump_events(toolkit)
                 except Exception:
@@ -10446,8 +10390,8 @@ EDITED VERSION:
             settings = result_holder.get("settings")
             if not settings:
                 self._show_message(
-                    "Configuration",
-                    "Impossible de recharger la configuration."
+                    _t("settings.reload_dialog_title"),
+                    _t("settings.reload_failed")
                 )
                 return
             try:
@@ -10457,8 +10401,8 @@ EDITED VERSION:
                 models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, True, include_info=True)
                 if not models:
                     self._show_message(
-                        "API",
-                        "Erreur lors de la récupération des modèles (vérifiez l'endpoint et le token)."
+                        _t("settings.models_failed_title"),
+                        _t("settings.models_failed")
                     )
                 if field_controls.get("endpoint"):
                     field_controls["endpoint"].getModel().Text = endpoint_val
@@ -10482,7 +10426,7 @@ EDITED VERSION:
                             pass
                 desc = model_descriptions_local.get(model_val) if models else model_descriptions.get(model_val)
                 if not desc:
-                    desc = f"ID: {model_val}" if model_val else "Aucune description disponible"
+                    desc = _t("settings.id_prefix", value=model_val) if model_val else _t("settings.no_description")
                 model_desc_control.getModel().Text = desc
             except Exception:
                 pass
@@ -10566,7 +10510,7 @@ EDITED VERSION:
                     selected = current_model
                 desc = model_descriptions.get(selected)
                 if not desc:
-                    desc = f"ID: {selected}"
+                    desc = _t("settings.id_prefix", value=selected)
                 model_desc_control.getModel().Text = desc
             except Exception:
                 pass
@@ -10586,10 +10530,10 @@ EDITED VERSION:
                             self.outer.set_config("llm_default_models", value)
                             desc = self.descriptions.get(value)
                             if not desc:
-                                desc = f"ID: {value}"
+                                desc = _t("settings.id_prefix", value=value)
                             self.desc_control.getModel().Text = desc
                         else:
-                            self.desc_control.getModel().Text = "Aucune description disponible"
+                            self.desc_control.getModel().Text = _t("settings.no_description")
                     except Exception:
                         pass
 
@@ -10745,8 +10689,8 @@ EDITED VERSION:
             # Une action de coquille qui échoue doit se voir.
             log_to_file(f"[dispatch] action {action} en échec : {exc}")
             self._show_message(
-                "Action impossible",
-                f"« {action} » n'a pas pu s'exécuter.\n\n{exc}")
+                _t("msg.action_failed_title"),
+                _t("msg.action_failed_body", action=action, exc=exc))
         return True
 
     def _open_url_config(self, key):
@@ -10831,9 +10775,8 @@ EDITED VERSION:
                     f"(document={type(model).__name__}, src={source})")
         self._report_unhandled_action(action, model)
         self._show_message(
-            "Action indisponible",
-            f"L'action « {action} » n'est pas disponible ici.\n\n"
-            "Ouvrez un document Writer ou Calc, puis réessayez.")
+            _t("msg.action_unavailable_title"),
+            _t("msg.action_unavailable_body", action=action))
 
 # pythonloader loads a static g_ImplementationHelper variable
 log_to_file("=== Loading mirai extension module ===")

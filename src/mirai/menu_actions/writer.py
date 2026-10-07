@@ -110,7 +110,8 @@ def _extend_selection(job, text, selection, text_range, controller=None, model=N
         directive = (
             "Continue DIRECTEMENT le texte fourni par l'utilisateur. "
             "Écris uniquement la suite naturelle, sans question, sans reformulation, "
-            "sans introduction."
+            "sans introduction. "
+            "Écris dans la même langue que le texte fourni."
         )
         system_prompt = (directive + " " + configured_sp) if configured_sp else directive
 

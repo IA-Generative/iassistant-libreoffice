@@ -11,6 +11,8 @@ contenu à reporter dans la zone de saisie. Il est **pur** — aucun objet UNO �
 donc testable sans LibreOffice.
 """
 
+from ..i18n import t as _t
+
 # Préfixes posés par le rendu des suggestions et de l'analyse. Ils servent à
 # l'œil, pas à la demande : les reporter tels quels dans la saisie donnerait
 # « 1. ▸ Résumer la sélection » au lieu de « Résumer la sélection ».
@@ -18,7 +20,8 @@ _PREFIXES = ("▸ ", "· ", "- ", "• ")
 
 # Le fil de conversation préfixe chaque tour. On ne renvoie que le PROPOS, pas
 # l'étiquette de son auteur.
-_SPEAKERS = ("Vous : ", "MIrAI : ")
+def _speakers():
+    return (_t("palette.user_prefix"), _t("palette.assistant_prefix"))
 
 
 def line_at(text, offset):
@@ -45,12 +48,13 @@ def clean(line):
         if line.startswith(prefixe):
             line = line[len(prefixe):].strip()
             break
-    for locuteur in _SPEAKERS:
+    for locuteur in _speakers():
         if line.startswith(locuteur):
             line = line[len(locuteur):].strip()
             break
-    # Un intitulé de section se termine par « : » et n'est pas une demande.
-    if line.endswith(":"):
+    # Un intitulé de section se termine par « : » (« ： » en chinois) et n'est
+    # pas une demande.
+    if line.endswith((":", "：")):
         return ""
     return line
 

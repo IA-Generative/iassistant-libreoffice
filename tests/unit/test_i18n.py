@@ -1,0 +1,549 @@
+"""Le catalogue de traduction est complet, coherent et effectivement branche.
+
+L'extension parle cinq langues (fr source, en, es, pt, zh) sans dependance
+externe : `src/mirai/i18n.py` porte le catalogue et la resolution de langue.
+Ces tests verrouillent les quatre proprietes dont depend l'IHM :
+
+1. aucune cle n'est partiellement traduite (parite des cinq locales) ;
+2. l'extension parle la langue de LibreOffice, et l'anglais quand elle ne la
+   propose pas ;
+3. toute cle referencee par un appel `_t(...)` existe vraiment, et les cles a
+   placeholders s'interpolent sans laisser d'accolade visible ;
+4. les libelles statiques d'`oxt/Addons.xcu` correspondent au catalogue.
+"""
+
+import json
+import os
+import re
+import xml.etree.ElementTree as ET
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.mirai import i18n
+from tests.stubs.uno_stubs import install, make_job
+
+install()
+
+from src.mirai import entrypoint
+from src.mirai.core import doc_analysis, presets, prompts
+from src.mirai.core.context import ToolContext
+from src.mirai.menu_actions import calc
+from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
+from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+_LOCALE_DEPENDENT_FILES = (
+    "src/mirai/entrypoint.py",
+    "src/mirai/menu_actions/calc.py",
+    "src/mirai/core/presets.py",
+    "src/mirai/core/suggestions.py",
+    "src/mirai/core/selection_info.py",
+    "src/mirai/core/progress.py",
+    "src/mirai/core/orchestrator.py",
+    "src/mirai/core/doc_analysis.py",
+    "src/mirai/core/entry.py",
+    "src/mirai/core/capabilities.py",
+    "src/mirai/core/clickable.py",
+    "src/mirai/ui/palette.py",
+)
+
+_ADDON_KEYS = (
+    "addon.menubar",
+    "addon.open_assistant",
+    "addon.settings",
+    "addon.test_model",
+    "addon.documentation",
+    "addon.about",
+    "addon.toolbar",
+)
+
+# (cle, kwargs) — chaque couple doit s'interpoler dans les cinq locales.
+_PLACEHOLDER_CASES = (
+    ("common.error", {"detail": "boom"}),
+    ("proxy.test_failed", {"detail": "boom"}),
+    ("settings.id_prefix", {"value": "42"}),
+    ("settings.token_error_proxy", {"detail": "boom", "url": "http://p"}),
+    ("settings.token_error_unreachable", {"detail": "boom", "url": "http://p"}),
+    ("about.version", {"version": "1.2.3"}),
+    ("about.update_available", {"target": "0.0.2"}),
+    ("about.downloading", {"target": "0.0.2"}),
+    ("about.installed_restart", {"target": "0.0.2"}),
+    ("about.download_failed", {"target": "0.0.2"}),
+    ("about.uptodate", {"current": "0.0.1"}),
+    ("update.prompt", {"version": "0.0.2"}),
+    ("update.prompt_critical", {"version": "0.0.2"}),
+    ("update.blocked_body", {"oxt": "/tmp/mirai_update.oxt", "version": "0.0.2"}),
+    ("resize.ok_format", {"delta": 3, "new_word_count": 120, "sign": "+"}),
+    ("edit.selection_prefix", {"snippet": "texte", "warning": ""}),
+    ("edit.prepare_suggestions", {"dots": "..."}),
+    ("calc.out_new_col", {"letter": "D", "name": "Resultat"}),
+    ("calc.out_col", {"letter": "D"}),
+    ("calc.out_col_header", {"header": "Resultat"}),
+    ("calc.selection_one", {"n": 1, "ref": "A1:A1"}),
+    ("calc.selection_many", {"n": 20, "ref": "A1:D5"}),
+    ("calc.formula.detail", {"formula": "=1+1"}),
+    ("calc.formula.detail_explained", {"explanation": "somme", "formula": "=1+1"}),
+    ("calc.formula.applied", {"formula": "=1+1"}),
+    ("calc.formula.filled_down", {"count": 5}),
+    ("calc.formula.error_line", {"err": "#ERREUR: x"}),
+    ("enroll.auth_waiting", {"dots": "..."}),
+    ("enroll.auth_progress", {"dots": "..."}),
+    ("enroll.enrolling_progress", {"dots": "..."}),
+    ("enroll.error_config_text", {"error": "boom"}),
+    ("enroll.failed_text", {"reason": "boom"}),
+    ("msg.kc_expired_body", {"redirect_uri": "http://localhost:28443/callback"}),
+    ("msg.quota_body", {"delay": "30 secondes"}),
+    ("msg.delay_seconds", {"seconds": 30}),
+    ("msg.action_failed_body", {"action": "OuvrirAssistant", "exc": "boom"}),
+    ("msg.action_unavailable_body", {"action": "OuvrirAssistant"}),
+    ("preset.resized", {"target": 7}),
+    ("preset.done_transform", {"count": 3, "col": "D"}),
+    ("sel.writer_selection", {"excerpt": "abc"}),
+    ("sel.calc_range", {"count": 5, "first": "A4", "last": "A8"}),
+    ("palette.header", {"app": "Writer"}),
+    ("palette.refuse_app", {"app": "Writer"}),
+    ("palette.mode_tools", {"mode": "json"}),
+    ("palette.capabilities", {"tools": "lecture"}),
+    ("palette.journal_prepare", {"label": "Résumer"}),
+    ("palette.journal_selection_start", {"chars": 12}),
+    ("palette.journal_selection_done", {"how": "remplacée"}),
+    ("palette.selection_summary", {"how": "remplacée"}),
+    ("palette.journal_read", {"count": 13}),
+    ("palette.journal_heading_kept", {"heading": "Titre"}),
+    ("palette.journal_rewrite_start", {"first": 1, "last": 3}),
+    ("palette.journal_written", {"before": 3, "after": 3}),
+    ("palette.document_summary", {"how": "réécrit", "before": 3, "after": 3, "kept": ""}),
+    ("palette.err_generic", {"text": "HTTP 500"}),
+    ("run.err_generic", {"code": "http_500"}),
+    ("entry.test_failed", {"detail": "erreur"}),
+    ("entry.model_line", {"model": "mistral"}),
+    ("entry.detail", {"detail": "probe"}),
+)
+
+
+def _read(relative_path):
+    with open(os.path.join(_REPO_ROOT, relative_path), encoding="utf-8") as handle:
+        return handle.read()
+
+
+# ---------------------------------------------------------------------------
+# Catalogue
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_every_key_covers_every_supported_locale():
+    incomplete = {
+        key: sorted(set(i18n.SUPPORTED) - set(entry))
+        for key, entry in i18n.CATALOG.items()
+        if set(entry) != set(i18n.SUPPORTED)
+    }
+    assert incomplete == {}
+
+
+def test_catalog_values_are_non_empty_strings():
+    blank = [
+        (key, code)
+        for key, entry in i18n.CATALOG.items()
+        for code, value in entry.items()
+        if not isinstance(value, str) or not value
+    ]
+    assert blank == []
+
+
+def test_catalog_has_no_obvious_placeholder_typo():
+    for key, entry in i18n.CATALOG.items():
+        reference = set(re.findall(r"\{(\w+)\}", entry[i18n.DEFAULT_LOCALE]))
+        for code, value in entry.items():
+            assert set(re.findall(r"\{(\w+)\}", value)) == reference, (key, code)
+
+
+# ---------------------------------------------------------------------------
+# t()
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_key_returns_the_key():
+    assert i18n.t("does.not.exist") == "does.not.exist"
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_t_returns_the_value_of_the_current_locale(code):
+    i18n.set_locale(code)
+    for key, entry in i18n.CATALOG.items():
+        assert i18n.t(key) == entry[code], key
+
+
+def test_missing_locale_falls_back_to_french(monkeypatch):
+    monkeypatch.setitem(i18n.CATALOG, "_test.partial", {"fr": "Bonjour"})
+    assert i18n.t("_test.partial") == "Bonjour"
+    i18n.set_locale("zh")
+    assert i18n.t("_test.partial") == "Bonjour"
+
+
+def test_t_interpolates_placeholders():
+    i18n.set_locale("fr")
+    assert "20" in i18n.t("calc.selection_many", n=20, ref="A1:D5")
+
+
+def test_bad_placeholder_degrades_to_the_raw_template():
+    # `t()` avale l'erreur de formatage : on documente ici la degradation
+    # (accolade visible) plutôt que de la laisser passer pour un mystere.
+    i18n.set_locale("fr")
+    rendered = i18n.t("calc.selection_many", unexpected="x")
+    assert "{" in rendered
+    assert rendered == i18n.CATALOG["calc.selection_many"]["fr"]
+
+
+@pytest.mark.parametrize("key,kwargs", _PLACEHOLDER_CASES)
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_placeholder_keys_interpolate_without_leftover_braces(key, kwargs, code):
+    i18n.set_locale(code)
+    rendered = i18n.t(key, **kwargs)
+    assert rendered
+    assert "{" not in rendered, (key, code, rendered)
+    assert "}" not in rendered, (key, code, rendered)
+
+
+@pytest.mark.parametrize("key,kwargs", _PLACEHOLDER_CASES)
+def test_placeholder_keys_substitute_at_least_one_value(key, kwargs):
+    i18n.set_locale("fr")
+    rendered = i18n.t(key, **kwargs)
+    assert any(str(value) in rendered for value in kwargs.values()), rendered
+
+
+# ---------------------------------------------------------------------------
+# normalize_locale / set_locale
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    (
+        ("fr", "fr"),
+        ("FR", "fr"),
+        ("pt-BR", "pt"),
+        ("pt_BR", "pt"),
+        ("en_US", "en"),
+        ("zh-CN.UTF-8", "zh"),
+        ("fr@euro", "fr"),
+        ("zh_CN.utf8", "zh"),
+        ("  es  ", "es"),
+        ("de", None),
+        ("", None),
+        ("   ", None),
+        (None, None),
+        (123, None),
+        (["fr"], None),
+    ),
+)
+def test_normalize_locale(raw, expected):
+    assert i18n.normalize_locale(raw) == expected
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_set_locale_round_trip(code):
+    assert i18n.set_locale(code) == code
+    assert i18n.get_locale() == code
+
+
+@pytest.mark.parametrize("raw", ("de", "", None, 42))
+def test_set_locale_falls_back_to_french_on_unknown_input(raw):
+    assert i18n.set_locale(raw) == i18n.DEFAULT_LOCALE
+    assert i18n.get_locale() == i18n.DEFAULT_LOCALE
+
+
+# ---------------------------------------------------------------------------
+# Langue de l'extension : celle de LibreOffice
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "libreoffice,expected",
+    (
+        ("fr", "fr"),
+        ("en-US", "en"),
+        ("es", "es"),
+        ("pt-BR", "pt"),
+        ("zh-CN", "zh"),
+    ),
+)
+def test_extension_speaks_the_language_of_libreoffice(libreoffice, expected):
+    make_job(ui_locale=libreoffice)
+    assert i18n.get_locale() == expected
+
+
+@pytest.mark.parametrize("libreoffice", ("de", "ja", ""))
+def test_extension_speaks_english_when_it_does_not_offer_the_language(libreoffice):
+    make_job(ui_locale=libreoffice)
+    assert i18n.get_locale() == "en"
+
+
+def test_extension_speaks_english_when_libreoffice_cannot_tell_its_language():
+    # Hors LibreOffice, les doublures UNO ne rendent aucune langue lisible.
+    assert i18n.resolve_locale(None) == "en"
+
+
+# ---------------------------------------------------------------------------
+# Branchement des libelles
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("relative_path", _LOCALE_DEPENDENT_FILES)
+def test_every_referenced_key_exists_in_the_catalog(relative_path):
+    keys = set(re.findall(r'_t\(\s*"([^"]+)"', _read(relative_path)))
+    assert keys
+    assert sorted(key for key in keys if key not in i18n.CATALOG) == []
+
+
+def test_context_menu_keys_are_translated():
+    for key in ("menu.summarize", "menu.reformulate", "menu.correct", "menu.translate"):
+        assert set(i18n.CATALOG[key]) == set(i18n.SUPPORTED)
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_calc_fallback_prompts_follow_the_locale(code):
+    job = make_job()
+    i18n.set_locale(code)
+    prompts = job._fallback_calc_prompts()
+    assert len(prompts) == 10
+    assert prompts == [i18n.CATALOG[f"calc.suggest.{position}"][code] for position in range(1, 11)]
+
+
+def test_edit_suggestion_keys_are_distinct_across_locales():
+    keys = [f"edit.suggest.{position}" for position in range(1, 11)]
+    i18n.set_locale("fr")
+    french = [i18n.t(key) for key in keys]
+    i18n.set_locale("en")
+    english = [i18n.t(key) for key in keys]
+    assert all(french)
+    assert all(english)
+    assert french != english
+
+
+# Libelles legitimement identiques en francais et en anglais : noms propres,
+# marques, sigles et termes techniques qui ne se traduisent pas. Toute autre
+# egalite signale une traduction oubliee.
+_IDENTICAL_BY_DESIGN = {
+    "about.version",  # "Version {version}" : mot identique dans les deux langues
+    "about.window_title",  # nom de la marque "MIrAI — IA'ssistant LibreOffice"
+    "addon.documentation",  # "📚 Documentation" : mot identique
+    "addon.menubar",  # "🤖 MIrAI" : nom de la marque
+    "calc.out_col",  # "  →  col. {letter}" : abreviation technique
+    "common.ok",  # "OK" : sigle international
+    "common.suggestions",  # "Suggestions..." : mot identique
+    "edit.suggestions_plain",  # "Suggestions" : mot identique
+    "menu.root",  # "MIrAI" : nom de la marque
+    "palette.header",  # "  MIrAI — Assistant ({app})" : nom de la marque
+    "palette.title",  # "MIrAI — Assistant" : nom de la marque
+    "proxy.title",  # "Proxy" : terme technique identique
+    "settings.id_prefix",  # "ID: {value}" : sigle international
+    "settings.model_label",  # "Model:" : mot identique
+    "settings.models_failed_title",  # "API" : sigle international
+    "settings.proxy_button",  # "Proxy" : terme technique identique
+    "settings.reload_dialog_title",  # "Configuration" : mot identique
+    "tab.actions",  # "Actions" : mot identique
+    "tab.conversation",  # "Conversation" : mot identique
+    "tab.suggestions",  # "Suggestions" : mot identique
+}
+
+
+def test_no_key_is_left_identical_between_french_and_english_by_accident():
+    identical = {
+        key
+        for key, entry in i18n.CATALOG.items()
+        if entry["fr"] == entry["en"]
+    }
+    assert identical <= _IDENTICAL_BY_DESIGN
+
+
+# ---------------------------------------------------------------------------
+# Page de retour navigateur (callback OAuth)
+# ---------------------------------------------------------------------------
+
+
+_CALLBACK_KEYS = (
+    "callback.title",
+    "callback.heading",
+    "callback.badge",
+    "callback.close_tab",
+    "callback.if_stuck",
+    "callback.no_action",
+)
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_callback_page_is_rendered_in_the_current_locale(code):
+    i18n.set_locale(code)
+    html = entrypoint._render_callback_page()
+    assert f'<html lang="{code}">' in html
+    for key in _CALLBACK_KEYS:
+        assert i18n.t(key) in html, key
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_callback_page_keeps_its_css_intact(code):
+    i18n.set_locale(code)
+    html = entrypoint._render_callback_page()
+    assert "body { font-family: Arial, sans-serif;" in html
+    assert ".card { background: #fff;" in html
+    assert "}}" not in html
+
+
+def test_callback_page_escapes_translated_text(monkeypatch):
+    monkeypatch.setitem(i18n.CATALOG, "callback.heading", {"fr": "<b>A & B</b>"})
+    page = entrypoint._render_callback_page()
+    assert "<b>" not in page
+    assert "&lt;b&gt;A &amp; B&lt;/b&gt;" in page
+
+
+def test_callback_locale_switch_changes_the_page():
+    i18n.set_locale("fr")
+    french = entrypoint._render_callback_page()
+    i18n.set_locale("zh")
+    chinese = entrypoint._render_callback_page()
+    assert french != chinese
+    assert i18n.CATALOG["callback.badge"]["zh"] in chinese
+
+
+# ---------------------------------------------------------------------------
+# oxt/Addons.xcu (libelles statiques, hors Python)
+# ---------------------------------------------------------------------------
+
+
+def test_addons_xcu_is_valid_xml():
+    ET.parse(os.path.join(_REPO_ROOT, "oxt", "Addons.xcu"))
+
+
+def test_addons_xcu_declares_every_locale():
+    content = _read("oxt/Addons.xcu")
+    assert content.count("xml:lang=") == 5 * len(_ADDON_KEYS)
+    for code in i18n.SUPPORTED:
+        assert f'xml:lang="{code}"' in content
+
+
+def test_addons_xcu_labels_match_the_catalog():
+    content = _read("oxt/Addons.xcu")
+    missing = [
+        (key, code)
+        for key in _ADDON_KEYS
+        for code, value in i18n.CATALOG[key].items()
+        if value not in content
+    ]
+    assert missing == []
+
+
+def test_addons_xcu_has_no_bogus_locale_tag():
+    # Les libelles etaient etiquetes `en-US` alors qu'ils etaient en francais.
+    assert "en-US" not in _read("oxt/Addons.xcu")
+
+
+# ---------------------------------------------------------------------------
+# Langue des réponses du LLM
+#
+# Les prompts métier restent en français (décision de conception). Ce qui est
+# écrit dans le document garde la langue du texte fourni ; ce qui s'adresse à
+# l'utilisateur suit la langue de l'interface (directive llm.answer_language).
+# Une requête ne porte jamais les deux règles.
+# ---------------------------------------------------------------------------
+
+
+def _assert_document_language(system):
+    assert "MÊME LANGUE que le texte fourni" in system
+    assert i18n.t("llm.answer_language") not in system
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_shell_requests_keep_the_document_language(code):
+    job = make_job()
+    i18n.set_locale(code)
+    request = job.make_api_request("ping", "", 10)
+    _assert_document_language(json.loads(request.data)["messages"][0]["content"])
+
+
+def _writer_target():
+    return FakeWriterDoc(selection_text="The quick brown fox jumps over the lazy dog."), "writer"
+
+
+def _calc_target():
+    sheet = FakeCalcSheet(grid={(0, 0): "apple", (0, 1): "pear"})
+    return FakeCalcDoc(sheet, selection_ref="A1:A2"), "calc"
+
+
+@pytest.mark.parametrize(
+    "runner,make_target",
+    (
+        ("run_extend", _writer_target),
+        ("run_summarize", _writer_target),
+        ("run_simplify", _writer_target),
+        ("run_shorten", _writer_target),
+        ("run_lengthen", _writer_target),
+        ("run_transform", _calc_target),
+        ("run_analyze", _calc_target),
+    ),
+)
+def test_palette_transformations_keep_the_document_language(runner, make_target):
+    i18n.set_locale("en")
+    doc, app = make_target()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("x")) for _ in range(2)])
+    getattr(presets, runner)(
+        ToolContext(doc, doc.controller, app, shell), shell, "uppercase", None
+    )
+    _assert_document_language(shell.requests[0]["messages"][0]["content"])
+
+
+def _assert_interface_language(system):
+    assert i18n.t("llm.answer_language") in system
+    assert "MÊME LANGUE" not in system
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_shell_suggestion_requests_follow_the_interface_language(code):
+    job = make_job()
+    i18n.set_locale(code)
+    request = job.make_api_request("ping", "", 10, answer_in_ui_language=True)
+    _assert_interface_language(json.loads(request.data)["messages"][0]["content"])
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_document_suggestions_follow_the_interface_language(code):
+    i18n.set_locale(code)
+    messages = doc_analysis.build_messages("Un paragraphe de démonstration. " * 20)
+    _assert_interface_language(messages[0]["content"])
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_conversation_follows_the_interface_language(code):
+    i18n.set_locale(code)
+    _assert_interface_language(prompts.build_system("writer", None, "native"))
+
+
+def test_formula_explanation_follows_the_interface_language():
+    i18n.set_locale("en")
+    job = MagicMock()
+    calc._explain_formula(job, "=SUM(A1:A3)")
+    system = job.make_chat_request.call_args.args[0][0]["content"]
+    _assert_interface_language(system)
+    assert "EXACTEMENT 3 lignes :\nLigne 1" in system
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "src/mirai/entrypoint.py",
+        "src/mirai/menu_actions/calc.py",
+        "src/mirai/core/prompts.py",
+    ),
+)
+def test_llm_language_directive_is_wired(relative_path):
+    assert '_t("llm.answer_language")' in _read(relative_path)
+
+
+def test_no_absolute_french_only_rule_remains():
+    # La palette d'éditions imposait « LANGUE OBLIGATOIRE : français » : ces
+    # suggestions sont des éléments d'interface et doivent suivre la locale.
+    for relative_path in ("src/mirai/entrypoint.py", "src/mirai/core/prompts.py"):
+        source = _read(relative_path)
+        assert "LANGUE OBLIGATOIRE" not in source
+        assert "JAMAIS répondre en anglais" not in source

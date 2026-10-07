@@ -5,6 +5,7 @@ Import paresseux depuis le dispatcher de la coquille — zéro coût au chargeme
 de l'extension tant qu'aucune action du moteur n'est déclenchée.
 """
 
+from ..i18n import t as _t
 from .shell_facade import MainJobShell
 
 
@@ -29,8 +30,8 @@ def test_model_capabilities(job):
     except Exception as exc:
         shell.log(f"[capabilities] sonde impossible : {exc}")
         job._show_message(
-            "Test du modèle",
-            f"Le test n'a pas pu aboutir.\n\n{exc}")
+            _t("entry.test_title"),
+            _t("entry.test_failed", detail=exc))
         return None
 
     caps.save_cached(shell, endpoint, model_name, verdict)
@@ -45,10 +46,10 @@ def test_model_capabilities(job):
     })
 
     job._show_message(
-        "Test du modèle",
-        f"Modèle : {model_name or '(non défini)'}\n\n"
-        f"{verdict.summary()}\n\n"
-        f"Détail technique : {verdict.detail}")
+        _t("entry.test_title"),
+        _t("entry.model_line", model=model_name or _t("entry.model_undefined"))
+        + "\n\n" + verdict.summary() + "\n\n"
+        + _t("entry.detail", detail=verdict.detail))
     return verdict
 
 
@@ -99,9 +100,7 @@ def open_palette(job, model):
     else:
         shell.log(f"[palette] composant courant sans Text/Sheets : {type(model)}")
         try:
-            job._show_message("MIrAI — Assistant",
-                              "Ouvrez un document Writer ou Calc pour "
-                              "utiliser l'assistant.")
+            job._show_message(_t("palette.title"), _t("entry.need_document"))
         except Exception:
             pass
         return None

@@ -119,7 +119,7 @@ _STARTUP_LAUNCHERS = (
 )
 
 
-def make_job(config_dir=None):
+def make_job(config_dir=None, ui_locale="fr"):
     """
     Instantiate MainJob with a fully mocked UNO context.
 
@@ -128,6 +128,7 @@ def make_job(config_dir=None):
                     /tmp/test_libreoffice_config, shared between tests and
                     purged by tests/unit/conftest.py).
                     Pass a real tempfile.mkdtemp() path for tests that write files.
+        ui_locale: interface language of the simulated LibreOffice.
     Returns:
         A MainJob instance ready for unit testing.
     """
@@ -137,6 +138,9 @@ def make_job(config_dir=None):
 
     path_settings = MagicMock()
     path_settings.UserConfig = config_dir or "/tmp/test_libreoffice_config"
+    # The same mock answers every service, including the configuration access
+    # that holds LibreOffice's interface language (/org.openoffice.Setup/L10N).
+    path_settings.createInstanceWithArguments.return_value.ooLocale = ui_locale
 
     service_manager = MagicMock()
     service_manager.createInstanceWithContext.return_value = path_settings

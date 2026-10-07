@@ -11,6 +11,7 @@ interroge la sélection en boucle.
 
 from __future__ import annotations
 
+from ..i18n import t as _t
 from .tools.calc_tools import col_letter
 
 MAX_EXCERPT = 90
@@ -41,10 +42,6 @@ def middle_ellipsis(text: str, limit: int = MAX_EXCERPT) -> str:
     return f"{head}…{tail}"
 
 
-NO_SELECTION_LABEL = ("Document entier — les actions rapides portent sur le "
-                      "paragraphe courant")
-
-
 def writer_label(selected_text: str, paragraph_text: str = "") -> str:
     """Libellé Writer, adapté au ciblage réel de l'action.
 
@@ -62,10 +59,10 @@ def writer_label(selected_text: str, paragraph_text: str = "") -> str:
     """
     selected = compact_whitespace(selected_text)
     if selected:
-        return f"Sélection : « {middle_ellipsis(selected)} »"
+        return _t("sel.writer_selection", excerpt=middle_ellipsis(selected))
     if compact_whitespace(paragraph_text):
-        return NO_SELECTION_LABEL
-    return "Placez le curseur dans un paragraphe, ou sélectionnez du texte."
+        return _t("sel.no_selection")
+    return _t("sel.no_target")
 
 
 def calc_label(start_col: int, start_row: int, end_col: int, end_row: int) -> str:
@@ -75,6 +72,6 @@ def calc_label(start_col: int, start_row: int, end_col: int, end_row: int) -> st
     count = columns * rows
     first = f"{col_letter(min(start_col, end_col))}{min(start_row, end_row) + 1}"
     if count == 1:
-        return f"Cellule sélectionnée ({first})"
+        return _t("sel.calc_cell", ref=first)
     last = f"{col_letter(max(start_col, end_col))}{max(start_row, end_row) + 1}"
-    return f"{count} cellules sélectionnées ({first}:{last})"
+    return _t("sel.calc_range", count=count, first=first, last=last)
