@@ -24,6 +24,7 @@ from src.mirai.menu_actions.calc import (  # noqa: E402
     _get_cell_error,
     _is_formula_safe,
     _looks_like_prompt_injection,
+    _range_label,
     _safe_formula_functions,
     _transform_to_column,
     handle_calc_action,
@@ -723,6 +724,46 @@ class TestGenerateFormulaMultiTurn(unittest.TestCase):
         sheet.getCellByPosition.return_value = _make_cell()
         result = handle_calc_action(job, "GenerateFormula", model)
         self.assertTrue(result)
+
+
+# ---------------------------------------------------------------------------
+# _range_label localization
+# ---------------------------------------------------------------------------
+
+def _make_area(sc, ec, sr, er):
+    area = MagicMock()
+    area.StartColumn = sc
+    area.EndColumn = ec
+    area.StartRow = sr
+    area.EndRow = er
+    return area
+
+
+class TestRangeLabelI18n(unittest.TestCase):
+
+    def test_many_cells_french(self):
+        from src.mirai import i18n
+        i18n.set_locale("fr")
+        self.assertEqual(
+            _range_label(_make_area(0, 3, 0, 4)),
+            "20 cellules sélectionnées (A1:D5)",
+        )
+
+    def test_single_cell_singular(self):
+        from src.mirai import i18n
+        i18n.set_locale("fr")
+        self.assertEqual(
+            _range_label(_make_area(0, 0, 0, 0)),
+            "1 cellule sélectionnée (A1:A1)",
+        )
+
+    def test_english_and_no_leftover_placeholder(self):
+        from src.mirai import i18n
+        i18n.set_locale("en")
+        label = _range_label(_make_area(0, 3, 0, 4))
+        self.assertIn("20 selected cells", label)
+        self.assertIn("(A1:D5)", label)
+        self.assertNotIn("{", label)
 
 
 if __name__ == "__main__":

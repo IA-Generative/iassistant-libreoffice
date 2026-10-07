@@ -71,12 +71,24 @@ def _reset_credentials():
     credentials.forget_all()
 
 
+def _pin_locale():
+    # Chaque test part du français, la langue du LibreOffice que simule
+    # `make_job` par défaut. Un test qui en veut une autre la pose lui-même.
+    try:
+        from src.mirai import i18n
+    except Exception:
+        return
+    i18n.set_locale(i18n.DEFAULT_LOCALE)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state():
     _reset_mainjob_flags()
     _reset_credentials()
+    _pin_locale()
     _cleanup_shared_config_dir()
     yield
+    _pin_locale()
     _reset_mainjob_flags()
     _reset_credentials()
     _cleanup_phantom_dirs()

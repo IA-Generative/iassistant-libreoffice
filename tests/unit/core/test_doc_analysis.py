@@ -6,6 +6,7 @@ respecte pas la consigne de format.
 """
 
 from src.mirai.core import doc_analysis
+from src.mirai.i18n import t as _t
 
 
 def _texte(n):
@@ -106,7 +107,7 @@ def test_render_lists_the_items():
 
 
 def test_render_without_items_says_so():
-    assert doc_analysis.render([]) == doc_analysis.UNAVAILABLE
+    assert doc_analysis.render([]) == _t("analysis.unavailable")
 
 
 # ── Réponse tronquée (constaté en recette avec gemma-4) ──────────────────────

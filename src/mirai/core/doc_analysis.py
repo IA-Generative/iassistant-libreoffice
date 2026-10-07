@@ -14,6 +14,8 @@ Le rendu ne remplace jamais les propositions statiques par du vide : en cas
 d'échec, l'appelant garde les siennes (cf. `AssistantPalette`).
 """
 
+from ..i18n import t as _t
+
 MAX_CHARS = 6000          # au-delà, on tronque : une analyse structurelle n'a
                           # pas besoin du document entier, et le relais plafonne
 MIN_CHARS = 200           # en deçà, il n'y a rien à structurer
@@ -38,14 +40,6 @@ SYSTEM_PROMPT = (
     "ni conclusion, ni numérotation, ni texte réécrit."
 )
 
-# Libellé de phase pour la jauge partagée avec le run : l'attente s'affiche
-# dans la ligne d'état, au même endroit et au même format (« ⠹ Analyse du
-# document · 3 s »).
-PHASE = "Analyse du document"
-TOO_SHORT = ("Document trop court pour une analyse de structure.\n"
-             "Écrivez quelques paragraphes, puis rouvrez cet onglet.")
-UNAVAILABLE = "Analyse indisponible pour le moment."
-
 
 def build_messages(text):
     """Messages prêts pour le client LLM, ou None si le texte ne vaut pas l'appel."""
@@ -56,7 +50,8 @@ def build_messages(text):
         # Couper sur une frontière de ligne : un paragraphe tronqué en plein
         # milieu se lit comme une faute de rédaction, et le modèle la signale.
         body = body[:MAX_CHARS].rsplit("\n", 1)[0] or body[:MAX_CHARS]
-    return [{"role": "system", "content": SYSTEM_PROMPT},
+    return [{"role": "system",
+             "content": SYSTEM_PROMPT + " " + _t("llm.answer_language")},
             {"role": "user", "content": body}]
 
 
@@ -99,7 +94,7 @@ def parse(raw, truncated=False):
 def render(items):
     """Met en forme les propositions pour l'onglet Suggestions."""
     if not items:
-        return UNAVAILABLE
-    lines = ["Propositions d'amélioration du document :", ""]
+        return _t("analysis.unavailable")
+    lines = [_t("analysis.header"), ""]
     lines += [f"· {item}" for item in items]
     return "\n".join(lines)

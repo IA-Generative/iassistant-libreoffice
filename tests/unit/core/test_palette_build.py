@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.mirai import i18n
+from src.mirai.i18n import t as _t
 from tests.stubs.uno_stubs import install
 
 install()
@@ -432,7 +434,7 @@ def test_reasoning_has_its_own_tab(palette_module):
     assert palette_module.REASONING_PANE in names
     assert "reasoning_toggle" in names          # le raccourci reste
     assert f"tab_{palette_module.REASONING_PANE}" in names
-    assert ("reasoning", "Raisonnement") in palette_module.TABS
+    assert ("reasoning", "tab.reasoning") in palette_module.TABS
 
 
 def test_reasoning_tab_is_never_blank(palette_module):
@@ -609,6 +611,34 @@ def test_document_rewrite_reports_why_it_did_nothing(palette_module):
     assert palette._run_document_rewrite(
         MagicMock(), "x", ["Titre"], ["Heading 1"]) == {
             "ok": False, "reason": "headings_only"}
+
+
+def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
+    """Sélection ou document entier : le texte réécrit garde sa langue, quelle
+    que soit celle de l'interface."""
+    sent = []
+
+    class _Client:
+        def __init__(self, _shell, max_tokens=None):
+            pass
+
+        def step(self, messages, **_kwargs):
+            sent.append(messages)
+            return SimpleNamespace(error="network_error")
+
+    monkeypatch.setattr(palette_module, "LLMClient", _Client)
+    i18n.set_locale("en")
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    palette._run_selection_rewrite(MagicMock(), "shorten", "Some English text.")
+    palette._run_document_rewrite(
+        MagicMock(), "shorten", ["First paragraph.", "Second paragraph."])
+
+    assert len(sent) == 2
+    for messages in sent:
+        system = messages[0]["content"]
+        assert "MÊME LANGUE que le texte fourni" in system
+        assert i18n.t("llm.answer_language") not in system
 
 
 # ── Refus de lancement ──────────────────────────────────────────────────
@@ -851,7 +881,7 @@ def test_short_document_is_reported_without_calling_the_model(palette_module, mo
                        _client(_Reponse(), budgets=budgets), doc="Trois mots.")
     assert demarre is False
     assert budgets == []                  # aucun aller-retour réseau inutile
-    assert palette._analysis_text == palette_module.doc_analysis.TOO_SHORT
+    assert palette._analysis_text == _t("analysis.too_short")
 
 
 def test_no_analysis_outside_writer(palette_module, monkeypatch):
@@ -888,8 +918,8 @@ def test_wait_is_shown_in_the_status_line_like_a_run(palette_module, monkeypatch
                         lambda **kw: type("T", (), {"start": lambda _s: None})())
     assert palette.start_document_analysis() is True
     rendu = palette._progress.render()
-    assert palette_module.doc_analysis.PHASE in rendu
-    assert palette_module.doc_analysis.PHASE not in palette._models["suggestions"].Text
+    assert _t("analysis.phase") in rendu
+    assert _t("analysis.phase") not in palette._models["suggestions"].Text
 
 
 def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, monkeypatch):

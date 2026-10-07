@@ -16,6 +16,8 @@ from __future__ import annotations
 import threading
 import time
 
+from ..i18n import t as _t
+
 # Cycle braille : rendu fiable dans les contrôles UNO et largeur stable, donc
 # aucun tremblement de mise en page d'une image à l'autre.
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -79,7 +81,7 @@ class RunProgress:
         self._preview = ""
         self._exact = None
         self._activity = activity
-        self._phase = activity or "Connexion…"
+        self._phase = activity or _t("progress.connecting")
 
     # ── Alimentation (thread worker) ────────────────────────────────────
 
@@ -93,7 +95,7 @@ class RunProgress:
             # l'indice de survol ne s'afficherait jamais.
             self._preview = (self._preview + chunk)[-REASONING_TOOLTIP_CHARS:]
             if self._activity is None:
-                self._phase = "Rédaction"
+                self._phase = _t("progress.writing")
 
     def on_reasoning(self, text):
         with self._lock:
@@ -102,7 +104,7 @@ class RunProgress:
             # On ne garde que la fin : c'est l'état courant de la réflexion.
             self._reasoning = (self._reasoning + chunk)[-REASONING_TOOLTIP_CHARS:]
             if self._activity is None:
-                self._phase = "Réflexion"
+                self._phase = _t("progress.thinking")
 
     def exact_tokens(self, count):
         """Valeur faisant autorité, transmise par le relais."""
@@ -143,9 +145,9 @@ class RunProgress:
         """
         with self._lock:
             if self._reasoning:
-                return "Réflexion du modèle :\n\n" + self._reasoning
+                return _t("progress.tooltip_reasoning") + self._reasoning
             if self._preview:
-                return "Texte en cours :\n\n" + self._preview
+                return _t("progress.tooltip_text") + self._preview
             return ""
 
     @property

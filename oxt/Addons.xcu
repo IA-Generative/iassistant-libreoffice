@@ -5,11 +5,20 @@
          Démonstrateur moteur MCP : point d'entrée UNIQUE.
          Les anciennes actions (extend/edit/résumé/… ) sont désormais des
          chips de la palette universelle (OpenAssistant).
+         Les libellés Title sont dupliqués par locale (xml:lang) : LibreOffice
+         choisit la variante de sa langue d'interface, et l'anglais à défaut.
+         L'extension suit la même règle pour ses propres libellés
+         (i18n.resolve_locale).
          ══════════════════════════════════════════════════════════════ -->
     <node oor:name="OfficeMenuBar">
       <node oor:name="fr.gouv.interieur.mirai.menubar" oor:op="replace">
         <prop oor:name="Title" oor:type="xs:string">
-          <value xml:lang="en-US">🤖 MIrAI</value>
+          <value>🤖 MIrAI</value>
+          <value xml:lang="fr">🤖 MIrAI</value>
+          <value xml:lang="en">🤖 MIrAI</value>
+          <value xml:lang="es">🤖 MIrAI</value>
+          <value xml:lang="pt">🤖 MIrAI</value>
+          <value xml:lang="zh">🤖 MIrAI</value>
         </prop>
         <prop oor:name="Context" oor:type="xs:string">
           <value>com.sun.star.sheet.SpreadsheetDocument,com.sun.star.text.GlobalDocument,com.sun.star.text.TextDocument,com.sun.star.text.WebDocument</value>
@@ -17,7 +26,12 @@
         <node oor:name="Submenu">
           <node oor:name="M1" oor:op="replace">
             <prop oor:name="Title">
-              <value xml:lang="en-US">🤖 Ouvrir l'assistant (Ctrl+Alt+Espace)</value>
+              <value>🤖 Ouvrir l'assistant (Ctrl+Alt+Espace)</value>
+              <value xml:lang="fr">🤖 Ouvrir l'assistant (Ctrl+Alt+Espace)</value>
+              <value xml:lang="en">🤖 Open the assistant (Ctrl+Alt+Space)</value>
+              <value xml:lang="es">🤖 Abrir el asistente (Ctrl+Alt+Espacio)</value>
+              <value xml:lang="pt">🤖 Abrir o assistente (Ctrl+Alt+Espaço)</value>
+              <value xml:lang="zh">🤖 打开助手（Ctrl+Alt+空格）</value>
             </prop>
             <prop oor:name="URL">
               <value>service:fr.gouv.interieur.mirai.do?OpenAssistant&amp;src=menu</value>
@@ -33,7 +47,12 @@
           </node>
           <node oor:name="M3" oor:op="replace">
             <prop oor:name="Title">
-              <value xml:lang="en-US">⚙️ Paramètres</value>
+              <value>⚙️ Paramètres</value>
+              <value xml:lang="fr">⚙️ Paramètres</value>
+              <value xml:lang="en">⚙️ Settings</value>
+              <value xml:lang="es">⚙️ Configuración</value>
+              <value xml:lang="pt">⚙️ Configurações</value>
+              <value xml:lang="zh">⚙️ 设置</value>
             </prop>
             <prop oor:name="URL">
               <value>service:fr.gouv.interieur.mirai.do?settings&amp;src=menu</value>
@@ -44,7 +63,12 @@
           </node>
           <node oor:name="M35" oor:op="replace">
             <prop oor:name="Title">
-              <value xml:lang="en-US">🔬 Tester le modèle</value>
+              <value>🔬 Tester le modèle</value>
+              <value xml:lang="fr">🔬 Tester le modèle</value>
+              <value xml:lang="en">🔬 Test the model</value>
+              <value xml:lang="es">🔬 Probar el modelo</value>
+              <value xml:lang="pt">🔬 Testar o modelo</value>
+              <value xml:lang="zh">🔬 测试模型</value>
             </prop>
             <prop oor:name="URL">
               <value>service:fr.gouv.interieur.mirai.do?TestModel&amp;src=menu</value>
@@ -55,7 +79,12 @@
           </node>
           <node oor:name="M4" oor:op="replace">
             <prop oor:name="Title">
-              <value xml:lang="en-US">📚 Documentation</value>
+              <value>📚 Documentation</value>
+              <value xml:lang="fr">📚 Documentation</value>
+              <value xml:lang="en">📚 Documentation</value>
+              <value xml:lang="es">📚 Documentación</value>
+              <value xml:lang="pt">📚 Documentação</value>
+              <value xml:lang="zh">📚 文档</value>
             </prop>
             <prop oor:name="URL">
               <value>service:fr.gouv.interieur.mirai.do?Documentation&amp;src=menu</value>
@@ -66,7 +95,12 @@
           </node>
           <node oor:name="M5" oor:op="replace">
             <prop oor:name="Title">
-              <value xml:lang="en-US">ℹ️ À propos de l'IA'ssistant...</value>
+              <value>ℹ️ À propos de l'IA'ssistant...</value>
+              <value xml:lang="fr">ℹ️ À propos de l'IA'ssistant...</value>
+              <value xml:lang="en">ℹ️ About the IA'ssistant...</value>
+              <value xml:lang="es">ℹ️ Acerca del IA'ssistant...</value>
+              <value xml:lang="pt">ℹ️ Sobre o IA'ssistant...</value>
+              <value xml:lang="zh">ℹ️ 关于 IA'ssistant...</value>
             </prop>
             <prop oor:name="URL">
               <value>service:fr.gouv.interieur.mirai.do?AboutDialog&amp;src=menu</value>
@@ -87,7 +121,12 @@
             <value>service:fr.gouv.interieur.mirai.do?OpenAssistant&amp;src=toolbar</value>
           </prop>
           <prop oor:name="Title" oor:type="xs:string">
-            <value xml:lang="en-US">Assistant MIrAI</value>
+            <value>Assistant MIrAI</value>
+            <value xml:lang="fr">Assistant MIrAI</value>
+            <value xml:lang="en">MIrAI assistant</value>
+            <value xml:lang="es">Asistente MIrAI</value>
+            <value xml:lang="pt">Assistente MIrAI</value>
+            <value xml:lang="zh">MIrAI 助手</value>
           </prop>
           <prop oor:name="Target" oor:type="xs:string">
             <value>_self</value>

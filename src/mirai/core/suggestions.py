@@ -14,6 +14,8 @@ from __future__ import annotations
 import dataclasses
 import re
 
+from ..i18n import t as _t
+
 LONG_SELECTION_CHARS = 400      # au-delà, résumer devient l'action évidente
 SHORT_SELECTION_CHARS = 80      # en deçà, on est sur une phrase, pas un passage
 
@@ -26,9 +28,13 @@ class Suggestion:
     Sinon le libellé pré-remplit le champ de prompt, sans rien exécuter :
     l'utilisateur garde la main.
     """
-    label: str
+    label_key: str
     prompt: str = ""
     preset_id: str = ""
+
+    @property
+    def label(self) -> str:
+        return _t(self.label_key)
 
     @property
     def runs_immediately(self) -> bool:
@@ -56,26 +62,26 @@ def _writer_suggestions(selected_text: str, has_paragraph: bool):
     items = []
 
     if length >= LONG_SELECTION_CHARS:
-        items.append(Suggestion("Résumer ce passage", preset_id="summarize"))
-        items.append(Suggestion("Le rendre plus court", preset_id="shorten"))
+        items.append(Suggestion("suggestion.w_summarize", preset_id="summarize"))
+        items.append(Suggestion("suggestion.w_shorten", preset_id="shorten"))
     elif length >= SHORT_SELECTION_CHARS:
-        items.append(Suggestion("Simplifier la formulation", preset_id="simplify"))
-        items.append(Suggestion("Développer ce passage", preset_id="lengthen"))
+        items.append(Suggestion("suggestion.w_simplify_passage", preset_id="simplify"))
+        items.append(Suggestion("suggestion.w_lengthen", preset_id="lengthen"))
     elif length > 0:
-        items.append(Suggestion("Développer cette phrase", preset_id="lengthen"))
+        items.append(Suggestion("suggestion.w_lengthen_phrase", preset_id="lengthen"))
     elif has_paragraph:
         # Sans sélection les actions ciblent le paragraphe courant : proposer
         # autre chose que « sélectionnez du texte » serait décourageant.
-        items.append(Suggestion("Simplifier ce paragraphe", preset_id="simplify"))
+        items.append(Suggestion("suggestion.w_simplify_paragraph", preset_id="simplify"))
 
     items.extend((
-        Suggestion("Corrige l'orthographe et la grammaire",
+        Suggestion("suggestion.w_spellcheck",
                    prompt="Corrige l'orthographe, la grammaire et la syntaxe, "
                           "sans reformuler."),
-        Suggestion("Rends le ton plus formel",
+        Suggestion("suggestion.w_formal",
                    prompt="Réécris ce passage sur un ton plus formel et "
                           "administratif."),
-        Suggestion("Traduis en anglais",
+        Suggestion("suggestion.w_translate_en",
                    prompt="Traduis ce passage en anglais."),
     ))
     return items
@@ -85,24 +91,24 @@ def _calc_suggestions(cell_count: int, values):
     items = []
     if cell_count == 0:
         items.append(Suggestion(
-            "Écrire une formule",
+            "suggestion.c_formula",
             prompt="Écris une formule qui "))
     elif looks_numeric(values):
-        items.append(Suggestion("Analyser ces chiffres", preset_id="analyze"))
+        items.append(Suggestion("suggestion.c_analyze", preset_id="analyze"))
         items.append(Suggestion(
-            "Calculer la moyenne et le total",
+            "suggestion.c_stats",
             prompt="Donne la moyenne, le total et les valeurs extrêmes de "
                    "cette plage."))
     else:
         items.append(Suggestion(
-            "Mettre en majuscules",
+            "suggestion.c_upper",
             prompt="Mets chaque valeur en majuscules."))
         items.append(Suggestion(
-            "Classer par catégorie",
+            "suggestion.c_sort",
             prompt="Classe chaque valeur par catégorie."))
 
     items.append(Suggestion(
-        "Repérer les anomalies",
+        "suggestion.c_outliers",
         prompt="Repère les valeurs incohérentes ou aberrantes."))
     return items
 
@@ -129,7 +135,7 @@ def render(suggestions) -> str:
     voit d'un coup d'œil ce qui va agir et ce qui va seulement pré-remplir.
     """
     if not suggestions:
-        return "Aucune suggestion pour cette sélection."
+        return _t("suggestion.none")
     lines = []
     for index, item in enumerate(suggestions, start=1):
         marker = "▸" if item.runs_immediately else "·"
