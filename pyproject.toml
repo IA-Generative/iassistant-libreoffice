@@ -5,7 +5,7 @@
 [tool.ruff]
 line-length = 100
 target-version = "py311"          # version du Python embarqué dans LibreOffice 25.8
-extend-exclude = ["mirai-dgx", "dist", "build", ".venv"]
+extend-exclude = ["dist", "build", ".venv"]
 
 [tool.ruff.lint]
 select = [

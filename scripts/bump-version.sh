@@ -24,11 +24,9 @@ _sed_i() {
   fi
 }
 
-# ── 1. Read current version ──────────────────────────────────────────────────
 CURRENT=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$DESC_XML" 2>/dev/null || echo "0.0.0")
 echo "Version actuelle : $CURRENT"
 
-# ── 2. Propose next version ──────────────────────────────────────────────────
 if [ -n "${1:-}" ]; then
   PROPOSED="$1"
 else
@@ -47,7 +45,6 @@ case "${CONFIRM:-O}" in
 esac
 NEW_VERSION="$PROPOSED"
 
-# ── 3. Update all manifest files ─────────────────────────────────────────────
 echo "▶ Mise à jour des fichiers..."
 
 # description.xml
@@ -71,17 +68,14 @@ echo "  ✓ dm-manifest.json"
 _sed_i "s|version [0-9][0-9.]*|version ${NEW_VERSION}|" "$LICENSE"
 echo "  ✓ oxt/registration/license.txt"
 
-# ── 4. Build OXT ─────────────────────────────────────────────────────────────
 echo "▶ Build du package..."
 "$ROOT_DIR/scripts/02-build-oxt.sh" --config config/profiles/config.default.integration.json 2>&1 | tail -2
 echo "  ✓ dist/mirai.oxt (version $NEW_VERSION)"
 
-# ── 5. Checksum ──────────────────────────────────────────────────────────────
 CHECKSUM=$(shasum -a 256 "$ROOT_DIR/dist/mirai.oxt" 2>/dev/null || sha256sum "$ROOT_DIR/dist/mirai.oxt" 2>/dev/null)
 CHECKSUM=$(echo "$CHECKSUM" | cut -d' ' -f1)
 echo "  ✓ sha256:${CHECKSUM}"
 
-# ── 6. Deploy instructions ───────────────────────────────────────────────────
 cat <<INSTRUCTIONS
 
 ════════════════════════════════════════════════════════════
