@@ -1,6 +1,6 @@
 """
 Headless unit tests for Update & Feature Toggling (schema_version=2).
-Covers TC-LO-01 to TC-LO-13 from the test cahier.
+Covers TC-LO-04 to TC-LO-13 from the test cahier.
 
 Run with:
     pytest tests/unit/test_update_features.py -v --tb=short
@@ -60,32 +60,6 @@ def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
     return d
 
 
-# ── TC-LO-01 : _is_feature_enabled sans cache → défaut True ─────────
-
-def test_lo01_is_feature_enabled_no_cache_returns_default():
-    job = make_job()
-    assert job._features_cache == {}
-    assert job._is_feature_enabled("writer_assistant") is True
-    assert job._is_feature_enabled("writer_assistant", default=False) is False
-
-
-# ── TC-LO-02 : _is_feature_enabled cache False → False ───────────────
-
-def test_lo02_is_feature_enabled_cache_false():
-    job = make_job()
-    job._features_cache = {"calc_assistant": False}
-    assert job._is_feature_enabled("calc_assistant") is False
-
-
-# ── TC-LO-03 : _is_feature_enabled clé absente → défaut ─────────────
-
-def test_lo03_is_feature_enabled_missing_key_returns_default():
-    job = make_job()
-    job._features_cache = {"other_flag": True}
-    assert job._is_feature_enabled("calc_assistant", default=True) is True
-    assert job._is_feature_enabled("calc_assistant", default=False) is False
-
-
 # ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
 
 def test_lo04_fetch_v2_populates_features_cache():
@@ -133,10 +107,6 @@ def test_lo05_fetch_v2_calls_schedule_update():
     payload = _enriched_v2(features={}, update=directive)
     job._urlopen = MagicMock(return_value=_json_response(payload))
 
-    # Le rafraîchissement de configuration lancé par __init__ peut encore être
-    # en vol et appeler _fetch_config lui aussi : on ne compte QUE les appels
-    # déclenchés par ce test, sinon l'assertion dépend de la charge machine.
-    job._schedule_update.reset_mock()
     job._fetch_config(force=True)
 
     job._schedule_update.assert_called_once_with(directive)

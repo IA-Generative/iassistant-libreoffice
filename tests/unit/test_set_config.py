@@ -4,6 +4,7 @@ Verifies atomic writes and concurrent-write safety.
 """
 import json
 import os
+import shutil
 import tempfile
 import threading
 import unittest
@@ -16,6 +17,7 @@ install()
 class TestSetConfig(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
         self.job = make_job(config_dir=self.tmpdir)
         self.config_path = os.path.join(self.tmpdir, "mirai", "settings.json")
 

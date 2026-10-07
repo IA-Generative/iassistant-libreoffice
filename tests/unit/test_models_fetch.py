@@ -110,21 +110,6 @@ class TestFetchModels(unittest.TestCase):
         self.assertIn("llama3", models)
         self.assertEqual(descriptions["llama3"], "Fast LLM")
 
-    def test_backward_compat_fetch_models_list(self):
-        """_fetch_models_list shim returns same result as _fetch_models."""
-        payload = {"data": [{"id": "m1"}]}
-        with self._patch_urlopen(_fake_response(payload)):
-            result = self.job._fetch_models_list("https://api.example.com", "k", False)
-        self.assertEqual(result, ["m1"])
-
-    def test_backward_compat_fetch_models_info(self):
-        """_fetch_models_info shim returns (list, dict)."""
-        payload = {"data": [{"id": "m1", "description": "desc"}]}
-        with self._patch_urlopen(_fake_response(payload)):
-            models, descs = self.job._fetch_models_info("https://api.example.com", "k", False)
-        self.assertEqual(models, ["m1"])
-        self.assertEqual(descs["m1"], "desc")
-
 
 if __name__ == "__main__":
     unittest.main()

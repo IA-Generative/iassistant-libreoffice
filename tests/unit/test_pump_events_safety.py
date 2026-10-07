@@ -1,15 +1,9 @@
 """`pump_events` : pomper hors du thread principal doit être un no-op, jamais un abort.
 
-Contexte — incident du 2026-07-26, pendant un enrôlement SSO réel. Un thread de
-fond a appelé `processEventsToIdle()`. Conséquence observée sur le prélèvement
-de pile :
-
-    thread Python → processEventsToIdle() → DispatchUserEvents → std::terminate()
-      → gestionnaire de signal → boîte de récupération d'urgence → SolarMutex
-
-Le thread fautif meurt **en tenant le SolarMutex** ; le thread principal reste
-alors bloqué dans `SalYieldMutex::doAcquire` et LibreOffice ne répond plus à un
-seul clic. Ce n'est donc pas une lenteur : c'est un interblocage définitif.
+Un thread de fond qui appelle `processEventsToIdle()` meurt en tenant le
+SolarMutex (abort dans DispatchUserEvents) : le thread principal reste bloqué et
+LibreOffice ne répond plus. Ce n'est pas une lenteur, c'est un interblocage
+définitif. Incident et prélèvement de pile : docs/RAPPORT-EXECUTION-2026-07-26.md.
 
 Ces tests garantissent que la garde reste en place.
 """
@@ -20,7 +14,7 @@ from tests.stubs.uno_stubs import install
 
 install()   # doit précéder l'import d'entrypoint (qui importe uno/unohelper)
 
-from src.mirai.entrypoint import is_main_thread, pump_events  # noqa: E402
+from src.mirai.entrypoint import is_main_thread, pump_events
 
 
 class FakeToolkit:

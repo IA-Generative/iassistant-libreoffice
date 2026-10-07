@@ -8,6 +8,8 @@ Usage — call install() before importing anything from src.mirai.entrypoint:
     install()
     from src.mirai.entrypoint import MainJob
 """
+import base64
+import json
 import os
 import sys
 import time
@@ -25,13 +27,10 @@ class _XMouseListener:   pass
 class _XKeyListener:     pass
 class _XWindowListener:  pass
 class _XTopWindowListener: pass
-class _XNamed:           pass
 class _XSelectionChangeListener: pass
 class _XCommandEnvironment: pass
 class _XInteractionHandler: pass
 class _XCallback:        pass
-class _XDispatchProvider: pass
-class _XDispatch: pass
 class _XContextMenuInterceptor: pass
 
 
@@ -40,31 +39,25 @@ def install():
     if sys.modules.get("uno") and getattr(sys.modules["uno"], "_STUB", False):
         return
 
-    # --- uno ---
     uno = MagicMock()
     uno._STUB = True
     uno.fileUrlToSystemPath = lambda url: url.replace("file://", "")
     uno.systemPathToFileUrl = lambda path: "file://" + path
     uno.createUnoStruct = MagicMock(return_value=MagicMock())
 
-    # --- unohelper ---
     unohelper = MagicMock()
     unohelper.Base = _UnoBase          # real class, not object
 
-    # --- officehelper ---
     officehelper = MagicMock()
 
-    # --- com.sun.star.task ---
     com_sun_star_task = MagicMock()
     com_sun_star_task.XJobExecutor = _XJobExecutor
     com_sun_star_task.XJob = _XJob
     com_sun_star_task.XInteractionHandler = _XInteractionHandler
 
-    # --- com.sun.star.ucb ---
     com_sun_star_ucb = MagicMock()
     com_sun_star_ucb.XCommandEnvironment = _XCommandEnvironment
 
-    # --- com.sun.star.awt ---
     com_sun_star_awt = MagicMock()
     com_sun_star_awt.MessageBoxButtons = MagicMock()
     com_sun_star_awt.MessageBoxType = MagicMock()
@@ -79,29 +72,19 @@ def install():
     com_sun_star_awt_msgtype = MagicMock()
     com_sun_star_awt_msgtype.MESSAGEBOX = 0
 
-    # --- com.sun.star.beans / container ---
     com_sun_star_beans = MagicMock()
     com_sun_star_beans.PropertyValue = MagicMock
 
     com_sun_star_container = MagicMock()
-    com_sun_star_container.XNamed = _XNamed
 
-    # --- com.sun.star.view ---
     com_sun_star_view = MagicMock()
     com_sun_star_view.XSelectionChangeListener = _XSelectionChangeListener
 
-    # --- com.sun.star.frame / ui ---
     com_sun_star_frame = MagicMock()
-    com_sun_star_frame.XDispatchProvider = _XDispatchProvider
-    com_sun_star_frame.XDispatch = _XDispatch
 
     com_sun_star_ui = MagicMock()
     com_sun_star_ui.XContextMenuInterceptor = _XContextMenuInterceptor
-    com_sun_star_ui.ContextMenuInterceptorAction = MagicMock()
-    com_sun_star_ui.ContextMenuInterceptorAction.EXECUTE_MODIFIED = 2
-    com_sun_star_ui.ContextMenuInterceptorAction.IGNORED = 0
 
-    # --- register all modules ---
     sys.modules.update({
         "uno": uno,
         "unohelper": unohelper,
@@ -141,7 +124,9 @@ def make_job(config_dir=None):
     Instantiate MainJob with a fully mocked UNO context.
 
     Args:
-        config_dir: directory used as UserConfig (defaults to /tmp).
+        config_dir: directory used as UserConfig (defaults to
+                    /tmp/test_libreoffice_config, shared between tests and
+                    purged by tests/unit/conftest.py).
                     Pass a real tempfile.mkdtemp() path for tests that write files.
     Returns:
         A MainJob instance ready for unit testing.
@@ -162,7 +147,8 @@ def make_job(config_dir=None):
 
     # Les tâches de fond de démarrage sont désarmées AVANT la construction :
     # `MainJob.__init__` les lance en threads, et ces threads réécrivent
-    # config.json. Les neutraliser après coup laisse la course ouverte — selon la
+    # mirai/settings.json (et l'instantané DM mirai/dm_snapshot.json). Les
+    # neutraliser après coup laisse la course ouverte : selon la
     # charge, l'un d'eux écrase la valeur que le test vient d'écrire, et l'échec
     # se déplace d'un test à l'autre. On patche donc la CLASSE le temps de
     # l'instanciation, puis on la restaure pour ne rien laisser fuir.
@@ -204,3 +190,10 @@ def read_user_config(config_dir):
     from src.mirai import local_config
     return local_config.read_json(
         os.path.join(local_config.data_dir(config_dir), local_config.SETTINGS_FILE))
+
+
+def make_jwt(payload):
+    """JWT non signé : le code testé ne lit que la charge utile."""
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    return f"{header}.{body}.sig"

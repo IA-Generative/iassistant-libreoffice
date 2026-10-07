@@ -1,10 +1,10 @@
 """Faux documents Writer/Calc à état réel (pas de simples MagicMock) pour
 asserter l'état final du document dans les tests golden des presets/tools."""
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-# ── Writer ──────────────────────────────────────────────────────────────
 
 class FakeUndoManager:
     def __init__(self):
@@ -161,8 +161,6 @@ class _FakeFound:
         return self
 
 
-# ── Calc ────────────────────────────────────────────────────────────────
-
 class FakeCell:
     def __init__(self, sheet, col, row):
         self._sheet = sheet
@@ -216,7 +214,6 @@ class _FakeAxis:
 
 def _parse_ref(ref):
     """'C4' → (2, 3) ; 'A1:B5' → adresse de plage."""
-    import re
     match = re.match(r"^\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$", ref.strip())
     if not match:
         raise ValueError(f"référence invalide : {ref}")

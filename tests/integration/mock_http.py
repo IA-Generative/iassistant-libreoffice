@@ -38,13 +38,13 @@ class _FakeResponse:
 
 
 class MockHttpRouter:
-    """URL-routing mock for _urlopen / _secure_http_call calls."""
+    """URL-routing mock for _urlopen calls."""
 
     def __init__(self):
         self.calls = []
         self._routes = []
 
-    def add(self, method, url_contains, body=None, status=200, headers=None, streaming=False):
+    def add(self, method, url_contains, body=None, status=200, headers=None):
         """Register a handler.
 
         Args:
@@ -53,7 +53,6 @@ class MockHttpRouter:
             body:         dict → JSON-encoded, bytes → raw, None → empty
             status:       HTTP status code
             headers:      dict of response headers
-            streaming:    if True, body is raw bytes with SSE lines (for LLM streaming)
         """
         if isinstance(body, dict):
             raw = json.dumps(body).encode()
@@ -71,7 +70,7 @@ class MockHttpRouter:
             "headers": headers or {},
         })
 
-    # ---- _urlopen signature: (request, context=None, timeout=None, use_proxy=None)
+    # Same signature as MainJob._urlopen (whose use_proxy defaults to True).
 
     def __call__(self, request, context=None, timeout=None, use_proxy=None):
         if isinstance(request, urllib.request.Request):
@@ -90,31 +89,11 @@ class MockHttpRouter:
                 continue
             if route["url_contains"] not in url:
                 continue
-            resp = _FakeResponse(route["status"], route["raw"], route["headers"])
             if route["status"] >= 400:
                 raise urllib.error.HTTPError(url, route["status"], "mock error", {}, None)
-            return resp
+            return _FakeResponse(route["status"], route["raw"], route["headers"])
 
         raise urllib.error.URLError(f"MockHttpRouter: no handler for {method} {url}")
-
-    # ---- _secure_http_call signature: (method, url, body, headers, timeout, use_proxy)
-
-    def secure_call(self, method, url, body=None, headers=None, timeout=10, use_proxy=False):
-        """Adapter for SecureBootstrapFlow._http_call interface."""
-        self.calls.append({"method": method, "url": url, "headers": headers or {}})
-        for route in self._routes:
-            if route["method"] != method.upper():
-                continue
-            if route["url_contains"] not in url:
-                continue
-            if route["status"] >= 400:
-                from src.mirai.security_flow import HttpStatusError
-                raise HttpStatusError(status=route["status"], body=route["raw"].decode())
-            resp_headers = dict(route["headers"])
-            return route["status"], resp_headers, route["raw"]
-        raise ConnectionError(f"MockHttpRouter.secure_call: no handler for {method} {url}")
-
-    # ---- Assertion helpers
 
     def called(self, method, url_contains):
         """Return True if a call matching method + URL substring was made."""

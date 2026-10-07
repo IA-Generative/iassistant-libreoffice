@@ -866,7 +866,7 @@ def test_package_cache_dir_anchors_on_description_xml(monkeypatch):
 
 def test_package_cache_dir_falls_back_to_fixed_depth_without_description_xml(monkeypatch):
     """Aucun description.xml au-dessus (tests, arborescence inattendue) :
-    comportement historique, cinq niveaux."""
+    repli sur une profondeur fixe de cinq niveaux."""
     root = _mkdtemp()
     deep = os.path.join(root, "cache", "lu42.tmp_", "mirai.oxt", "src", "mirai")
     os.makedirs(deep)

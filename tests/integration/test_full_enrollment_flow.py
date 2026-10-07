@@ -12,14 +12,12 @@ Sequence validated (per device-management README — Secure Relay Flow):
   7.  Plugin → DM:  GET /config/libreoffice/config.json   (X-Relay-Client + X-Relay-Key)
   8.  DM → Plugin:  config with secret values (llm_api_tokens, llm_base_urls)
   9.  Plugin → LLM: POST /v1/chat/completions             (Authorization: Bearer llm-secret-token)
-  10. LLM → Plugin: streaming completion response
+      (the request is built and checked, never sent)
 
 All external HTTP calls are intercepted via MockHttpRouter.
 The PKCE callback server IS real (localhost socket started by _wait_for_auth_code).
 webbrowser.open is patched to auto-send the auth code to that server.
 """
-import base64
-import json
 import tempfile
 import threading
 import time
@@ -29,23 +27,12 @@ import urllib.request
 from unittest.mock import patch
 
 from tests.integration.mock_http import MockHttpRouter
-from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
+from tests.stubs.uno_stubs import install, make_job, make_jwt, read_user_config, seed_user_config
 
 install()
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
-
-def _jwt(payload: dict) -> str:
-    """Build a minimal unsigned JWT for testing."""
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    body = base64.urlsafe_b64encode(
-        json.dumps(payload).encode()
-    ).rstrip(b"=").decode()
-    return f"{header}.{body}.fakesig"
-
 
 def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
     """
@@ -68,15 +55,13 @@ def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
     threading.Thread(target=_send, daemon=True).start()
 
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 BOOTSTRAP_URL = "http://dm.test"
 KC_BASE = "http://keycloak.test/realms/mirai"
 LLM_BASE = "http://llm.test"
 
-FAKE_ACCESS_TOKEN = _jwt({"sub": "user-1", "email": "user@test.local", "exp": 9_999_999_999})
+FAKE_ACCESS_TOKEN = make_jwt({"sub": "user-1", "email": "user@test.local", "exp": 9_999_999_999})
 FAKE_REFRESH_TOKEN = "refresh-token-abc"
 RELAY_CLIENT_ID = "relay-client-001"
 RELAY_CLIENT_KEY = "relay-key-secret"
@@ -114,17 +99,7 @@ DM_SECRET_CONFIG = {
     },
 }
 
-# SSE streaming response for LLM (step 9).
-LLM_STREAMING_RESPONSE = (
-    b'data: {"choices":[{"delta":{"content":"Bonjour"},"finish_reason":null}]}\n\n'
-    b'data: {"choices":[{"delta":{"content":" monde"},"finish_reason":null}]}\n\n'
-    b'data: [DONE]\n\n'
-)
-
-
-# ---------------------------------------------------------------------------
 # Test class
-# ---------------------------------------------------------------------------
 
 class TestFullEnrollmentFlow(unittest.TestCase):
     """
@@ -138,11 +113,6 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp()
         self._write_local_config()
         self.job = make_job(config_dir=self.tmpdir)
-
-        # Wait for __init__ background threads (schedule_config_refresh) to settle,
-        # then clear the recursion guard so our tests can call _fetch_config freely.
-        time.sleep(0.1)
-        self.job._fetching_config = False
 
         self.router = MockHttpRouter()
         self._register_routes()
@@ -191,15 +161,6 @@ class TestFullEnrollmentFlow(unittest.TestCase):
             "relayClientKey": RELAY_CLIENT_KEY,
             "relayKeyExpiresAt": 9_999_999_999,
         })
-        # Step 7: config with secrets (after enrollment, relay headers present)
-        # Same URL suffix — router matches first registered route; we rotate in tests
-        # that need the secret config by re-registering or using a separate router.
-        self.router.add("GET", "/config/libreoffice/config.json",
-                        body=DM_SECRET_CONFIG)
-        # Step 9: LLM streaming response
-        self.router.add("POST", "/chat/completions",
-                        body=LLM_STREAMING_RESPONSE, status=200)
-        self.router._routes[-1]["raw"] = LLM_STREAMING_RESPONSE  # ensure raw bytes
 
     def _patch_urlopen(self):
         return patch.object(self.job, "_urlopen", side_effect=self.router)
@@ -213,10 +174,9 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         Au PREMIER enrôlement, `_authorization_code_flow` passe par
         `_show_enrollment_wizard` au lieu d'un simple `_confirm_message`. Hors
         LibreOffice, le wizard échoue à construire son dialogue et retombe sur
-        `(False, None, None, None, None)` — le flux sortait donc avant même
-        d'ouvrir le navigateur, et ces tests étaient rouges depuis l'ajout du
-        wizard sans que personne ne le voie. On rend ici la décision de
-        l'utilisateur, sans la couche graphique.
+        `(False, None, None, None, None)` : le flux sortirait avant même
+        d'ouvrir le navigateur. On rend ici la décision de l'utilisateur, sans
+        la couche graphique.
         """
         return patch.object(
             self.job, "_show_enrollment_wizard",
@@ -225,9 +185,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
     def _patch_show_message(self):
         return patch.object(self.job, "_show_message", return_value=None)
 
-    # ------------------------------------------------------------------
     # Step 1 + 2: Bootstrap config fetch — no relay headers
-    # ------------------------------------------------------------------
 
     def test_01_bootstrap_config_fetch_no_relay_headers(self):
         """
@@ -248,9 +206,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertNotIn("x-relay-key", first_headers,
                          "No relay key header on first bootstrap fetch")
 
-    # ------------------------------------------------------------------
     # Steps 3 + 4: PKCE — browser opens, code received, tokens stored
-    # ------------------------------------------------------------------
 
     def test_02_pkce_flow_stores_tokens(self):
         """
@@ -296,9 +252,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertTrue(self.job._get_config_from_file("refresh_token", ""),
                         "refresh_token must be stored")
 
-    # ------------------------------------------------------------------
     # Steps 5 + 6: Device Management enrollment
-    # ------------------------------------------------------------------
 
     def test_03_enroll_stores_relay_credentials(self):
         """
@@ -306,7 +260,6 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         """
         # Pre-load tokens so _ensure_access_token skips interactive PKCE
         self.job.set_config("access_token", FAKE_ACCESS_TOKEN)
-        self.job.set_config("access_token_expires_at", 9_999_999_999)
         # Pre-load DM config so enroll endpoint is found
         self.job.config_cache = DM_PUBLIC_CONFIG
         self.job.config_loaded_at = time.time()
@@ -334,9 +287,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         saved = read_user_config(self.tmpdir)
         self.assertTrue(saved.get("enrolled"), "enrolled flag must be True")
 
-    # ------------------------------------------------------------------
     # Steps 7 + 8: Re-fetch config with relay headers → secrets returned
-    # ------------------------------------------------------------------
 
     def test_04_second_config_fetch_uses_relay_headers(self):
         """
@@ -366,13 +317,11 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertIsNotNone(relay_call,
                              "At least one config fetch must include relay headers after enrollment")
 
-    # ------------------------------------------------------------------
-    # Steps 9 + 10: LLM call with correct credentials
-    # ------------------------------------------------------------------
+    # Step 9: LLM call with correct credentials
 
     def test_05_llm_call_uses_secret_token(self):
         """
-        Steps 9-10: make_api_request targets /chat/completions with the LLM secret token.
+        Step 9: make_api_request targets /chat/completions with the LLM secret token.
         """
         # Simulate post-enrollment state: config cache holds LLM secrets
         self.job.config_cache = DM_SECRET_CONFIG
@@ -398,13 +347,11 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertIn("chat/completions", req.full_url,
                       "Chat API must target /chat/completions")
 
-    # ------------------------------------------------------------------
     # Golden path: all steps in sequence
-    # ------------------------------------------------------------------
 
     def test_06_full_sequence_in_order(self):
         """
-        Runs all 10 steps in sequence, verifying each stage of the
+        Runs steps 1 to 9 in sequence, verifying each stage of the
         device-management README Secure Relay Flow diagram.
         """
         captured_browser = {}
@@ -413,7 +360,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
             captured_browser["url"] = url
             _pkce_auto_callback(url, delay=0.2)
 
-        # ── Step 1-2: Bootstrap config (no relay headers) ──────────────
+        # Steps 1-2: Bootstrap config (no relay headers)
         with self._patch_urlopen():
             config = self.job._fetch_config(force=True)
         self.assertIsNotNone(config, "Step 1: bootstrap config must be returned")
@@ -425,7 +372,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         )
         self.router.calls.clear()
 
-        # ── Steps 3-4: PKCE ────────────────────────────────────────────
+        # Steps 3-4: PKCE
         self.job.config_cache = DM_PUBLIC_CONFIG
         self.job.config_loaded_at = time.time()
 
@@ -443,7 +390,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
                         "Step 4: access_token must be stored")
         self.router.calls.clear()
 
-        # ── Steps 5-6: Enrollment ───────────────────────────────────────
+        # Steps 5-6: Enrollment
         self.job.config_cache = DM_PUBLIC_CONFIG
         self.job.config_loaded_at = time.time()
 
@@ -458,7 +405,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertTrue(saved.get("enrolled"), "Step 6: enrolled flag must be set")
         self.router.calls.clear()
 
-        # ── Steps 7-8: Re-fetch with relay headers ──────────────────────
+        # Steps 7-8: Re-fetch with relay headers
         self.job.config_cache = None
         self.job.config_loaded_at = 0
         # Garde de récursion : _ensure_device_management_state a pu la laisser
@@ -479,7 +426,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertTrue(has_relay, "Steps 7-8: config re-fetch must include relay headers")
         self.router.calls.clear()
 
-        # ── Steps 9-10: LLM call ────────────────────────────────────────
+        # Step 9: LLM request
         self.job.config_cache = DM_SECRET_CONFIG
         self.job.config_loaded_at = time.time()
         self.job.set_config("llm_base_urls", LLM_BASE)
@@ -491,10 +438,6 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
         req_headers = {k.lower(): v for k, v in dict(req.headers).items()}
         self.assertIn(LLM_SECRET_TOKEN, req_headers.get("authorization", ""),
-                      "Steps 9-10: LLM request must carry the secret credential")
+                      "Step 9: LLM request must carry the secret credential")
         self.assertIn("chat/completions", req.full_url,
-                      "Steps 9-10: LLM call must target /chat/completions")
-
-
-if __name__ == "__main__":
-    unittest.main()
+                      "Step 9: LLM call must target /chat/completions")

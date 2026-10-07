@@ -5,7 +5,6 @@ Run:  pytest tests/unit/test_config_fetch_perf.py -v
 """
 import json
 import os
-import tempfile
 import time
 from unittest.mock import MagicMock
 
@@ -19,7 +18,7 @@ def _cfg(job, values):
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: values.get(k, d))
 
 
-# ── Fix 1 : _failover_ordered_urls (essaie le DM gagnant en premier) ──
+# ── _failover_ordered_urls (essaie le DM gagnant en premier) ──
 
 def test_failover_prefers_in_memory_resolved_url():
     job = make_job()
@@ -55,10 +54,10 @@ def test_failover_single_url_unchanged():
     assert job._failover_ordered_urls() == ["https://only"]
 
 
-# ── Fix 3 : persist + hydrate du cache config ────────────────────────
+# ── persist + hydrate du cache config ────────────────────────
 
-def test_config_cache_persist_and_hydrate_roundtrip():
-    d = tempfile.mkdtemp()
+def test_config_cache_persist_and_hydrate_roundtrip(tmp_path):
+    d = str(tmp_path)
     job = make_job(config_dir=d)
     data = {"meta": {"schema_version": 2}, "config": {"keycloakRealm": "mirai"}}
     job._persist_config_cache(data)
@@ -70,8 +69,8 @@ def test_config_cache_persist_and_hydrate_roundtrip():
     assert job2.config_cache == data
 
 
-def test_config_cache_hydrate_skips_when_stale():
-    d = tempfile.mkdtemp()
+def test_config_cache_hydrate_skips_when_stale(tmp_path):
+    d = str(tmp_path)
     job = make_job(config_dir=d)
     local_config.write_json_atomic(
         os.path.join(d, "mirai", "dm_snapshot.json"),
@@ -81,8 +80,8 @@ def test_config_cache_hydrate_skips_when_stale():
     assert job.config_cache is None
 
 
-def test_config_cache_hydrate_noop_when_already_cached():
-    d = tempfile.mkdtemp()
+def test_config_cache_hydrate_noop_when_already_cached(tmp_path):
+    d = str(tmp_path)
     job = make_job(config_dir=d)
     job._persist_config_cache({"config": {"a": 1}})
     job.config_cache = {"config": {"already": "loaded"}}
@@ -90,7 +89,7 @@ def test_config_cache_hydrate_noop_when_already_cached():
     assert job.config_cache == {"config": {"already": "loaded"}}
 
 
-# ── Fix 2 : timeout de fetch configurable ────────────────────────────
+# ── timeout de fetch configurable ────────────────────────────
 
 def _mini_response(obj):
     resp = MagicMock()
@@ -109,8 +108,7 @@ def test_config_fetch_uses_configurable_timeout():
         "proxy_enabled": False,
         "config_fetch_timeout_seconds": 3,
     })
-    for attr in ("_relay_headers",):
-        setattr(job, attr, MagicMock(return_value={}))
+    job._relay_headers = MagicMock(return_value={})
     job._get_extension_version = MagicMock(return_value="1.0.0")
     job._get_lo_version = MagicMock(return_value="24.8")
     job._ensure_plugin_uuid = MagicMock(return_value="u")
