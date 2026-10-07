@@ -18,7 +18,7 @@ Statuts : ✅ OK | ⚠️ TRUNCATED | 🔄 QUESTION | 🛑 STOP | ❌ ERROR
 
 ### gpt-oss-120b — statut production : ✅
 
-Les TRUNCATED observés pour gpt-oss sur ExtendSelection et SummarizeSelection sont des **artefacts du benchmark** (max_tokens conservateurs : 500 / 300). Avec les paramètres de production (`max_tokens=15000`), les trois scénarios passent sans problème (retesté à `max_tokens=2000`, résultats dans `gpt_oss_production_tokens.md`). gpt-oss reste le modèle de référence.
+Les TRUNCATED observés pour gpt-oss sur ExtendSelection et SummarizeSelection sont des **artefacts du benchmark** (max_tokens conservateurs : 500 / 300). Avec les paramètres de production (`max_tokens=15000`), les trois scénarios passent sans problème (retesté à `max_tokens=2000`). gpt-oss reste le modèle de référence.
 
 ### Modèles à éviter en production
 

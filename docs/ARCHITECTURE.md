@@ -17,7 +17,7 @@
 │ core/entry.py (le pont)    │──▶│ ui/palette.py (DSFR)      │
 │ MainJobShell(job)          │   │ chips · prompt · sélection│
 └────────────┬───────────────┘   │ zone basse à onglets :    │
-             │ ShellServices     │ Historique/Suggest./Actions│
+             │ ShellServices     │ Conv./Sugg./Raison./Actions│
 ┌────────────▼───────────────────┴───────────────────────────┐
 │ MOTEUR (core/) — jamais d'import de la coquille (testé)    │
 │ registry (tools MCP-like) · orchestrator (boucle agentique)│
@@ -28,7 +28,7 @@
 
 ## Règles non négociables
 
-1. **Threading — modèle worker + dispatcher** (itération 2, remplace le drain).
+1. **Threading — modèle worker + dispatcher**.
    Le run **entier** vit dans un thread worker ; le thread principal retourne
    immédiatement à la boucle d'événements de LibreOffice, qui reste utilisable
    pendant toute la génération. Tout ce qui touche UNO — document, contrôles,
@@ -244,7 +244,7 @@ comme « la demande porte sur le document entier ».
 
 ## Tests
 
-`python3 -m pytest tests/unit/ -v` — 337 tests (coquille inchangée + moteur).
+`python3 -m pytest tests/unit/ tests/integration/ -q` (ou `./scripts/03-test-local.sh`) : coquille + moteur.
 Golden iso-fonctionnels : `test_presets_writer.py` / `test_presets_calc.py`
 rejouent chaque fonction historique via le moteur (FakeShell + SSE scripté +
 faux documents à état réel).
@@ -252,8 +252,8 @@ faux documents à état réel).
 ## De démonstrateur à produit (dette nommée, si on poursuit)
 
 1. Supprimer le cœur legacy d'entrypoint.py + `menu_actions/` (commit de pure
-   suppression — prévu, non fait tant que la validation utilisateur n'est pas
-   passée) puis, une release plus tard, `stream_request`/`make_api_request`.
+   suppression, une fois la validation utilisateur passée) puis, une release
+   plus tard, `stream_request`/`make_api_request`.
 2. Unifier `=PROMPT()` (`calc_prompt_function.py`) sur la façade (≈150 lignes
    dupliquées de la coquille, sans Keycloak ni relais).
 3. `ui_ask_user` (questions de clarification interactives dans la palette).
@@ -265,7 +265,7 @@ faux documents à état réel).
 
 macOS 26 (Darwin 25.5) tue les binaires auxiliaires de LibreOffice.app
 (`uno`, `unopkg`, python embarqué) : SIGKILL « Launch Constraint Violation »
-→ `unopkg add` et l'install in-process échouent. Réparation (2026-07-25) :
+→ `unopkg add` et l'install in-process échouent. Réparation :
 re-signature ad hoc (`codesign --force -s - <binaire>`) de
 `Contents/MacOS/{uno,unopkg,gengal,regview,senddoc,unoinfo,uri-encode,xpdfimport,opencltest}`
 et du framework Python embarqué. **À refaire après chaque mise à jour de

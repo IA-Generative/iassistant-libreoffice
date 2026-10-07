@@ -21,7 +21,7 @@
 ## Fonctionnalités Writer
 
 > **Accès unique — `Ctrl+Alt+Espace`** (macOS : `Ctrl+Opt+Espace`), ou l'entrée
-> **🤖 MIrAI — Assistant** du menu, ou le clic droit sur une sélection dans Writer.
+> **🤖 Ouvrir l'assistant** du menu **🤖 MIrAI**, ou le clic droit sur une sélection dans Writer.
 > Les raccourcis par fonction ont été **supprimés** : ils écrasaient des commandes
 > de LibreOffice (`Ctrl+Q` = Quitter, `Ctrl+E` = centrer, `Ctrl+R` = aligner à
 > droite, `Ctrl+L` = aligner à gauche, `Ctrl+K` = insérer un hyperlien), et l'un
