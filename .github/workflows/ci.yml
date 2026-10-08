@@ -1,24 +1,62 @@
-# CI — tests unitaires + intégration + build smoke (.oxt) à chaque push/PR.
-# Le plugin n'a AUCUNE dépendance pip (stdlib + stubs UNO) : seul pytest est
-# installé. Le build smoke (test_build_oxt_smoke.py) exécute réellement
-# scripts/02-build-oxt.sh (zip/unzip/git sont présents sur ubuntu-latest).
+# CI : lint, tests unitaires + intégration + build smoke (.oxt) à chaque push/PR.
+# Le plugin n'a AUCUNE dépendance pip (stdlib + stubs UNO) : seuls pytest et
+# ruff sont installés. Le build smoke (test_build_oxt_smoke.py) exécute
+# réellement scripts/02-build-oxt.sh (zip/unzip/git sont présents sur ubuntu-latest).
 name: CI
 
 on:
   push:
-    branches: [master, develop, "fix/**", "feat/**", "exp-jetable/**"]
+    branches: [master, develop, "fix/**", "feat/**", "chore/**", "refactor/**", "exp-jetable/**"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  tests:
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    env:
+      # Erreurs ruff tolérées sur src et tests : ce plafond ne fait que baisser.
+      RUFF_BUDGET: "21"
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff==0.16.10
+
+      - name: Lint bloquant (moteur, palette, tests)
+        run: ruff check src/mirai/core src/mirai/ui tests --ignore C901
+
+      - name: Budget de lint (src et tests)
+        run: |
+          ruff check src tests --statistics --exit-zero
+          count=$(ruff check src tests --output-format concise --exit-zero | grep -cE ':[0-9]+:[0-9]+: [A-Z]+[0-9]+' || true)
+          echo "erreurs ruff : $count (budget : $RUFF_BUDGET)"
+          if [ "$count" -gt "$RUFF_BUDGET" ]; then
+            echo "::error::$count erreurs ruff, au-delà du budget de $RUFF_BUDGET"
+            exit 1
+          fi
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 : le Python embarqué par LibreOffice 25.8 sous Windows et macOS.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
       - name: Install test runner
         run: pip install pytest
