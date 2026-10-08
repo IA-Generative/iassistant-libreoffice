@@ -2,7 +2,17 @@
 
 import unittest
 
-from src.mirai.formatting.ast_nodes import Blockquote, Bold, Heading, Italic, Link, ListItem, Paragraph, Table, Text
+from src.mirai.formatting.ast_nodes import (
+    Blockquote,
+    Bold,
+    Heading,
+    Italic,
+    Link,
+    ListItem,
+    Paragraph,
+    Table,
+    Text,
+)
 from src.mirai.formatting.html_parser import parse_html
 from src.mirai.formatting.insert import looks_like_html
 

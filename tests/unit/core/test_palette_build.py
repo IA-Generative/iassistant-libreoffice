@@ -11,10 +11,14 @@ famille de pannes qui empêche l'ouverture : attribut manquant, appel de
 méthode inexistante, mauvaise signature.
 """
 
+import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from src.mirai import i18n
+from src.mirai.i18n import t as _t
 from tests.stubs.uno_stubs import install
 
 install()
@@ -46,9 +50,6 @@ class FakeControlModel:
         self.TextColor = 0
         self.FontWeight = 100.0
 
-    def __setattr__(self, name, value):
-        object.__setattr__(self, name, value)
-
 
 class FakeControl:
     """Contrôle UNO minimal : accepte tout, mesure une taille plausible."""
@@ -67,9 +68,6 @@ class FakeControl:
 
     def getPreferredSize(self):
         return FakeSize()
-
-    def getModel(self):
-        return self.model
 
     def setVisible(self, value):
         self.visible = value
@@ -94,7 +92,7 @@ class FakeControl:
 
 
 class FakePeer:
-    """Peer minimal : `toFront()` est ce qui remonte une fenêtre autonome."""
+    """Peer minimal : `toFront()` est ce qui remonte une fenêtre non modale."""
 
     def __init__(self):
         self.front_calls = 0
@@ -185,7 +183,7 @@ def palette_module(monkeypatch):
     # assertions porteraient alors sur un affichage jamais mis à jour.
     monkeypatch.setattr(palette_module, "MainThreadDispatcher",
                         lambda _ctx, log=None: DirectDispatcher())
-    palette_module._fake_dialog = dialog
+    monkeypatch.setattr(palette_module, "_fake_dialog", dialog, raising=False)
     return palette_module
 
 
@@ -197,7 +195,7 @@ def _build(palette_module, app="writer"):
     shell.log = lambda _m: None
 
     uno_ctx = MagicMock()
-    return palette_module.AssistantPalette(uno_ctx, shell, app, callbacks={})
+    return palette_module.AssistantPalette(uno_ctx, shell, app)
 
 
 def test_palette_builds_for_writer(palette_module):
@@ -283,7 +281,8 @@ def test_conversation_shows_most_recent_first(palette_module):
         {"role": "user", "text": "seconde question", "app": "writer"},
         {"role": "assistant", "text": "seconde réponse", "app": "writer"},
     ]
-    palette.reload_history()
+    palette._history_cache = None
+    palette._render_conversation()
 
     text = palette._models["response"].Text
     assert text.index("seconde question") < text.index("première question"), (
@@ -298,14 +297,15 @@ def test_current_exchange_stays_on_top(palette_module):
         {"role": "user", "text": "ancienne", "app": "writer"},
         {"role": "assistant", "text": "ancienne réponse", "app": "writer"},
     ]
-    palette.reload_history()
+    palette._history_cache = None
+    palette._render_conversation()
     palette._append_response("Vous : ", "en cours")
 
     text = palette._models["response"].Text
     assert text.index("en cours") < text.index("ancienne")
 
 
-# ── Mode « ajouter à la suite » ─────────────────────────────────────────
+# Mode « ajouter à la suite »
 
 def test_append_mode_checkbox_exists(palette_module):
     """Les deux écoles coexistent : remplacer, ou ajouter entre marqueurs."""
@@ -341,7 +341,7 @@ def test_sink_follows_the_choice(palette_module):
     assert "début-du-texte-modifié" in sink.header_marker
 
 
-# ── Journal d'actions ───────────────────────────────────────────────────
+# Journal d'actions
 
 def test_journal_receives_lines_outside_agentic_mode(palette_module):
     """L'onglet Actions restait vide sur les presets et la réécriture."""
@@ -417,7 +417,7 @@ def test_set_text_tolerates_a_missing_control(palette_module):
     palette._set_text("inexistant", "x")   # ne doit pas lever
 
 
-# ── Panneau de réflexion (le « ⓘ ») ─────────────────────────────────────
+# Panneau de réflexion (le « ⓘ »)
 
 def test_reasoning_has_its_own_tab(palette_module):
     """Le raisonnement porte son propre onglet, en plus du raccourci ⓘ.
@@ -432,7 +432,7 @@ def test_reasoning_has_its_own_tab(palette_module):
     assert palette_module.REASONING_PANE in names
     assert "reasoning_toggle" in names          # le raccourci reste
     assert f"tab_{palette_module.REASONING_PANE}" in names
-    assert ("reasoning", "Raisonnement") in palette_module.TABS
+    assert ("reasoning", "tab.reasoning") in palette_module.TABS
 
 
 def test_reasoning_tab_is_never_blank(palette_module):
@@ -479,14 +479,10 @@ def test_marker_appears_only_when_there_is_something_to_read(palette_module):
     assert palette._models["reasoning_toggle"].Label == ""
 
 
-# ── Span de run unifié (AssistantRun sur les 4 chemins) ─────────────────
+# Span de run unifié (AssistantRun sur les 4 chemins)
 # L'orchestrateur n'émettait le span QUE pour le mode agentique : pipeline,
 # réécriture de sélection et réécriture de document étaient invisibles.
 # Le point d'émission unique est le finally de `_run_in_worker`.
-
-import threading
-from types import SimpleNamespace
-
 
 def _run_spans(palette):
     return [c.args[1] for c in palette.shell.telemetry.call_args_list
@@ -611,7 +607,35 @@ def test_document_rewrite_reports_why_it_did_nothing(palette_module):
             "ok": False, "reason": "headings_only"}
 
 
-# ── Refus de lancement ──────────────────────────────────────────────────
+def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
+    """Sélection ou document entier : le texte réécrit garde sa langue, quelle
+    que soit celle de l'interface."""
+    sent = []
+
+    class _Client:
+        def __init__(self, _shell, max_tokens=None):
+            pass
+
+        def step(self, messages, **_kwargs):
+            sent.append(messages)
+            return SimpleNamespace(error="network_error")
+
+    monkeypatch.setattr(palette_module, "LLMClient", _Client)
+    i18n.set_locale("en")
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    palette._run_selection_rewrite(MagicMock(), "shorten", "Some English text.")
+    palette._run_document_rewrite(
+        MagicMock(), "shorten", ["First paragraph.", "Second paragraph."])
+
+    assert len(sent) == 2
+    for messages in sent:
+        system = messages[0]["content"]
+        assert "MÊME LANGUE que le texte fourni" in system
+        assert i18n.t("llm.answer_language") not in system
+
+
+# Refus de lancement
 
 def test_an_empty_prompt_refusal_is_counted(palette_module):
     palette = _build(palette_module)
@@ -659,7 +683,7 @@ def test_no_document_refusal_is_counted(palette_module):
     assert _step_spans(palette.shell, "run.refused")[0]["refuse.reason"] == "no_document"
 
 
-# ── Session : compteurs agrégés, un seul span à la fermeture ────────────
+# Session : compteurs agrégés, un seul span à la fermeture
 # Un span par clic d'onglet saturerait l'envoi (1 span = 1 requête HTTP) :
 # les interactions IHM sont comptées en mémoire et partent en UNE fois.
 
@@ -711,13 +735,13 @@ def test_refocusing_an_open_palette_is_telemetered(palette_module):
     palette_module._open_palette[0] = palette
     shell = MagicMock()
 
-    result = palette_module.open_or_focus(MagicMock(), shell, "writer", {})
+    result = palette_module.open_or_focus(MagicMock(), shell, "writer")
 
     assert result is palette
     assert len(_step_spans(shell, "palette.refocused")) == 1
 
 
-# ── Filet anti-blocage ──────────────────────────────────────────────────
+# Filet anti-blocage
 
 def test_heal_stuck_is_telemetered(palette_module):
     """Chaque déclenchement du filet = un lot de messages async perdus.
@@ -738,7 +762,7 @@ def test_heal_does_nothing_on_a_healthy_palette(palette_module):
     assert _step_spans(palette.shell, "ui.heal_stuck") == []
 
 
-# ── Analyse asynchrone du document (onglet Suggestions) ─────────────────────
+# Analyse asynchrone du document (onglet Suggestions)
 #
 # La pompe du dispatcher NE TOURNE QUE PENDANT UN RUN (ui_thread.start_pump).
 # La première version lisait le document par `dispatcher.call` depuis le thread
@@ -851,7 +875,7 @@ def test_short_document_is_reported_without_calling_the_model(palette_module, mo
                        _client(_Reponse(), budgets=budgets), doc="Trois mots.")
     assert demarre is False
     assert budgets == []                  # aucun aller-retour réseau inutile
-    assert palette._analysis_text == palette_module.doc_analysis.TOO_SHORT
+    assert palette._analysis_text == _t("analysis.too_short")
 
 
 def test_no_analysis_outside_writer(palette_module, monkeypatch):
@@ -888,8 +912,8 @@ def test_wait_is_shown_in_the_status_line_like_a_run(palette_module, monkeypatch
                         lambda **kw: type("T", (), {"start": lambda _s: None})())
     assert palette.start_document_analysis() is True
     rendu = palette._progress.render()
-    assert palette_module.doc_analysis.PHASE in rendu
-    assert palette_module.doc_analysis.PHASE not in palette._models["suggestions"].Text
+    assert _t("analysis.phase") in rendu
+    assert _t("analysis.phase") not in palette._models["suggestions"].Text
 
 
 def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, monkeypatch):
@@ -904,7 +928,7 @@ def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, m
     assert arrets == []
 
 
-# ── Lignes cliquables (Conversation et Suggestions) ─────────────────────────
+# Lignes cliquables (Conversation et Suggestions)
 
 def _clic(palette, name, offset):
     palette._pick_from_pane(name, offset)
@@ -972,7 +996,7 @@ def test_journal_and_reasoning_are_not_clickable(palette_module):
                        for handler in listeners), f"« {name} » ne doit pas être cliquable"
 
 
-# ── Fenêtre autonome, titre, et application courante ────────────────────────
+# Fenêtre non modale, titre, et application courante
 #
 # La palette était une fenêtre POSSÉDÉE par la fenêtre de document active à son
 # ouverture. Mesuré le 2026-08-04 sur un Mac à trois écrans : impossible de la

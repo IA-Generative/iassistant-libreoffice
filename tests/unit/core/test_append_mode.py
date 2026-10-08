@@ -64,14 +64,12 @@ def test_defaults_match_historic_behaviour():
     expected = {"summarize": True, "simplify": True,
                 "shorten": False, "lengthen": False}
     for preset_id, appends in expected.items():
-        runner = presets.get_preset(preset_id).runner
+        runner = next(p for p in presets.PRESETS if p.id == preset_id).runner
         default = inspect.signature(runner).parameters["append_mode"].default
         assert default is appends, f"{preset_id} : défaut inattendu"
 
 
-# ── Le prompt libre doit écrire dans le DOCUMENT ────────────────────────
-
-def test_free_prompt_with_selection_targets_the_document(palette_module=None):
+def test_free_prompt_with_selection_targets_the_document():
     """Un prompt libre sur une sélection modifie le document, pas la palette.
 
     Sans ce chemin, la demande partait en mode agentique dont le sink est la

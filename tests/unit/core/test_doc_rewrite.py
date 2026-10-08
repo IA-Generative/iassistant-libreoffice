@@ -12,7 +12,7 @@ from src.mirai.core.doc_rewrite import (
     wants_document_rewrite,
 )
 
-# ── Détection d'intention ───────────────────────────────────────────────
+# Détection d'intention
 #
 # Le principe : sans sélection, tout ce qui n'est pas une QUESTION est un ordre
 # portant sur le document. Énumérer les verbes de modification est sans fin —
@@ -76,7 +76,7 @@ def test_is_question_is_exposed():
     assert not is_question("Raccourcis ce texte")
 
 
-# ── Construction de la demande ──────────────────────────────────────────
+# Construction de la demande
 
 def test_prompt_numbers_the_paragraphs():
     prompt = build_rewrite_prompt(["Titre", "Corps."], "réécris en un bloc")
@@ -92,7 +92,7 @@ def test_prompt_forbids_commentary():
     assert "sans les marqueurs" in prompt
 
 
-# ── Lecture de la réponse ───────────────────────────────────────────────
+# Lecture de la réponse
 
 def test_parses_one_paragraph_per_line():
     assert parse_rewritten("Premier bloc.\nSecond bloc.") == [
@@ -119,7 +119,7 @@ def test_empty_response_yields_nothing():
     assert parse_rewritten(None) == []
 
 
-# ── Préservation des titres ─────────────────────────────────────────────
+# Préservation des titres
 
 def test_heading_styles_are_recognised():
     from src.mirai.core.doc_rewrite import is_heading

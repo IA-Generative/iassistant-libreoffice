@@ -22,8 +22,7 @@ def insert_formatted(model, text_obj, cursor, raw_text, base_char_style=None, ba
     Writer content: real headings, bold/italic, lists, quotes, links and
     tables instead of literal Markdown/HTML syntax.
 
-    Plain prose with no recognizable markup is inserted exactly as before
-    (a single paragraph), so existing plain-text responses are unaffected.
+    Plain prose with no recognizable markup becomes a single paragraph.
     """
     if not raw_text:
         return

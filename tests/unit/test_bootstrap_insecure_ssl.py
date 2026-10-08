@@ -12,7 +12,7 @@ Run with:
 import ssl
 from unittest.mock import MagicMock
 
-# ── Stubs must be installed before importing entrypoint ──────────────
+# Stubs must be installed before importing entrypoint
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -31,8 +31,6 @@ def _job_with_config(values):
     )
     return job
 
-
-# ── _is_insecure_bootstrap_url ───────────────────────────────────────
 
 def test_insecure_match_base_and_full_url():
     job = _job_with_config({"bootstrap_insecure_urls": [OCP]})
@@ -59,8 +57,6 @@ def test_bare_host_entry_tolerated():
     )
     assert job._is_insecure_bootstrap_url(OCP) is True
 
-
-# ── get_ssl_context(target_url) ──────────────────────────────────────
 
 def test_context_insecure_for_ocp():
     job = _job_with_config(

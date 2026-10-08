@@ -9,6 +9,7 @@ de prompt ne part en télémétrie — uniquement compteurs et statuts.
 import dataclasses
 import time
 
+from ..i18n import t as _t
 from . import prompts
 from .progress import NullProgress
 
@@ -40,31 +41,22 @@ class RunResult:
     reason: str = ""
 
 
-ERROR_MESSAGES = {
+ERROR_KEYS = {
     # Le renouvellement automatique du jeton (refresh /config, puis
     # ré-enrôlement) a déjà été tenté avant d'en arriver là : ce message ne
     # s'affiche que si le poste n'a pas pu se ré-authentifier tout seul.
-    "http_401": ("Votre poste n'est pas authentifié auprès du service IA. "
-                 "Ouvrez les Réglages pour vous reconnecter."),
-    "http_403": ("Accès refusé par le relais — la configuration se "
-                 "resynchronise. Réessayez dans quelques instants."),
-    "http_429": ("Quota de requêtes atteint. Merci de réessayer dans "
-                 "quelques instants."),
-    "network_error": ("Le serveur IA est injoignable. Vérifiez votre "
-                      "connexion réseau puis réessayez."),
-    # Le flux s'est terminé sans erreur mais n'a rien livré : ni texte, ni appel
-    # d'outil, et aucun outil n'avait agi plus tôt dans le run. Constaté en
-    # recette le 2026-08-04 — le relais renvoyait pourtant un tool call complet
-    # (229 chunks), le plugin n'en a rien récupéré. Sans cette garde le run se
-    # déclarait RÉUSSI avec un texte vide : écran muet côté utilisateur, et
-    # `assistant.ok=true` côté télémétrie, donc invisible dans les tableaux.
-    "empty_response": ("L'assistant n'a rien produit. Réessayez — si cela "
-                       "persiste, signalez-le."),
+    "http_401": "run.err_401",
+    "http_403": "run.err_403",
+    "http_429": "run.err_429",
+    "network_error": "run.err_network",
+    # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
+    "empty_response": "run.err_empty",
 }
 
 
 def error_message(code):
-    return ERROR_MESSAGES.get(code, f"Erreur du service IA ({code}). Réessayez.")
+    key = ERROR_KEYS.get(code)
+    return _t(key) if key else _t("run.err_generic", code=code)
 
 
 DEFAULT_MAX_ITERATIONS = 6
@@ -121,7 +113,7 @@ class Orchestrator:
             for iteration in range(self.max_iterations):
                 if self.cancelled:
                     return RunResult(ok=False, iterations=iteration,
-                                     reason="cancelled", text="Arrêté.")
+                                     reason="cancelled", text=_t("run.stopped"))
                 step = self.llm.step(messages, tools=tools,
                                      on_text_delta=sink.stream_delta,
                                      cancel_event=self.cancel_event,
@@ -134,9 +126,9 @@ class Orchestrator:
                     return result
                 if self.cancelled:
                     return RunResult(ok=False, iterations=iteration + 1,
-                                     reason="cancelled", text="Arrêté.")
+                                     reason="cancelled", text=_t("run.stopped"))
                 if step.tool_calls:
-                    self.progress.set_phase("Action sur le document")
+                    self.progress.set_phase(_t("progress.action"))
                     self.observer.on_tool_calls(step.tool_calls)
                     results = self._execute_tool_calls(step.tool_calls)
                     messages.extend(self.llm.encode_tool_exchange(step, results))
@@ -163,9 +155,7 @@ class Orchestrator:
                                    text=final_text)
                 return result
 
-            self.observer.on_error("max_iterations",
-                                   "L'assistant n'a pas convergé — réessayez en "
-                                   "précisant la demande.")
+            self.observer.on_error("max_iterations", _t("run.not_converged"))
             return result
         finally:
             # Le span AssistantRun est émis par le worker de la palette — point
@@ -209,8 +199,6 @@ class Orchestrator:
                     "ne modifierait rien.")
         return ("PORTÉE : aucune plage sélectionnée — appuie-toi sur la vue "
                 "d'ensemble de la feuille avant d'agir.")
-
-    # ── Exécution des outils ────────────────────────────────────────────
 
     @property
     def cancelled(self):

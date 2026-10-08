@@ -75,13 +75,13 @@ curl -X POST https://api.openai.com/v1/chat/completions \
 
 Les paramètres sont stockés dans :
 ```
-~/Library/Application Support/LibreOffice/4/user/mirai.json
+~/Library/Application Support/LibreOffice/4/user/config/mirai/settings.json
 ```
 
 ### Voir la configuration actuelle :
 
 ```bash
-cat ~/Library/Application\ Support/LibreOffice/4/user/mirai.json
+cat ~/Library/Application\ Support/LibreOffice/4/user/config/mirai/settings.json
 ```
 
 ### Exemple de configuration pour OpenWebUI :
@@ -121,8 +121,8 @@ cat ~/Library/Application\ Support/LibreOffice/4/user/mirai.json
 - Testez l'URL avec curl pour confirmer le bon endpoint
 
 ### SSL: CERTIFICATE_VERIFY_FAILED
-- Le code désactive maintenant la vérification SSL par défaut
-- Si le problème persiste, vérifiez votre connexion réseau
+- La vérification TLS est active par défaut (magasin système, complété par le bundle embarqué Let's Encrypt R13 + ISRG X1).
+- CA privée : renseigner `ca_bundle_path` dans settings.json, ou ajouter l'hôte à `bootstrap_insecure_urls` du profil de build (dev uniquement).
 
 ### Pas de réponse / Timeout
 - Vérifiez que le serveur est accessible : `curl http://localhost:3000`
@@ -170,21 +170,4 @@ Puis redémarrez LibreOffice.
 
 ## 8. Mode développement
 
-Pour modifier et tester rapidement :
-
-```bash
-cd /Users/etiquet/Documents/GitHub/mirai
-
-# Modifier le code
-nano main.py
-
-# Recréer le package
-rm -f mirai.oxt && \
-zip -r mirai.oxt Accelerators.xcu Addons.xcu description.xml main.py META-INF/ registration/ assets/
-
-# Réinstaller
-unopkg remove org.extension.sample
-unopkg add mirai.oxt
-
-# Relancer LibreOffice
-```
+Voir README.md §Cycle de développement (`./scripts/dev-launch.sh`).

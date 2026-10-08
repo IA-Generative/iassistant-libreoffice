@@ -1,5 +1,4 @@
 # Configuration files with secrets / URLs réelles (non exportés sur GitHub)
-mirai.json
 config/config.default.json
 config/keycloak-client-export.json
 config/profiles/config.default.integration.json
@@ -9,7 +8,6 @@ config/profiles/config.default.dgx.json
 
 # Build artifacts
 *.oxt
-!dist/mirai.example.oxt
 *.pyc
 __pycache__/
 
@@ -39,6 +37,7 @@ docs/superpowers/
 
 # Sorties sensibles locales (rapports, diagnostics) — jamais committées
 private/
+tests/simulation/report_*.json
 
 # Artefacts OXT décompressés / archives locales
 mirai-dgx/

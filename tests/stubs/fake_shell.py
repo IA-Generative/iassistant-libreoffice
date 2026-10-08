@@ -119,13 +119,6 @@ class FakeShell:
     def request_timeout(self):
         return 5
 
-    def extract_content(self, chunk):
-        choices = chunk.get("choices") or []
-        if not choices:
-            return "", None
-        delta = choices[0].get("delta", {})
-        return delta.get("content", ""), choices[0].get("finish_reason")
-
     # Erreurs / télémétrie
     def report_llm_error(self, status_code, body, headers=None):
         self.llm_errors.append((status_code, body))
@@ -141,7 +134,5 @@ class FakeShell:
         self.logs.append(str(message))
 
     # UNO
-    uno_ctx = None
-
     def toolkit(self):
         return MagicMock()

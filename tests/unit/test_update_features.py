@@ -1,6 +1,6 @@
 """
 Headless unit tests for Update & Feature Toggling (schema_version=2).
-Covers TC-LO-01 to TC-LO-13 from the test cahier.
+Covers TC-LO-04 to TC-LO-13 from the test cahier.
 
 Run with:
     pytest tests/unit/test_update_features.py -v --tb=short
@@ -60,32 +60,6 @@ def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
     return d
 
 
-# ── TC-LO-01 : _is_feature_enabled sans cache → défaut True ─────────
-
-def test_lo01_is_feature_enabled_no_cache_returns_default():
-    job = make_job()
-    assert job._features_cache == {}
-    assert job._is_feature_enabled("writer_assistant") is True
-    assert job._is_feature_enabled("writer_assistant", default=False) is False
-
-
-# ── TC-LO-02 : _is_feature_enabled cache False → False ───────────────
-
-def test_lo02_is_feature_enabled_cache_false():
-    job = make_job()
-    job._features_cache = {"calc_assistant": False}
-    assert job._is_feature_enabled("calc_assistant") is False
-
-
-# ── TC-LO-03 : _is_feature_enabled clé absente → défaut ─────────────
-
-def test_lo03_is_feature_enabled_missing_key_returns_default():
-    job = make_job()
-    job._features_cache = {"other_flag": True}
-    assert job._is_feature_enabled("calc_assistant", default=True) is True
-    assert job._is_feature_enabled("calc_assistant", default=False) is False
-
-
 # ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
 
 def test_lo04_fetch_v2_populates_features_cache():
@@ -133,10 +107,6 @@ def test_lo05_fetch_v2_calls_schedule_update():
     payload = _enriched_v2(features={}, update=directive)
     job._urlopen = MagicMock(return_value=_json_response(payload))
 
-    # Le rafraîchissement de configuration lancé par __init__ peut encore être
-    # en vol et appeler _fetch_config lui aussi : on ne compte QUE les appels
-    # déclenchés par ce test, sinon l'assertion dépend de la charge machine.
-    job._schedule_update.reset_mock()
     job._fetch_config(force=True)
 
     job._schedule_update.assert_called_once_with(directive)
@@ -230,7 +200,7 @@ def test_lo09_perform_update_checksum_ok_stages():
         "bootstrap_url": "http://localhost:9999",
     }.get(k, d))
     job._report_update_status = MagicMock()
-    job._install_oxt_inprocess = MagicMock()  # ne doit PAS être appelé au staging
+    job._install_and_restart_in_process = MagicMock()  # ne doit PAS être appelé au staging
 
     directive = _make_update_directive(
         action="update",
@@ -246,7 +216,7 @@ def test_lo09_perform_update_checksum_ok_stages():
     statuses = [c.args[1] for c in job._report_update_status.call_args_list if len(c.args) > 1]
     assert "deferred" in statuses                  # stagé, install à suivre
     assert "installed" not in statuses             # véridique : pas encore actif
-    job._install_oxt_inprocess.assert_not_called()  # pas d'install au staging
+    job._install_and_restart_in_process.assert_not_called()  # pas d'install au staging
     assert MainJob._update_in_progress_cls is False
 
 
@@ -263,7 +233,6 @@ def test_lo09b_download_fails_over_to_next_bootstrap():
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
         "bootstrap_urls": ["https://onyxia.unreachable/bootstrap", "https://scaleway.ok"],
     }.get(k, d))
-    job._install_oxt_inprocess = MagicMock()
 
     tried = []
 
@@ -312,7 +281,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
         "bootstrap_url": "http://localhost:9999",
     }.get(k, d))
 
-    job._install_oxt_inprocess = MagicMock()
+    job._install_and_restart_in_process = MagicMock()
 
     directive = _make_update_directive(checksum=wrong_checksum)
     job._urlopen = MagicMock(return_value=_response(fake_binary))
@@ -320,7 +289,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
     job._perform_update(directive)
 
     # checksum KO → retour avant tout staging/install
-    job._install_oxt_inprocess.assert_not_called()
+    job._install_and_restart_in_process.assert_not_called()
 
 
 # ── TC-LO-11 : _perform_update libère flag sur exception ─────────────

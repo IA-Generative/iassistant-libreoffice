@@ -21,7 +21,7 @@ Génère un trace ID hexadécimal de 32 caractères (16 bytes).
 #### `generate_span_id()`
 Génère un span ID hexadécimal de 16 caractères (8 bytes).
 
-#### `send_telemetry_trace(config, span_name, attributes=None)`
+#### `send_telemetry_trace_async(config, span_name, attributes=None)`
 Envoie une trace OpenTelemetry complète à l'endpoint configuré.
 
 **Paramètres :**
@@ -31,11 +31,13 @@ Envoie une trace OpenTelemetry complète à l'endpoint configuré.
 
 **Exemple d'appel :**
 ```python
-send_telemetry_trace(self, "EditSelection", {
+send_telemetry_trace_async(self, "EditSelection", {
     "action": "edit_selection",
-    "text_length": str(len(text_range.getString()))
+    "text_length": len(text_range.getString())
 })
 ```
+
+Les types sont conservés par `otel_attributes` (bool/int/float/str).
 
 ## Événements tracés
 
@@ -136,18 +138,15 @@ Envoyé lors de l'ouverture du dialogue des paramètres.
 
 ### Paramètres disponibles
 
-Dans `mirai.json` :
+Dans `settings.json` (dossier `<profil LibreOffice>/user/config/mirai/`, voir `docs/donnees-locales.md`) :
 
 ```json
 {
   "telemetryEnabled": true,
-  "telemetryEndpoint": "https://traces.cpin.numerique-interieur.com/v1/traces",
-  "telemetrySel": "mirai_salt",
+  "telemetryEndpoint": "https://<COLLECTEUR>/v1/traces",
   "telemetryAuthorizationType": "Basic",
-  "telemetryKey": "dGVzdC1lcmljOnRlc3QtZXJpYw==",
-  "telemetryHost": "",
+  "telemetryKey": "<base64(user:pass)>",
   "telemetrylogJson": false,
-  "telemetryFormatProtobuf": false,
   "extensionUUID": ""
 }
 ```
@@ -159,13 +158,10 @@ Les valeurs par défaut sont définies dans la méthode `_get_telemetry_defaults
 ```python
 {
     "telemetryEnabled": True,
-    "telemetryEndpoint": "https://traces.cpin.numerique-interieur.com/v1/traces",
-    "telemetrySel": "mirai_salt",
+    "telemetryEndpoint": "https://<COLLECTEUR>/v1/traces",
     "telemetryAuthorizationType": "Basic",
-    "telemetryKey": "dGVzdC1lcmljOnRlc3QtZXJpYw==",
-    "telemetryHost": "",
+    "telemetryKey": "",
     "telemetrylogJson": False,
-    "telemetryFormatProtobuf": False
 }
 ```
 
@@ -179,8 +175,7 @@ telemetryKey: "base64(username:password)"
 
 Exemple :
 ```bash
-echo -n "test-eric:test-eric" | base64
-# Résultat : dGVzdC1lcmljOnRlc3QtZXJpYw==
+echo -n "user:pass" | base64
 ```
 
 #### Bearer Token
@@ -230,7 +225,7 @@ Pour désactiver complètement la télémétrie :
 ```
 
 2. **Via suppression du fichier de configuration :**
-Si aucun fichier `mirai.json` n'existe, la télémétrie est activée par défaut avec les paramètres par défaut.
+Si aucun fichier `settings.json` n'existe, la télémétrie est activée par défaut avec les paramètres par défaut.
 
 ## Dépannage
 

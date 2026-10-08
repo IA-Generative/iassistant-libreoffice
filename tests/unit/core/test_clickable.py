@@ -6,7 +6,10 @@ illisible. On traduit donc la position du curseur en ligne, puis en demande
 nue, débarrassée de ce qui n'appartient qu'à l'affichage.
 """
 
-from src.mirai.core import clickable
+import pytest
+
+from src.mirai import i18n
+from src.mirai.core import clickable, doc_analysis
 
 SUGGESTIONS = ("1. ▸ Résumer la sélection\n"
                "2. · Reformuler en langage clair\n"
@@ -26,8 +29,6 @@ def _offset_de_ligne(texte, numero):
     return sum(len(ligne) + 1 for ligne in texte.split("\n")[:numero])
 
 
-# ── Traduction décalage → ligne ──────────────────────────────────────────────
-
 def test_offset_maps_to_the_right_line():
     for numero in range(3):
         offset = _offset_de_ligne(SUGGESTIONS, numero)
@@ -45,8 +46,6 @@ def test_line_at_tolerates_absurd_offsets():
     assert clickable.line_at("", 42) == 0
     assert clickable.line_at(SUGGESTIONS, 10_000) <= SUGGESTIONS.count("\n")
 
-
-# ── Nettoyage de la ligne ────────────────────────────────────────────────────
 
 def test_numbering_and_bullet_are_stripped():
     assert clickable.clean("1. ▸ Résumer la sélection") == "Résumer la sélection"
@@ -74,8 +73,6 @@ def test_a_date_is_not_mistaken_for_numbering():
     assert clickable.clean("2026. année de bascule") == "année de bascule"
 
 
-# ── Contenu rendu au clic ────────────────────────────────────────────────────
-
 def test_click_on_a_suggestion_returns_the_bare_request():
     offset = _offset_de_ligne(SUGGESTIONS, 1)
     assert clickable.payload_at(SUGGESTIONS, offset) == "Reformuler en langage clair"
@@ -88,6 +85,13 @@ def test_click_on_an_analysis_item_returns_it():
 
 def test_click_on_the_analysis_title_returns_nothing():
     assert clickable.payload_at(ANALYSE, 0) == ""
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_click_on_the_analysis_title_returns_nothing_in_every_language(code):
+    i18n.set_locale(code)
+    rendered = doc_analysis.render(["Ajouter des intertitres"])
+    assert clickable.payload_at(rendered, 0) == ""
 
 
 def test_click_on_a_blank_line_returns_nothing():

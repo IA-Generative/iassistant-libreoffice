@@ -40,10 +40,10 @@ def _write(tmpdir, name, content):
     return path
 
 
-def test_inject_bakes_one_src_per_bootstrap_url():
+def test_inject_bakes_one_src_per_bootstrap_url(tmp_path):
     """Chaque bootstrap_url du profil donne un <src> (failover natif LO),
     avec le chemin de feed conventionnel du DM."""
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
     cfg = _write(d, "config.json", json.dumps({
         "enabled": True,
@@ -62,10 +62,10 @@ def test_inject_bakes_one_src_per_bootstrap_url():
     ET.fromstring(out.encode("utf-8"))
 
 
-def test_inject_skips_offline_profile():
+def test_inject_skips_offline_profile(tmp_path):
     """Profil offline (enabled:false) : pas de bloc — le bouton natif répond
     simplement « aucune mise à jour »."""
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
     cfg = _write(d, "config.json", json.dumps({
         "enabled": False, "bootstrap_urls": ["https://dm.example"],
@@ -75,9 +75,9 @@ def test_inject_skips_offline_profile():
     assert "<update-information>" not in open(desc, encoding="utf-8").read()
 
 
-def test_inject_is_idempotent():
+def test_inject_is_idempotent(tmp_path):
     """Un description.xml déjà équipé n'est pas modifié (double build, repack)."""
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
     cfg = _write(d, "config.json", json.dumps({
         "enabled": True, "bootstrap_urls": ["https://dm.example"],
@@ -89,9 +89,9 @@ def test_inject_is_idempotent():
     assert open(desc, encoding="utf-8").read() == first
 
 
-def test_inject_env_override_wins(monkeypatch):
+def test_inject_env_override_wins(monkeypatch, tmp_path):
     """MIRAI_UPDATE_FEED_URL force une URL de feed unique (builds spéciaux)."""
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
     cfg = _write(d, "config.json", json.dumps({
         "enabled": True, "bootstrap_urls": ["https://dm.example"],
@@ -103,9 +103,8 @@ def test_inject_env_override_wins(monkeypatch):
     assert "dm.example" not in out
 
 
-# La voie du Gestionnaire des extensions — remplace atomiquement une extension
-# de même identifiant, PAS de remove-avant-add (le cycle removePackage/addPackage
-# worker est ce qui laissait des entrées fantômes dans registrymodifications.xcu).
+# La voie du Gestionnaire des extensions remplace atomiquement une extension
+# de même identifiant : pas de remove-avant-add.
 
 def _job_with_sync_async_callback():
     """Job dont l'AsyncCallback exécute le callback immédiatement (synchro),
@@ -164,43 +163,23 @@ def test_main_thread_install_reports_manager_failure():
     assert job._run_install_on_main_thread("file:///x.oxt", (), None, timeout=2) is False
 
 
-def test_install_and_restart_prefers_main_thread_over_legacy():
-    """Main thread OK → le chemin worker legacy (removePackage/addPackage,
-    vecteur de corruption) n'est PAS invoqué ; LO est fermé proprement."""
+def test_install_and_restart_closes_after_success():
+    """Installation réussie sur le thread principal → LO est fermé proprement."""
     fd, path = tempfile.mkstemp(suffix=".oxt")
     os.close(fd)
     try:
         job = make_job()
         job._run_install_on_main_thread = MagicMock(return_value=True)
-        job._install_oxt_inprocess = MagicMock()
         job._close_after_inprocess_update = MagicMock()
 
         assert job._install_and_restart_in_process(path) is True
-        job._install_oxt_inprocess.assert_not_called()
         job._close_after_inprocess_update.assert_called_once()
     finally:
         os.remove(path)
 
 
-def test_install_and_restart_falls_back_to_legacy_worker_path():
-    """Main thread KO → dernier recours worker (comportement historique)."""
-    fd, path = tempfile.mkstemp(suffix=".oxt")
-    os.close(fd)
-    try:
-        job = make_job()
-        job._run_install_on_main_thread = MagicMock(return_value=False)
-        job._install_oxt_inprocess = MagicMock(return_value=True)
-        job._close_after_inprocess_update = MagicMock()
-
-        assert job._install_and_restart_in_process(path) is True
-        job._install_oxt_inprocess.assert_called_once()
-        job._close_after_inprocess_update.assert_called_once()
-    finally:
-        os.remove(path)
-
-
-def _job_with_state(state, current_version="0.0.1.0.31"):
-    job = make_job(config_dir=tempfile.mkdtemp())
+def _job_with_state(tmp_path, state, current_version="0.0.1.0.31"):
+    job = make_job(config_dir=str(tmp_path))
     pend = job._pending_update_dir()
     os.makedirs(pend, exist_ok=True)
     with open(os.path.join(pend, "update_state.json"), "w", encoding="utf-8") as fh:
@@ -212,11 +191,11 @@ def _job_with_state(state, current_version="0.0.1.0.31"):
     return job, pend
 
 
-def test_reconcile_reports_installed_and_purges_on_version_match():
+def test_reconcile_reports_installed_and_purges_on_version_match(tmp_path):
     """Version active == target → « installed » (véridique) rapporté au DM,
     pending_update purgé, anti-boucle levée."""
     MainJob._update_launch_blocked_cls.add("0.0.1.0.31")
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.31",
         "version_before": "0.0.1.0.30", "stage": "user_accepted",
         "ts": time.time(),
@@ -229,10 +208,10 @@ def test_reconcile_reports_installed_and_purges_on_version_match():
     assert "0.0.1.0.31" not in MainJob._update_launch_blocked_cls
 
 
-def test_reconcile_keeps_fresh_pending_state():
+def test_reconcile_keeps_fresh_pending_state(tmp_path):
     """MAJ pas encore appliquée (version ≠ target, état récent) → no-op :
     l'état et l'OXT stagé restent en place pour le fallback manuel."""
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
         "version_before": "0.0.1.0.31", "stage": "staged",
         "ts": time.time(),
@@ -244,13 +223,13 @@ def test_reconcile_keeps_fresh_pending_state():
     assert os.path.isfile(os.path.join(pend, "mirai_update.oxt"))
 
 
-def test_reconcile_reports_failed_at_startup_when_target_never_became_active(monkeypatch):
+def test_reconcile_reports_failed_at_startup_when_target_never_became_active(monkeypatch, tmp_path):
     """Dossier de paquet laissé par une installation native annulée : l'étape dit
     installed_native, mais la cible n'est pas active au redémarrage. Le DM doit
     l'apprendre (failed) et l'état être purgé — sinon le poste ne retente rien
     pendant 14 jours et la campagne reste bloquée sur deferred."""
     monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", 0.01)
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
         "version_before": "0.0.1.0.31", "stage": "installed_native",
         "route": "native", "ts": time.time(),
@@ -266,12 +245,12 @@ def test_reconcile_reports_failed_at_startup_when_target_never_became_active(mon
     assert not os.path.isdir(pend)
 
 
-def test_reconcile_at_startup_rechecks_registry_before_failing(monkeypatch):
+def test_reconcile_at_startup_rechecks_registry_before_failing(monkeypatch, tmp_path):
     """Juste après le démarrage, le registre peut encore se consolider : une
     première lecture périmée ne doit pas produire un « failed » — la seconde
     lecture confirme l'installation."""
     monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", 0.01)
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
         "version_before": "0.0.1.0.31", "stage": "installed_native",
         "route": "native", "ts": time.time(),
@@ -285,11 +264,11 @@ def test_reconcile_at_startup_rechecks_registry_before_failing(monkeypatch):
     assert not os.path.isdir(pend)
 
 
-def test_reconcile_keeps_installed_state_in_session():
+def test_reconcile_keeps_installed_state_in_session(tmp_path):
     """En session, LibreOffice garde l'ancien paquet enregistré jusqu'au
     redémarrage : la réconciliation du worker ne conclut rien sur une étape
     installed_*, elle ne rapporte surtout pas un échec."""
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
         "version_before": "0.0.1.0.31", "stage": "installed_native",
         "route": "native", "ts": time.time(),
@@ -302,9 +281,9 @@ def test_reconcile_keeps_installed_state_in_session():
     assert os.path.isfile(os.path.join(pend, "update_state.json"))
 
 
-def test_reconcile_purges_stale_state():
+def test_reconcile_purges_stale_state(tmp_path):
     """État périmé (> 14 jours) → purge silencieuse, aucun rapport."""
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
         "version_before": "0.0.1.0.31", "stage": "staged",
         "ts": time.time() - 15 * 24 * 3600,
@@ -315,9 +294,9 @@ def test_reconcile_purges_stale_state():
     assert not os.path.isdir(pend)
 
 
-def test_reconcile_discards_corrupt_state_file():
+def test_reconcile_discards_corrupt_state_file(tmp_path):
     """update_state.json illisible → supprimé, jamais d'exception."""
-    job = make_job(config_dir=tempfile.mkdtemp())
+    job = make_job(config_dir=str(tmp_path))
     pend = job._pending_update_dir()
     os.makedirs(pend, exist_ok=True)
     state_path = os.path.join(pend, "update_state.json")
@@ -331,9 +310,9 @@ def test_reconcile_discards_corrupt_state_file():
     job._report_update_status.assert_not_called()
 
 
-def test_save_update_state_roundtrip():
+def test_save_update_state_roundtrip(tmp_path):
     """_save_update_state écrit un état relisible par la réconciliation."""
-    job = make_job(config_dir=tempfile.mkdtemp())
+    job = make_job(config_dir=str(tmp_path))
     job._get_extension_version = MagicMock(return_value="0.0.1.0.31")
     job._save_update_state(
         {"campaign_id": 3, "target_version": "0.0.1.0.32"}, "staged")
@@ -434,11 +413,11 @@ def test_schedule_update_runs_for_rollback_action():
     assert done.wait(2), "le worker de rollback aurait dû tourner"
 
 
-def test_reconcile_confirms_rollback_to_older_version():
+def test_reconcile_confirms_rollback_to_older_version(tmp_path):
     """Après un rollback (target < version_before), la réconciliation confirme
     « installed » dès que la version ACTIVE == target — la comparaison est une
     égalité stricte, pas un « plus récent que »."""
-    job, pend = _job_with_state({
+    job, pend = _job_with_state(tmp_path, {
         "campaign_id": 11, "target_version": "0.0.1.0.30",
         "version_before": "0.0.1.0.31", "stage": "user_accepted",
         "ts": time.time(),

@@ -1,7 +1,9 @@
 # Bundled CA chain for bootstrap HTTPS
 
-This folder contains CA certificates loaded by the plugin SSL context when
-LibreOffice Python has no usable trust store.
+This folder contains a CA chain that the plugin SSL context loads in addition
+to the system trust store (`ssl.create_default_context()`), unless a configured
+`ca_bundle_path` loads first: only the first CA file that loads is used (see
+`MainJob.get_ssl_context` and `calc_prompt_function.build_ssl_context`).
 
 File:
 

@@ -6,11 +6,13 @@ texte ou des coordonnées, jamais d'objet UNO — donc testables hors LibreOffic
 
 La règle d'acquisition, elle, est ailleurs (ui/palette.py) : `XSelectionChangeListener`,
 livré par LibreOffice sur le thread principal. Surtout pas de thread qui
-interroge la sélection en boucle — c'est le contre-exemple qu'on vient
-d'éliminer du code historique.
+interroge la sélection en boucle.
 """
 
 from __future__ import annotations
+
+from ..i18n import t as _t
+from .tools.calc_tools import col_letter
 
 MAX_EXCERPT = 90
 
@@ -40,10 +42,6 @@ def middle_ellipsis(text: str, limit: int = MAX_EXCERPT) -> str:
     return f"{head}…{tail}"
 
 
-NO_SELECTION_LABEL = ("Document entier — les actions rapides portent sur le "
-                      "paragraphe courant")
-
-
 def writer_label(selected_text: str, paragraph_text: str = "") -> str:
     """Libellé Writer, adapté au ciblage réel de l'action.
 
@@ -61,32 +59,19 @@ def writer_label(selected_text: str, paragraph_text: str = "") -> str:
     """
     selected = compact_whitespace(selected_text)
     if selected:
-        return f"Sélection : « {middle_ellipsis(selected)} »"
+        return _t("sel.writer_selection", excerpt=middle_ellipsis(selected))
     if compact_whitespace(paragraph_text):
-        return NO_SELECTION_LABEL
-    return "Placez le curseur dans un paragraphe, ou sélectionnez du texte."
-
-
-def column_letter(index: int) -> str:
-    """Index de colonne (0 = A) → lettre(s) de colonne."""
-    letters = ""
-    index += 1
-    while index > 0:
-        index, remainder = divmod(index - 1, 26)
-        letters = chr(ord("A") + remainder) + letters
-    return letters
+        return _t("sel.no_selection")
+    return _t("sel.no_target")
 
 
 def calc_label(start_col: int, start_row: int, end_col: int, end_row: int) -> str:
-    """Libellé Calc : « 5 cellules sélectionnées (A4:A8) ».
-
-    Reprend la formulation historique — les utilisateurs la connaissent.
-    """
+    """Libellé Calc : « 5 cellules sélectionnées (A4:A8) »."""
     columns = abs(end_col - start_col) + 1
     rows = abs(end_row - start_row) + 1
     count = columns * rows
-    first = f"{column_letter(min(start_col, end_col))}{min(start_row, end_row) + 1}"
+    first = f"{col_letter(min(start_col, end_col))}{min(start_row, end_row) + 1}"
     if count == 1:
-        return f"Cellule sélectionnée ({first})"
-    last = f"{column_letter(max(start_col, end_col))}{max(start_row, end_row) + 1}"
-    return f"{count} cellules sélectionnées ({first}:{last})"
+        return _t("sel.calc_cell", ref=first)
+    last = f"{col_letter(max(start_col, end_col))}{max(start_row, end_row) + 1}"
+    return _t("sel.calc_range", count=count, first=first, last=last)

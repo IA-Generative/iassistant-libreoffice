@@ -9,11 +9,11 @@ from src.mirai.core.conversation import ConversationStore
 
 def _store(**kwargs):
     directory = tempfile.mkdtemp()
-    return ConversationStore(directory, **kwargs), directory
+    return ConversationStore(directory, **kwargs)
 
 
 def test_roundtrip():
-    store, _ = _store()
+    store = _store()
     store.append("user", "bonjour", "writer")
     store.append("assistant", "salut !", "writer")
     entries = store.load()
@@ -22,14 +22,14 @@ def test_roundtrip():
 
 
 def test_clear():
-    store, _ = _store()
+    store = _store()
     store.append("user", "x")
     store.clear()
     assert store.load() == []
 
 
 def test_max_exchanges_cap():
-    store, _ = _store(max_exchanges=2)
+    store = _store(max_exchanges=2)
     for i in range(10):
         store.append("user", f"q{i}")
         store.append("assistant", f"r{i}")
@@ -39,19 +39,19 @@ def test_max_exchanges_cap():
 
 
 def test_max_bytes_cap():
-    store, _ = _store(max_bytes=2000)
+    store = _store(max_bytes=2000)
     for _ in range(10):
         store.append("user", "x" * 400)
         store.append("assistant", "y" * 400)
-    size = os.path.getsize(store.path)
+    size = os.path.getsize(store._path)
     assert size <= 3000  # marge pour l'enveloppe JSON
     assert len(store.load()) >= 2
 
 
 def test_corrupted_file_recovers_empty():
-    store, _ = _store()
+    store = _store()
     store.append("user", "ok")
-    with open(store.path, "w", encoding="utf-8") as fh:
+    with open(store._path, "w", encoding="utf-8") as fh:
         fh.write("{pas du json")
     assert store.load() == []
     store.append("user", "après corruption")   # ne lève pas
@@ -59,14 +59,14 @@ def test_corrupted_file_recovers_empty():
 
 
 def test_wrong_shape_recovers_empty():
-    store, _ = _store()
-    with open(store.path, "w", encoding="utf-8") as fh:
+    store = _store()
+    with open(store._path, "w", encoding="utf-8") as fh:
         json.dump(["liste", "inattendue"], fh)
     assert store.load() == []
 
 
 def test_context_messages_capped_and_ordered():
-    store, _ = _store()
+    store = _store()
     store.append("user", "ancienne question " + "a" * 100)
     store.append("assistant", "ancienne réponse " + "b" * 100)
     store.append("user", "récente question")
@@ -74,12 +74,11 @@ def test_context_messages_capped_and_ordered():
     messages = store.context_messages(max_chars=60)
     assert messages[-1]["content"] == "récente réponse"
     assert len(messages) <= 3
-    roles = [m["role"] for m in messages]
-    assert roles == sorted(roles, key=lambda r: 0) or True  # ordre chronologique conservé
+    assert [m["content"] for m in messages] == ["récente question", "récente réponse"]  # ordre chronologique conservé
     assert messages[0]["role"] in ("user", "assistant")
 
 
 def test_missing_file_is_empty():
-    store, _ = _store()
+    store = _store()
     assert store.load() == []
     assert store.context_messages() == []

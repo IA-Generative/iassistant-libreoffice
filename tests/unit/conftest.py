@@ -1,9 +1,8 @@
 """Fixtures partagées pour les tests unitaires.
 
-`MainJob` porte des drapeaux de CLASSE volontairement partagés entre instances
-(`_update_in_progress_cls`, `_enrollment_dismissed_cls` — cf. « share
-enrollment/update flags across instances »). Sans réinitialisation, l'état
-fuit d'un test à l'autre et provoque des échecs dépendants de l'ordre.
+`MainJob` porte des drapeaux de CLASSE (`*_cls`) volontairement partagés entre
+instances. Sans réinitialisation, l'état fuit d'un test à l'autre et provoque
+des échecs dépendants de l'ordre.
 
 Ce conftest réinitialise ces drapeaux avant ET après chaque test, et nettoie
 en filet de sécurité d'éventuels dossiers-fantômes laissés par des chemins de
@@ -71,22 +70,25 @@ def _reset_credentials():
     credentials.forget_all()
 
 
+def _pin_locale():
+    # Chaque test part du français, la langue du LibreOffice que simule
+    # `make_job` par défaut. Un test qui en veut une autre la pose lui-même.
+    try:
+        from src.mirai import i18n
+    except Exception:
+        return
+    i18n.set_locale(i18n.DEFAULT_LOCALE)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state():
     _reset_mainjob_flags()
     _reset_credentials()
+    _pin_locale()
     _cleanup_shared_config_dir()
     yield
+    _pin_locale()
     _reset_mainjob_flags()
     _reset_credentials()
     _cleanup_phantom_dirs()
     _cleanup_shared_config_dir()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_legacy_home(monkeypatch, tmp_path_factory):
-    # La migration supprime ~/log.txt s'il vient de l'extension : jamais le
-    # vrai dossier personnel du développeur pendant les tests.
-    from src.mirai import local_config
-    home = tmp_path_factory.mktemp("home")
-    monkeypatch.setattr(local_config, "legacy_home_dir", lambda: str(home))

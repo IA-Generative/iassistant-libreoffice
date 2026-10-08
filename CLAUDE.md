@@ -58,7 +58,8 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 - `src/mirai/ui/` — Palette universelle (dsfr.py tokens + palette.py)
 - `src/mirai/menu_actions/` — legacy, encore présent (suppression prévue après
   validation du démonstrateur)
-- `oxt/Addons.xcu` — Entrée unique « MIrAI — Assistant » ; raccourci
+- `oxt/Addons.xcu` — menu « 🤖 MIrAI » : entrée « 🤖 Ouvrir l'assistant »
+  (+ Paramètres, Tester le modèle, Documentation, À propos) et bouton de barre ; raccourci
   Ctrl+Alt+Espace (macOS : Ctrl+Opt+Espace) — jamais Ctrl+Shift+Espace
 - `config/profiles/` — Bootstrap config profiles (dev, docker, integration, kubernetes, production)
 

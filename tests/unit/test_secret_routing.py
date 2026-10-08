@@ -29,8 +29,8 @@ def test_stored_keys_go_to_the_store_and_read_back(tmp_path):
 
 
 def test_startup_moves_secrets_out_of_settings(tmp_path):
-    # Fichier écrit tel que l'a laissé la Partie 2 (ou un rollback) : sans passer
-    # par seed_user_config, qui rangerait déjà les secrets.
+    # settings.json contenant encore des secrets en clair (version antérieure ou rollback),
+    # sans passer par seed_user_config, qui les rangerait déjà dans le coffre.
     local_config.write_json_atomic(
         os.path.join(str(tmp_path), "mirai", "settings.json"),
         {"plugin_uuid": "u", "refresh_token": "SECRET-rt",

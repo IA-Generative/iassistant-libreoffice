@@ -1,9 +1,7 @@
 """Analyse du document par le modèle → propositions d'amélioration.
 
-Les suggestions de la palette étaient **statiques** : des règles sur la
-longueur de la sélection (`suggestions.py`), jamais sur le contenu. Elles
-proposaient « Résumer » devant un passage long sans avoir la moindre idée de
-ce qu'il disait. Utile au démarrage, sans valeur ensuite.
+Les suggestions statiques (`suggestions.py`) ne regardent que la longueur de la
+sélection ; ce module demande au modèle des propositions fondées sur le contenu.
 
 Ce module fabrique la demande envoyée au modèle et remet en forme sa réponse.
 Il ne fait **aucun appel réseau et ne touche pas à UNO** : c'est la palette qui
@@ -14,17 +12,15 @@ Le rendu ne remplace jamais les propositions statiques par du vide : en cas
 d'échec, l'appelant garde les siennes (cf. `AssistantPalette`).
 """
 
+from ..i18n import t as _t
+
 MAX_CHARS = 6000          # au-delà, on tronque : une analyse structurelle n'a
                           # pas besoin du document entier, et le relais plafonne
 MIN_CHARS = 200           # en deçà, il n'y a rien à structurer
 MAX_ITEMS = 5             # une liste plus longue n'est plus lue
 
-# Budget de sortie propre à l'analyse, très au-dessus des ~200 caractères
-# attendus. Les modèles à raisonnement puisent la réflexion ET la réponse dans
-# le MÊME `max_tokens`, et la réponse vient en dernier : mesuré le 2026-08-04,
-# `gemma-4-26b-a4b-it` consomme 1 200 tokens de réflexion et ne rend RIEN
-# d'exploitable. Cinq propositions ne coûtent rien à côté ; c'est la réflexion
-# qu'il faut laisser tenir.
+# Budget large : les modèles à raisonnement puisent réflexion ET réponse dans le
+# même `max_tokens`, et la réponse vient en dernier.
 MAX_TOKENS = 12000
 
 SYSTEM_PROMPT = (
@@ -38,14 +34,6 @@ SYSTEM_PROMPT = (
     "ni conclusion, ni numérotation, ni texte réécrit."
 )
 
-# Libellé de phase pour la jauge partagée avec le run : l'attente s'affiche
-# dans la ligne d'état, au même endroit et au même format (« ⠹ Analyse du
-# document · 3 s »).
-PHASE = "Analyse du document"
-TOO_SHORT = ("Document trop court pour une analyse de structure.\n"
-             "Écrivez quelques paragraphes, puis rouvrez cet onglet.")
-UNAVAILABLE = "Analyse indisponible pour le moment."
-
 
 def build_messages(text):
     """Messages prêts pour le client LLM, ou None si le texte ne vaut pas l'appel."""
@@ -56,7 +44,8 @@ def build_messages(text):
         # Couper sur une frontière de ligne : un paragraphe tronqué en plein
         # milieu se lit comme une faute de rédaction, et le modèle la signale.
         body = body[:MAX_CHARS].rsplit("\n", 1)[0] or body[:MAX_CHARS]
-    return [{"role": "system", "content": SYSTEM_PROMPT},
+    return [{"role": "system",
+             "content": SYSTEM_PROMPT + " " + _t("llm.answer_language")},
             {"role": "user", "content": body}]
 
 
@@ -66,11 +55,8 @@ def parse(raw, truncated=False):
     Tolérant sur la forme — les modèles ajoutent volontiers une phrase
     d'introduction, une numérotation ou des puces variées, malgré la consigne.
 
-    `truncated` (flux arrêté sur `length`) fait tomber la DERNIÈRE proposition :
-    elle est alors coupée en plein mot. Constaté en recette le 2026-08-04 avec
-    `gemma-4-26b-a4b-it`, qui consomme son budget en raisonnement avant de
-    répondre — l'onglet affichait « Fusionner les sections en une seule chron ».
-    Une proposition tronquée ne vaut pas mieux que pas de proposition.
+    `truncated` (flux arrêté sur `length`) retire la DERNIÈRE proposition : elle
+    est coupée en plein mot et ne vaut pas mieux que rien.
     """
     items = []
     for line in (raw or "").splitlines():
@@ -99,7 +85,7 @@ def parse(raw, truncated=False):
 def render(items):
     """Met en forme les propositions pour l'onglet Suggestions."""
     if not items:
-        return UNAVAILABLE
-    lines = ["Propositions d'amélioration du document :", ""]
+        return _t("analysis.unavailable")
+    lines = [_t("analysis.header"), ""]
     lines += [f"· {item}" for item in items]
     return "\n".join(lines)

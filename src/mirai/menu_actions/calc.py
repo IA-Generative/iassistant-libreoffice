@@ -3,7 +3,7 @@
 import os
 import re
 
-from .shared import apply_settings_result
+from ..i18n import t as _t
 
 _ERR_PREFIX = "#ERREUR: "
 
@@ -55,8 +55,8 @@ def _range_label(area) -> str:
     sr, er = area.StartRow, area.EndRow
     n = (ec - sc + 1) * (er - sr + 1)
     ref = f"{_col_letter(sc)}{sr + 1}:{_col_letter(ec)}{er + 1}"
-    noun = "cellule" if n == 1 else "cellules"
-    return f"{n} {noun} sélectionnée{'s' if n > 1 else ''} ({ref})"
+    key = "calc.selection_one" if n == 1 else "calc.selection_many"
+    return _t(key, n=n, ref=ref)
 
 
 def _collect_headers(sheet, num_cols):
@@ -172,17 +172,6 @@ def _get_cell_error(target_cell) -> str:
     return ""
 
 
-def _open_settings(job):
-    try:
-        result = job.settings_box("Settings")
-        apply_settings_result(job, result)
-    except Exception:
-        pass
-
-
-    # _strip_markdown defined at module level (see top of file)
-
-
 def _safe_set_string(cell, text):
     """Set a Calc cell's string content without losing a leading apostrophe.
 
@@ -286,7 +275,6 @@ def _next_result_header(sheet):
     Scans row 0 for existing headers that start with _RESULT_BASE and returns
     the next name in the series: 'Résultat IA', 'Résultat IA ×2', '×3', …
     """
-    import re
     try:
         num_cols = sheet.getColumns().Count
     except Exception:
@@ -468,7 +456,6 @@ def _fill_formula_down(job, sheet, formula, area):
     so this should never turn a validated formula unsafe, but the check is
     kept here too (defense in depth) rather than trusting the caller.
     """
-    import re
     out_col = area.StartColumn
     num_cols = sheet.getColumns().Count
     filled = 0
@@ -522,7 +509,6 @@ _FORMULA_SYSTEM = (
     "rejected before being applied, regardless of context."
 )
 
-# ── Calc functions reference for context-aware formula generation ────────
 
 _CALC_FUNCTIONS_DB = None  # lazy-loaded
 
@@ -579,7 +565,6 @@ _KEYWORD_MAP = {
     "date": ["DATE", "TODAY", "NOW", "YEAR", "MONTH", "DAY", "DATEDIF", "EDATE", "EOMONTH"],
     "jour": ["DAY", "DAYS", "WEEKDAY", "WORKDAY", "TODAY", "NETWORKDAYS"],
     "mois": ["MONTH", "EOMONTH", "EDATE"],
-    "année": ["YEAR", "YEARFRAC", "YEARS"],
     "année": ["YEAR", "YEARFRAC"],
     "semaine": ["WEEKNUM", "ISOWEEKNUM", "WEEKDAY"],
     "heure": ["HOUR", "TIME", "NOW"],
@@ -681,9 +666,9 @@ def _format_functions_context(matches):
 
 
 def _build_from_selection(job, sheet, raw_selection):
-    """Build (on_generate_fn, schema_ctx) from a raw UNO cell selection.
+    """Build (on_generate, schema_ctx, on_apply) from a raw UNO cell selection.
 
-    Returns (None, None) if the selection has no valid range address.
+    Returns (None, None, None) if the selection has no valid range address.
     Each call creates fresh messages/area state — suitable for both the
     initial open and XSelectionChangeListener updates.
     """
@@ -691,7 +676,7 @@ def _build_from_selection(job, sheet, raw_selection):
     try:
         area_r = raw_selection.getRangeAddress()
     except Exception:
-        return None, None
+        return None, None, None
 
     sr = max(area_r.StartRow, 1)
     tc = sheet.getCellByPosition(area_r.StartColumn, sr)
@@ -727,10 +712,14 @@ def _build_from_selection(job, sheet, raw_selection):
             _preview["formula"] = formula
             explanation = _explain_formula(job, formula, schema_context=sc)
             _preview["explanation"] = explanation
-            detail = f"Formule : {formula}\n\n{explanation}" if explanation else f"Formule : {formula}"
-            new_lines.append("── Cliquez Appliquer pour insérer ──")
+            detail = (
+                _t("calc.formula.detail_explained", formula=formula, explanation=explanation)
+                if explanation
+                else _t("calc.formula.detail", formula=formula)
+            )
+            new_lines.append(_t("calc.formula.click_apply"))
         else:
-            new_lines.append("⚠ Aucune formule générée")
+            new_lines.append(_t("calc.formula.none_generated"))
             _preview["formula"] = ""
             _preview["explanation"] = ""
         return new_lines, detail
@@ -739,15 +728,17 @@ def _build_from_selection(job, sheet, raw_selection):
         """Apply the previewed formula to the target cell."""
         formula = _preview.get("formula", "")
         if not formula:
-            return ["⚠ Aucune formule à appliquer"]
+            return [_t("calc.formula.none_to_apply")]
         _apply_formula(job, tc, formula)
-        result_lines = [f"✓ Appliqué : {formula}"]
+        result_lines = [_t("calc.formula.applied", formula=formula)]
         if area.EndRow > area.StartRow:
             _fill_formula_down(job, sheet, formula, area)
-            result_lines.append(f"↓ Répliqué sur {area.EndRow - area.StartRow + 1} lignes")
+            result_lines.append(
+                _t("calc.formula.filled_down", count=area.EndRow - area.StartRow + 1)
+            )
         err = _get_cell_error(tc)
         if err:
-            result_lines.append(f"⚠ Erreur : {err}")
+            result_lines.append(_t("calc.formula.error_line", err=err))
             msgs.append({
                 "role": "user",
                 "content": (
@@ -832,7 +823,8 @@ def _explain_formula(job, formula, schema_context=""):
     api_type = "chat"
     system = (
         "Tu es un expert LibreOffice Calc. "
-        "On te donne une formule. Réponds en français avec EXACTEMENT 3 lignes :\n"
+        + _t("llm.answer_language")
+        + " On te donne une formule. Réponds avec EXACTEMENT 3 lignes :\n"
         "Ligne 1 : une explication courte de ce que fait la formule (1 phrase)\n"
         "Ligne 2 : commence par 'Alternative : ' suivi d'une formule alternative qui donne le même résultat (ou approchant) avec une syntaxe différente\n"
         "Ligne 3 : commence par 'Note : ' suivi d'un conseil pratique (1 phrase courte)\n"
@@ -969,7 +961,7 @@ def _analyze_range(job, sheet, col_range, row_range):
     api_type = "chat"
     system_prompt = (
         "Tu es un analyste de données expert. "
-        "Tu analyses des tableaux et fournis des insights concis et actionnables en français."
+        "Tu analyses des tableaux et fournis des insights concis et actionnables."
     )
 
     rows_text = []
@@ -1047,27 +1039,15 @@ def handle_calc_action(job, args, model):
         sheet = model.CurrentController.ActiveSheet
         selection = model.CurrentController.Selection
 
-        if args == "settings":
-            job._send_telemetry("OpenSettings", {"context": "calc"})
-            _open_settings(job)
-            return True
-        if args == "AboutDialog":
-            job._send_telemetry("AboutDialog", {"context": "calc"})
-            try:
-                job._show_about_dialog()
-            except Exception as e:
-                job._log(f"AboutDialog error: {e}")
-            return True
-
         # Collect user input before touching the sheet
         user_input = ""
         if args == "EditSelection":
             user_input = job.input_box(
-                "Saisissez vos instructions d'édition !",
-                "Modifier la sélection",
+                _t("edit.instructions_prompt"),
+                _t("edit.title_short"),
                 "",
-                ok_label="Envoyer",
-                cancel_label="Fermer",
+                ok_label=_t("common.send"),
+                cancel_label=_t("common.close"),
                 always_on_top=True,
             )
         elif args == "TransformToColumn":
@@ -1085,14 +1065,16 @@ def handle_calc_action(job, args, model):
             _prev_letter = _col_letter(_prev_out)
             if _prev_new:
                 _prev_name = _next_result_header(sheet)
-                _out_info = f"  →  nouvelle colonne « {_prev_name} » (col. {_prev_letter})"
+                _out_info = _t("calc.out_new_col", name=_prev_name, letter=_prev_letter)
             else:
                 _existing_hdr = sheet.getCellByPosition(_prev_out, 0).getString()
-                _out_info = f"  →  col. {_prev_letter}" + (f" « {_existing_hdr} »" if _existing_hdr else "")
+                _out_info = _t("calc.out_col", letter=_prev_letter) + (
+                    _t("calc.out_col_header", header=_existing_hdr) if _existing_hdr else ""
+                )
             user_input = job._show_calc_input_dialog(
                 _range_label(_area) + _out_info,
-                "MIrAI — Transformer les cellules",
-                "Transformer",
+                _t("calc.title"),
+                _t("calc.ok_button"),
                 cell_content=" | ".join(_sample[:10]),
             )
         # GenerateFormula uses a dedicated multi-turn assistant dialog
@@ -1147,10 +1129,7 @@ def handle_calc_action(job, args, model):
         elif args == "AnalyzeRange":
             _analyze_range(job, sheet, col_range, row_range)
     except Exception as exc:
-        # Ce bloc couvrait TOUT le corps de la fonction en `pass` : n'importe
-        # quelle panne d'une action Calc devenait invisible — ni message, ni
-        # trace — et la fonction rendait quand même True. C'était la première
-        # fabrique à « il ne se passe rien ».
+        # Une panne d'action Calc doit être journalisée ET visible.
         import traceback
         job._log(f"[calc] action {args} en échec : {exc}\n{traceback.format_exc()}")
         try:

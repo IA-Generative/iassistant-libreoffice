@@ -1,10 +1,4 @@
-"""Encodage OTLP des attributs : conserver les types, sinon la mesure est perdue.
-
-Le code d'origine appliquait `str(value)` à TOUT. Une trace fonctionnelle
-annonçant « 45 paragraphes → 2 » arrivait dans Tempo en `stringValue: "45"` :
-lisible à l'œil, mais impossible à agréger, moyenner ou seuiller. Or c'est
-précisément ce qu'on attend d'une mesure.
-"""
+"""Encodage OTLP des attributs : conserver les types, sinon la mesure est perdue."""
 
 from src.mirai.entrypoint import otel_attributes
 

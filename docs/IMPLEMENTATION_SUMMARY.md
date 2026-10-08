@@ -31,13 +31,10 @@
 ```json
 {
   "telemetryEnabled": true,
-  "telemetryEndpoint": "https://traces.cpin.numerique-interieur.com/v1/traces",
-  "telemetrySel": "mirai_salt",
+  "telemetryEndpoint": "https://<COLLECTEUR>/v1/traces",
   "telemetryAuthorizationType": "Basic",
-  "telemetryKey": "dGVzdC1lcmljOnRlc3QtZXJpYw==",
-  "telemetryHost": "",
-  "telemetrylogJson": false,
-  "telemetryFormatProtobuf": false
+  "telemetryKey": "<base64(user:pass)>",
+  "telemetrylogJson": false
 }
 ```
 

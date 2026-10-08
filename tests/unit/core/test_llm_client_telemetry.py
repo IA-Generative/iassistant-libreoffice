@@ -37,7 +37,7 @@ def _http_error(status, body=b"{}"):
                                   io.BytesIO(body))
 
 
-# ── Bascule natif → JSON ────────────────────────────────────────────────
+# Bascule natif → JSON
 
 def test_fallback_to_json_is_telemetered_once():
     shell = FakeShell(
@@ -60,7 +60,7 @@ def test_no_fallback_step_on_a_plain_success():
     assert _steps(shell) == []
 
 
-# ── Reprise 401 ─────────────────────────────────────────────────────────
+# Reprise 401
 
 def test_recovered_auth_is_telemetered():
     shell = FakeShell(

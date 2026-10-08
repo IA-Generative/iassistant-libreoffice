@@ -180,9 +180,10 @@ un canary au reste du parc.
 
 - **Install sur le main thread via `ExtensionManager.addExtension`**, sans
   remove-avant-add : le remplacement même-identifiant est atomique
-  (`VersionException` auto-approuvée). Les cycles `removePackage`/`addPackage`
-  bas niveau depuis le thread worker — la cause des entrées fantômes — sont
-  relégués en tout dernier recours.
+  (`VersionException` auto-approuvée). C'est la seule voie d'installation du
+  plugin : si elle échoue, la route manuelle prend le relais. L'API bas niveau
+  `removePackage`/`addPackage` n'est pas utilisée : elle ajoute le paquet sans
+  l'enregistrer et laisse l'ancien enregistrement orphelin.
 - **Scripts `.bat`/`.sh` désactivés par défaut** (spawn d'enfant = WinError 5 +
   cycle unopkg corrupteur). Réactivation diagnostic : `MIRAI_UPDATE_ALLOW_SCRIPT=1`.
 - **Rapport DM véridique** : `deferred` au staging, `installed` seulement quand

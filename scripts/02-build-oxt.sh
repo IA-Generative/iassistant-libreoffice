@@ -148,7 +148,7 @@ cp -R "$ROOT_DIR/oxt/." "$STAGE_DIR/"
 cp "$ROOT_DIR/main.py" "$STAGE_DIR/main.py"
 cp -R "$ROOT_DIR/src" "$STAGE_DIR/src"
 cp "$CONFIG_IN_USE" "$STAGE_DIR/config.default.json"
-# ── Anti-fuite : la config embarquée d'un profil ONLINE doit être transport-only ──
+# Anti-fuite : la config embarquée d'un profil ONLINE doit être transport-only
 # (bootstrap_urls/config_path/enabled). Aucun SSO/keycloak/LLM baké : ils sont servis
 # par le DM au runtime. Un profil offline (enabled:false) est exempté (pas de DM).
 python3 - "$STAGE_DIR/config.default.json" <<'PY' || { err "Embedded config.default.json leaks non-transport keys (see above)"; exit 1; }
@@ -166,10 +166,7 @@ if leaked:
 print("✓ embedded config.default.json: transport-only (no SSO/keycloak/LLM leak)")
 PY
 
-# ── Anti-fuite (2/2) : aucun nom d'hôte d'infrastructure interne dans ce qui est
-# VERSIONNÉ. Le contrôle ci-dessus n'inspecte que les clés du config embarqué ;
-# il ne voyait donc pas les URLs internes présentes dans config/profiles/, docs/,
-# tests/ ou prompts/ — trois d'entre elles étaient parties sur GitHub.
+# Anti-fuite (2/2) : aucun nom d'hôte interne dans les fichiers suivis par git (profils, docs, tests, prompts).
 python3 - "$ROOT_DIR" <<'PY' || { err "Des noms d'hôtes internes sont présents dans des fichiers suivis par git"; exit 1; }
 import re, subprocess, sys
 
@@ -183,8 +180,6 @@ tracked = subprocess.run(["git", "-C", root, "ls-files"],
                          capture_output=True, text=True).stdout.split()
 offenders = []
 for rel in tracked:
-    if rel.startswith(("prompts/plan-", "docs/QUALIFICATION-")):
-        continue          # documents de travail : décrivent le problème, sans le reproduire
     try:
         with open(f"{root}/{rel}", encoding="utf-8") as fh:
             content = fh.read()
@@ -210,26 +205,24 @@ mkdir -p "$STAGE_DIR/config"
 if [ -f "$ROOT_DIR/config/calc-functions.json" ]; then
   cp "$ROOT_DIR/config/calc-functions.json" "$STAGE_DIR/config/calc-functions.json"
 fi
-# ── Device Management packaging ──────────────────────────────────────────
-# Sync version from description.xml into dm-manifest.json
+# Device Management packaging
+# Version et identifiant de l'extension, seule source : description.xml
 OXT_VERSION=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 OXT_IDENTIFIER=$(sed -n 's/.*<identifier value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 
-# dm-manifest.json — plugin metadata for DM auto-registration
+# La licence affiche la version de description.xml, seule source de version.
+if [ -n "$OXT_VERSION" ] && [ -f "$STAGE_DIR/registration/license.txt" ]; then
+  sed -i.bak "s|@VERSION@|${OXT_VERSION}|" "$STAGE_DIR/registration/license.txt"
+  rm -f "$STAGE_DIR/registration/license.txt.bak"
+fi
+
+# dm-manifest.json : métadonnées lues par le DM à l'upload. La copie embarquée
+# prend la version de description.xml et un changelog dérivé de CHANGELOG.md.
 if [ -f "$ROOT_DIR/dm-manifest.json" ]; then
   if [ -n "$OXT_VERSION" ]; then
-    # Inject current version into manifest changelog[0].version if it differs
-    python3 -c "
-import json, sys
-with open('$ROOT_DIR/dm-manifest.json') as f:
-    m = json.load(f)
-m['version'] = '$OXT_VERSION'
-if '$OXT_IDENTIFIER':
-    m['identifier'] = '$OXT_IDENTIFIER'
-with open('$STAGE_DIR/dm-manifest.json', 'w') as f:
-    json.dump(m, f, indent=2, ensure_ascii=False)
-    f.write('\n')
-" 2>/dev/null || cp "$ROOT_DIR/dm-manifest.json" "$STAGE_DIR/dm-manifest.json"
+    python3 "$ROOT_DIR/scripts/dm_manifest.py" "$ROOT_DIR/dm-manifest.json" \
+      "$STAGE_DIR/dm-manifest.json" "$OXT_VERSION" "$OXT_IDENTIFIER" "$ROOT_DIR/CHANGELOG.md" \
+      || { err "dm-manifest.json embarqué impossible à produire"; exit 1; }
   else
     cp "$ROOT_DIR/dm-manifest.json" "$STAGE_DIR/dm-manifest.json"
   fi
@@ -240,7 +233,7 @@ if [ -f "$ROOT_DIR/dm-config.json" ]; then
   cp "$ROOT_DIR/dm-config.json" "$STAGE_DIR/dm-config.json"
 fi
 
-# ── Mécanisme natif de MAJ LibreOffice (<update-information>, issue #5) ──
+# Mécanisme natif de MAJ LibreOffice (<update-information>)
 # Bake l'URL du feed update.xml (par tier, dérivée du profil bootstrap embarqué)
 # dans description.xml : le bouton « Vérifier les mises à jour » du Gestionnaire
 # des extensions détecte/télécharge/installe alors en pur in-process (pas de
@@ -263,7 +256,7 @@ log "Creating package: $OUTPUT_PATH"
 (
   cd "$STAGE_DIR"
   zip -r "$OUTPUT_PATH" . \
-    -x "*.git*" -x "*.DS_Store" -x "*.pyc" -x "*__pycache__*"
+    -x "*.git*"
 ) >/dev/null
 
 log "OK: Package created: $OUTPUT_PATH"
@@ -315,7 +308,7 @@ log "Installing extension via unopkg..."
 # NB: certaines versions d'unopkg ne connaissent pas --replace ; -f (force) écrase.
 if ! "$UNOPKG_BIN" add -f "$OUTPUT_PATH" >/dev/null 2>&1; then
   warn "add -f failed, fallback to remove + add"
-  "$UNOPKG_BIN" remove "fr.gouv.interieur.mirai" >/dev/null 2>&1 || true
+  "$UNOPKG_BIN" remove "$OXT_IDENTIFIER" >/dev/null 2>&1 || true
   printf "yes\n" | "$UNOPKG_BIN" add "$OUTPUT_PATH"
 fi
 

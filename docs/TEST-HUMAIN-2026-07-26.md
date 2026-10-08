@@ -124,7 +124,7 @@ entier**, ouvrez l'assistant, cliquez sur le bouton indiqué.
 ### 3.1 Résumer
 
 **Vous devez voir :** un résumé apparaît **dans le document**, juste après votre sélection,
-encadré par des repères `---début-du-texte-généré---` et `---fin-du-texte-généré---`. Le
+encadré par des repères `---début-du-résumé---` et `---fin-du-résumé---`. Le
 texte arrive progressivement, mot après mot.
 
 ☐ Conforme ☐ Non conforme — *observations :* ______________________________

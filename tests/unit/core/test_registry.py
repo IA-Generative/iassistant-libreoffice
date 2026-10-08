@@ -115,7 +115,7 @@ def test_content_capped():
     assert len(result.content) < 50 and "tronqué" in result.content
 
 
-# ── Télémétrie enrichie : motif d'échec + coercitions + types ───────────
+# Télémétrie enrichie : motif d'échec + coercitions + types
 
 def _tool_span(ctx):
     spans = [(s, a) for s, a in ctx.shell.telemetry_events
@@ -173,8 +173,9 @@ def _bounded_registry():
 
 
 def test_clamped_arguments_are_counted():
-    """f41d9e8 ramène 99 → 20 au lieu de rejeter : la coercition doit se voir,
-    sinon impossible de savoir combien d'appels sont rattrapés en silence."""
+    """Un argument hors bornes est ramené à la borne (99 → 20) au lieu d'être rejeté :
+    la coercition doit se voir, sinon impossible de savoir combien d'appels sont
+    rattrapés en silence."""
     registry, ctx = _bounded_registry(), _Ctx()
     result = registry.call_tool("writer_read", {"count": 99}, ctx)
     assert result.ok and result.content == "20"

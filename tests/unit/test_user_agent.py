@@ -1,8 +1,5 @@
 """
 Tests for User-Agent construction and propagation.
-
-Run with:
-    .venv/bin/pytest tests/unit/test_user_agent.py -v
 """
 import unittest
 
@@ -10,7 +7,7 @@ from tests.stubs.uno_stubs import install
 
 install()
 
-from src.mirai.entrypoint import (  # noqa: E402
+from src.mirai.entrypoint import (
     PLUGIN_NAME,
     _with_user_agent,
     build_user_agent,

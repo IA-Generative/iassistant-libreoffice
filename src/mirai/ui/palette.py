@@ -22,7 +22,7 @@ import threading
 import time
 
 import unohelper
-from com.sun.star.awt import XKeyListener
+from com.sun.star.awt import XKeyListener, XMouseListener
 
 try:
     from com.sun.star.awt import XCallback
@@ -65,6 +65,7 @@ from ..core.registry import ToolRegistry
 from ..core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSink
 from ..core.tools import register_all
 from ..core.ui_thread import DispatcherClosed, MainThreadDispatcher
+from ..i18n import t as _t
 from . import dsfr
 
 try:
@@ -74,19 +75,19 @@ except Exception:
     KEY_RETURN, KEY_ESCAPE = 1280, 1281
 
 TOOL_LABELS = {
-    "writer_get_selection": "Lecture de la sélection",
-    "writer_get_document_map": "Lecture du document",
-    "writer_replace_paragraphs": "Réécriture des paragraphes",
-    "writer_replace_selection": "Remplacement de la sélection",
-    "writer_insert_text": "Insertion de texte",
-    "writer_find_replace": "Remplacements dans le document",
-    "calc_get_selection": "Lecture de la sélection",
-    "calc_read_range": "Lecture d'une plage",
-    "calc_get_sheet_overview": "Analyse de la structure",
-    "calc_write_cells": "Écriture de cellules",
-    "calc_write_result_column": "Écriture de la colonne résultat",
-    "calc_set_formula": "Écriture de la formule",
-    "calc_fill_formula_down": "Recopie de la formule",
+    "writer_get_selection": "tool.writer_get_selection",
+    "writer_get_document_map": "tool.writer_get_document_map",
+    "writer_replace_paragraphs": "tool.writer_replace_paragraphs",
+    "writer_replace_selection": "tool.writer_replace_selection",
+    "writer_insert_text": "tool.writer_insert_text",
+    "writer_find_replace": "tool.writer_find_replace",
+    "calc_get_selection": "tool.calc_get_selection",
+    "calc_read_range": "tool.calc_read_range",
+    "calc_get_sheet_overview": "tool.calc_get_sheet_overview",
+    "calc_write_cells": "tool.calc_write_cells",
+    "calc_write_result_column": "tool.calc_write_result_column",
+    "calc_set_formula": "tool.calc_set_formula",
+    "calc_fill_formula_down": "tool.calc_fill_formula_down",
 }
 
 _open_palette = [None]   # singleton de session
@@ -95,30 +96,19 @@ FLUSH_INTERVAL_S = 0.12   # cadence maximale des mises à jour d'affichage
 FLUSH_CHARS = 80          # ou dès qu'on a accumulé ce nombre de caractères
 PULSE_INTERVAL_S = 0.2    # cadence d'animation de la jauge d'activité
 
-# Zone basse : trois contenus, un seul rectangle. L'identifiant sert aussi de
-# nom de contrôle (« response » porte l'historique, déjà créé plus haut).
-# « Conversation » et non « Historique » : cet onglet porte le FIL en cours,
-# restauré d'une session à l'autre. « Historique » laissait attendre une liste
-# de conversations passées, qui n'existe pas (une seule conversation en v1).
-# « Raisonnement » a désormais SON onglet. Il partageait le rectangle des
-# autres sans en porter un : le clic sur « ⓘ » remplaçait donc le contenu de
-# l'onglet courant — le plus souvent la Conversation — sans que rien n'indique
-# où l'on venait d'atterrir ni comment revenir. Un onglet nommé rend le
-# déplacement visible, réversible d'un clic, et lisible sans mode d'emploi.
-TABS = (("response", "Conversation"),
-        ("suggestions", "Suggestions"),
-        ("reasoning", "Raisonnement"),
-        ("journal", "Actions"))
+# Zone basse : quatre contenus, un seul rectangle. L'identifiant sert aussi de
+# nom de contrôle (« response » est créé dans _build, hors de la boucle).
+# « Conversation » : le fil en cours, restauré d'une session à l'autre (une
+# seule conversation en v1).
+TABS = (("response", "tab.conversation"),
+        ("suggestions", "tab.suggestions"),
+        ("reasoning", "tab.reasoning"),
+        ("journal", "tab.actions"))
 
 REASONING_PANE = "reasoning"
 BOTTOM_PANES = tuple(tab_id for tab_id, _ in TABS)
 
-REASONING_EMPTY = ("Le raisonnement du modèle s'affichera ici pendant "
-                   "la prochaine demande.")
-
-# Le retour d'un run doit se VOIR : une ligne de statut colorée selon l'issue,
-# pas un texte discret dans une zone grise. C'est la leçon du « il ne se passe
-# rien » — l'action partait bien, mais rien ne le signalait à l'écran.
+# Le retour d'un run doit se VOIR : une ligne de statut colorée selon l'issue.
 STATUS_COLORS = {
     "neutral": dsfr.TOKENS["text_mention"],
     "error":   dsfr.TOKENS["error"],
@@ -222,10 +212,7 @@ class _SelectionWatcher(unohelper.Base,
     """Suit la sélection du document — en PUSH, jamais en polling.
 
     LibreOffice livre `selectionChanged` sur le thread principal : on peut donc
-    écrire dans les contrôles depuis le callback sans marshalling. C'est ce qui
-    distingue ce patron du thread de rafraîchissement du code historique, qui
-    écrivait dans des contrôles VCL toutes les 3 s depuis un thread de fond,
-    sans SolarMutex.
+    écrire dans les contrôles depuis le callback sans marshalling.
     """
 
     def __init__(self, palette):
@@ -296,12 +283,12 @@ def _friendly_error(exc):
     """Traduit une panne technique en phrase actionnable pour l'utilisateur."""
     text = str(exc)
     if "401" in text or "Unauthorized" in text or "Missing credentials" in text:
-        return ("Jeton expiré — Menu MIrAI ▸ Paramètres pour vous reconnecter.")
+        return _t("palette.err_token")
     if "timeout" in text.lower() or "timed out" in text.lower():
-        return "Le service n'a pas répondu à temps. Réessayez dans un instant."
+        return _t("palette.err_timeout")
     if "thread principal n'a pas répondu" in text:
-        return "LibreOffice était occupé (fenêtre ouverte ?). Réessayez."
-    return f"Erreur : {text}"
+        return _t("palette.err_busy")
+    return _t("palette.err_generic", text=text)
 
 
 class _DeltaCoalescer:
@@ -384,7 +371,7 @@ class _KeyHandler(unohelper.Base, XKeyListener):
         pass
 
 
-class _PaneClickHandler(unohelper.Base, dsfr.XMouseListener):
+class _PaneClickHandler(unohelper.Base, XMouseListener):
     """Clic dans une zone de texte : reporte la ligne cliquée dans la saisie.
 
     On lit la position au RELÂCHEMENT et non à l'appui : c'est le clic qui
@@ -421,7 +408,8 @@ class _JournalObserver(RunObserver):
         self.acted = False    # un outil a-t-il agi pendant CE run ?
 
     def _tool_label(self, call):
-        return TOOL_LABELS.get(call.name, call.name)
+        key = TOOL_LABELS.get(call.name)
+        return _t(key) if key else call.name
 
     def _capabilities(self):
         """Libellés des outils réellement disponibles ici, sans doublon."""
@@ -431,7 +419,7 @@ class _JournalObserver(RunObserver):
             return []
         labels = []
         for spec in specs:
-            label = TOOL_LABELS.get(spec.name, spec.name)
+            label = _t(TOOL_LABELS.get(spec.name, spec.name))
             if label not in labels:
                 labels.append(label)
         return labels
@@ -440,7 +428,7 @@ class _JournalObserver(RunObserver):
         self._palette.set_journal_text("\n".join(self.lines))
 
     def on_run_start(self, mode):
-        self.lines = [f"Mode outils : {mode}"]
+        self.lines = [_t("palette.mode_tools", mode=mode)]
         self.acted = False
         self._render()
 
@@ -475,10 +463,10 @@ class _JournalObserver(RunObserver):
         """
         if self.acted:
             return
-        self.lines.append("ℹ Aucune action sur le document — réponse en texte seul.")
+        self.lines.append(_t("palette.no_action"))
         labels = self._capabilities()
         if labels:
-            self.lines.append(f"   Ici, l'assistant sait : {', '.join(labels)}.")
+            self.lines.append(_t("palette.capabilities", tools=", ".join(labels)))
         self._render()
 
     def on_error(self, code, message):
@@ -487,11 +475,10 @@ class _JournalObserver(RunObserver):
 
 
 class AssistantPalette:
-    def __init__(self, uno_ctx, shell, app, callbacks):
+    def __init__(self, uno_ctx, shell, app):
         self.uno_ctx = uno_ctx
         self.shell = shell
         self.app = app                      # "writer" | "calc" à l'ouverture
-        self.callbacks = callbacks          # settings / about / documentation
         self.busy = False
         self.active_tab = self._restore_tab(shell)
         self._bottom_height = 0        # ajusté par le redimensionnement
@@ -502,7 +489,6 @@ class AssistantPalette:
         self._analysis_text = ""       # analyse du document, quand elle arrive
         self._analysis_running = False  # une seule analyse à la fois
         self._analysis_base = ""       # socle statique, repli si l'analyse échoue
-        self._analysis_progress = None  # jauge de l'analyse (partagée avec le run)
         self._title_shown = ""         # dernier titre posé (évite le clignotement)
         self.append_mode = self._restore_append_mode(shell)
         self._progress = None          # jauge du run en cours
@@ -514,7 +500,7 @@ class AssistantPalette:
         self._min_width = 0            # largeur qui garde les chips sur UNE ligne
         self._scale = 1.0
         self._laying_out = False       # garde anti-réentrance (_layout → setPosSize)
-        self._resize_watcher = None
+        self._window_closer = None
         self.registry = register_all(ToolRegistry())
         self.conversation = ConversationStore(shell.data_dir())
         self.dialog = None
@@ -538,20 +524,18 @@ class AssistantPalette:
         self._last_refusal = ""             # anti-rafale sur Entrée martelée
         self._build()
 
-    # ── Construction (création des contrôles, positions posées par _layout) ──
     def _build(self):
         toolkit = self.shell.toolkit()
         font = dsfr.probe_font(toolkit)
-        self._font = font
 
         app_label = "Writer" if self.app == "writer" else "Calc"
         dialog, model = dsfr.make_dialog(
-            self.uno_ctx, "MIrAI — Assistant", 640, 560)
-        self.dialog, self.model = dialog, model
+            self.uno_ctx, _t("palette.title"), 640, 560)
+        self.dialog = dialog
 
         _, header_model = dsfr.add_control(
             dialog, model, "header", "FixedText", 0, 0, 640, 40, {
-                "Label": f"  MIrAI — Assistant ({app_label})",
+                "Label": _t("palette.header", app=app_label),
                 "BackgroundColor": dsfr.TOKENS["primary"],
                 "TextColor": dsfr.TOKENS["text_inverted"],
                 "FontName": font, "FontHeight": 7, "FontWeight": 150.0,
@@ -584,7 +568,7 @@ class AssistantPalette:
                 # Champ DSFR : fond contraste + bordure sombre, bien visible
                 "BackgroundColor": dsfr.TOKENS["bg_contrast"],
                 "Border": 2, "BorderColor": dsfr.TOKENS["text_body"],
-                "HelpText": "Décrivez ce que l'assistant doit faire",
+                "HelpText": _t("palette.prompt_help"),
             })
         self._models["prompt"] = prompt_model
 
@@ -596,16 +580,12 @@ class AssistantPalette:
             })
         self._models["status"] = status_model
 
-        # Deux écoles chez les utilisateurs : remplacer la sélection, ou
-        # ajouter le résultat à la suite entre marqueurs pour comparer avant de
-        # décider. On ne tranche pas — on laisse choisir, et le choix est
-        # mémorisé d'une session à l'autre.
         reasoning_control, reasoning_toggle = dsfr.add_control(
             dialog, model, "reasoning_toggle", "FixedText", 0, 0, 20, 18, {
                 "Label": "",
                 "TextColor": dsfr.TOKENS["primary"],
                 "FontName": font, "FontHeight": 8,
-                "HelpText": "Voir ce que le modèle est en train de faire",
+                "HelpText": _t("palette.reasoning_help"),
             })
         self._models["reasoning_toggle"] = reasoning_toggle
         reasoning_handler = dsfr.ClickHandler(
@@ -614,15 +594,17 @@ class AssistantPalette:
         reasoning_control.addMouseListener(reasoning_handler)
         self._handlers.append(reasoning_handler)
 
+        # Deux écoles chez les utilisateurs : remplacer la sélection, ou
+        # ajouter le résultat à la suite entre marqueurs pour comparer avant de
+        # décider. On ne tranche pas : on laisse choisir, et le choix est
+        # mémorisé d'une session à l'autre.
         _, append_model = dsfr.add_control(
             dialog, model, "append_mode", "CheckBox", 0, 0, 150, 18, {
-                "Label": "Ajouter à la suite",
+                "Label": _t("palette.append_label"),
                 "State": 1 if self.append_mode else 0,
                 "FontName": font, "FontHeight": 7,
                 "TextColor": dsfr.TOKENS["text_mention"],
-                "HelpText": ("Coché : le résultat est inséré après la sélection, "
-                             "entre marqueurs, et l'original est conservé.\n"
-                             "Décoché : le résultat remplace la sélection."),
+                "HelpText": _t("palette.append_help"),
             })
         self._models["append_mode"] = append_model
         append_handler = _AppendModeListener(self)
@@ -630,7 +612,7 @@ class AssistantPalette:
         self._handlers.append(append_handler)
 
         _, send_model = dsfr.add_primary_button(
-            dialog, model, "send", "Envoyer  ⏎", 0, 0, 120, 32, font,
+            dialog, model, "send", _t("palette.send"), 0, 0, 120, 32, font,
             self._on_send)
         self._models["send"] = send_model
 
@@ -649,9 +631,9 @@ class AssistantPalette:
         dialog.getControl("response").addMouseListener(response_click)
         self._handlers.append(response_click)
 
-        # Zone basse : UN seul rectangle, trois contenus superposés qu'on
-        # bascule par setVisible(). Réempiler trois zones distinctes ferait
-        # exploser la hauteur — c'est justement ce qu'on corrige ici.
+        # Zone basse : un seul rectangle pour les quatre contenus (« response »
+        # créé plus haut), basculés par setVisible() : empiler quatre zones
+        # ferait exploser la hauteur.
         for name, color, background in (
             ("suggestions", dsfr.TOKENS["text_body"], dsfr.TOKENS["bg_accent"]),
             ("journal", dsfr.TOKENS["text_mention"], dsfr.TOKENS["bg_accent"]),
@@ -669,7 +651,7 @@ class AssistantPalette:
             # Conversation et Suggestions sont rejouables d'un clic : la ligne
             # cliquée remonte dans la zone de saisie. Le journal d'actions et
             # le raisonnement, eux, ne sont pas des demandes.
-            if name in ("suggestions",):
+            if name == "suggestions":
                 pane_handler = _PaneClickHandler(
                     control, lambda offset, n=name: self._pick_from_pane(n, offset))
                 control.addMouseListener(pane_handler)
@@ -677,11 +659,11 @@ class AssistantPalette:
 
         # Onglets : des FixedText cliquables (pas de UnoControlTabPageContainer,
         # capricieux et peu stylable). L'onglet actif porte la couleur accent.
-        for tab_id, label in TABS:
+        for tab_id, key in TABS:
             name = f"tab_{tab_id}"
             control, tab_model = dsfr.add_control(
                 dialog, model, name, "FixedText", 0, 0, 90, 16, {
-                    "Label": label,
+                    "Label": _t(key),
                     "TextColor": dsfr.TOKENS["text_mention"],
                     "FontName": font, "FontHeight": 7,
                 })
@@ -694,28 +676,22 @@ class AssistantPalette:
 
         # Réglages / À propos / Documentation vivent UNIQUEMENT dans le menu
         # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler.
-        dsfr.add_link(dialog, model, "link_clear", "🗑 Nouvelle conversation",
+        dsfr.add_link(dialog, model, "link_clear", _t("palette.new_conversation"),
                       0, 0, 120, 16, font, self._on_clear)
         _, hint_model = dsfr.add_control(
             dialog, model, "hint", "FixedText", 0, 0, 120, 16, {
-                "Label": "Entrée : envoyer · Échap : fermer",
+                "Label": _t("palette.hint"),
                 "TextColor": dsfr.TOKENS["text_mention"],
                 "FontName": font, "FontHeight": 6, "Align": 2,
             })
         self._models["hint"] = hint_model
 
-        # La palette est une fenêtre POSSÉDÉE par la fenêtre de document : sur
-        # macOS elle ne peut pas quitter l'écran de son propriétaire et le suit
-        # au pixel près. Mesuré le 2026-08-04 sur trois écrans.
-        #
-        # Passer `None` en parent NE LE CORRIGE PAS — essayé et mesuré le même
-        # jour : VCL rattache alors le dialogue à la fenêtre active de
-        # l'application, et le suivi reste identique (+1500/+261 dans les deux
-        # cas). On garde donc le parent explicite, qui a au moins le mérite
-        # d'être prévisible et de tenir la palette au-dessus du document.
-        #
-        # Une vraie fenêtre autonome demanderait `toolkit.createWindow` avec un
-        # WindowDescriptor de type TOP, au lieu d'un UnoControlDialog. Voir
+        # La palette est une fenêtre POSSÉDÉE par la fenêtre de document (sur
+        # macOS elle la suit et ne peut pas quitter son écran). Passer `None` en
+        # parent ne change rien : VCL rattache alors le dialogue à la fenêtre
+        # active. On garde donc le parent explicite, prévisible et qui tient la
+        # palette au-dessus du document. Une fenêtre réellement indépendante
+        # demanderait `toolkit.createWindow` (WindowDescriptor TOP) ; voir
         # `bring_to_front` pour ce qui est faisable sans cette refonte.
         frame = self.uno_ctx.getServiceManager().createInstanceWithContext(
             "com.sun.star.frame.Desktop", self.uno_ctx).getCurrentFrame()
@@ -725,8 +701,7 @@ class AssistantPalette:
         self._layout()
 
         # On s'ouvre toujours SUR la fenêtre de document — c'est là que regarde
-        # l'utilisateur. Autonome ne veut pas dire posée n'importe où : elle
-        # cesse seulement d'y être enchaînée ensuite.
+        # l'utilisateur.
         if parent_window is not None:
             try:
                 ps = parent_window.getPosSize()
@@ -737,7 +712,7 @@ class AssistantPalette:
                 # vision sur une configuration à plusieurs écrans. Dans ce cas
                 # on laisse le toolkit décider plutôt que de viser à l'aveugle.
                 if ps.Width > 0 and ps.Height > 0:
-                    dialog.setPosSize(x, y, 0, 0, 3)  # POS
+                    dialog.setPosSize(x, y, 0, 0, dsfr.POS)
             except Exception:
                 pass
 
@@ -754,7 +729,7 @@ class AssistantPalette:
             try:
                 dialog.getControl(name).addKeyListener(escape_handler)
             except Exception:
-                pass          # contrôle absent selon l'application — sans gravité
+                pass          # enregistrement du listener refusé : sans gravité
 
         # La croix de la fenêtre : sans listener, elle ne ferme RIEN.
         self._attach_window_closer()
@@ -776,11 +751,8 @@ class AssistantPalette:
                 resizer = _ResizeWatcher(self)
                 self.dialog.addWindowListener(resizer)
                 self._handlers.append(resizer)
-                self._resize_watcher = resizer
             except Exception as exc:
                 self.shell.log(f"[palette] redimensionnement indisponible : {exc}")
-
-    # ── Redimensionnement ───────────────────────────────────────────────
 
     def on_resized(self, width, height):
         """Réagit à un redimensionnement : toute la hauteur gagnée va en bas.
@@ -820,12 +792,11 @@ class AssistantPalette:
         if width < 200 or height < 150:
             return                     # valeur aberrante : on garde le défaut
         try:
-            self.dialog.setPosSize(x, y, width, height, 15)
+            self.dialog.setPosSize(x, y, width, height, dsfr.POSSIZE)
             self.on_resized(width, height)
         except Exception:
             pass
 
-    # ── Layout mesuré ───────────────────────────────────────────────────
     def _preferred(self, name):
         try:
             return self.dialog.getControl(name).getPreferredSize()
@@ -835,7 +806,7 @@ class AssistantPalette:
     def _place(self, name, x, y, w, h):
         control = self.dialog.getControl(name)
         if control is not None:
-            control.setPosSize(int(x), int(y), int(w), int(h), 15)  # POSSIZE
+            control.setPosSize(int(x), int(y), int(w), int(h), dsfr.POSSIZE)
 
     def _layout(self, width=None):
         """Positionne tout à partir des tailles réelles de rendu.
@@ -908,7 +879,7 @@ class AssistantPalette:
                     y + (send_h - line_h) // 2, toggle_w, line_h)
         y += send_h + int(8 * scale)
 
-        # Zone basse : les trois contenus occupent EXACTEMENT le même
+        # Zone basse : les quatre contenus occupent EXACTEMENT le même
         # rectangle ; seul l'onglet actif est visible. Toute la hauteur gagnée
         # au redimensionnement lui revient — le reste garde sa taille.
         bottom_h = max(int(70 * scale), self._bottom_height or int(120 * scale))
@@ -959,9 +930,8 @@ class AssistantPalette:
             self._base_bottom_h = bottom_h
             self._min_width = width
         ps = self.dialog.getPosSize()
-        self.dialog.setPosSize(ps.X, ps.Y, width, self._height, 15)
+        self.dialog.setPosSize(ps.X, ps.Y, width, self._height, dsfr.POSSIZE)
 
-    # ── Affichage ───────────────────────────────────────────────────────
     def show(self):
         self.dialog.setVisible(True)
         try:
@@ -992,7 +962,7 @@ class AssistantPalette:
         # Retirer les listeners AVANT dispose() : l'ordre inverse laisse
         # LibreOffice notifier un contrôle détruit.
         self.detach_selection_watcher()
-        closer = getattr(self, "_window_closer", None)
+        closer = self._window_closer
         if closer is not None:
             self._window_closer = None
             try:
@@ -1027,11 +997,9 @@ class AssistantPalette:
             "append.toggles": self._session["append_toggles"],
         })
 
-    # ── Mises à jour d'affichage ────────────────────────────────────────
     # Ces méthodes sont appelées indifféremment depuis le thread principal et
     # depuis le worker : elles postent systématiquement, ce qui garantit que
     # l'écriture dans les contrôles VCL a bien lieu sur le thread principal.
-
     def set_status(self, message, tone="neutral", tooltip=None):
         """Ligne de statut, colorée selon l'issue — le retour doit se VOIR.
 
@@ -1054,8 +1022,6 @@ class AssistantPalette:
     def set_journal_text(self, text):
         self.dispatcher.post(lambda: self._set_text("journal", text))
 
-    # ── Indicateur de sélection ─────────────────────────────────────────
-
     def attach_selection_watcher(self):
         """Branche le listener sur le contrôleur courant. Après createPeer."""
         if _XSelectionChangeListener is None:
@@ -1074,9 +1040,8 @@ class AssistantPalette:
             self.shell.log(f"[palette] listener de sélection indisponible : {exc}")
 
     def detach_selection_watcher(self):
-        """Retire le listener. À appeler AVANT dispose() — le legacy fait
-        l'inverse et ne survit que grâce à un try/except."""
-        pair = getattr(self, "_selection_watcher", None)
+        """Retire le listener. À appeler AVANT dispose()."""
+        pair = self._selection_watcher
         if not pair:
             return
         watcher, controller = pair
@@ -1116,13 +1081,13 @@ class AssistantPalette:
         self.dispatcher.drain()      # rattraper ce qui n'a pas été délivré
         self._set_input_enabled(True)
         self._set_send_label(running=False)
-        self.set_status("Terminé", tone="success")
+        self.set_status(_t("palette.done"), tone="success")
         self.dispatcher.drain()
 
     def bring_to_front(self):
         """Remonte la fenêtre au premier plan, au-dessus du document.
 
-        `setFocus` seul ne suffit pas sur une fenêtre autonome : il donne le
+        `setFocus` seul ne suffit pas sur une fenêtre non modale : il donne le
         focus clavier sans changer l'ordre d'empilement, et la palette reste
         cachée derrière LibreOffice. `toFront()` (XTopWindow, porté par le peer)
         est ce qui la fait remonter — et il faut être visible d'abord, sinon il
@@ -1155,12 +1120,11 @@ class AssistantPalette:
         """Nomme dans le titre le document sur lequel la demande portera.
 
         La palette agit sur le document ACTIF au moment de l'envoi, pas sur
-        celui qui était ouvert quand on l'a lancée. Avec plusieurs documents et
-        une fenêtre désormais autonome, rien ne disait plus lequel — le titre
-        le dit maintenant.
+        celui qui était ouvert quand on l'a lancée. Avec plusieurs documents
+        ouverts, le titre nomme celui sur lequel la demande portera.
         """
         nom = self._current_document_name()
-        titre = f"MIrAI — Assistant · {nom}" if nom else "MIrAI — Assistant"
+        titre = f"{_t('palette.title')} · {nom}" if nom else _t('palette.title')
         if titre == self._title_shown:
             return                    # setTitle() fait clignoter la barre
         self._title_shown = titre
@@ -1188,10 +1152,7 @@ class AssistantPalette:
     def current_app(self):
         """Application du document ACTIF, pas celle de l'ouverture.
 
-        `self.app` est figé à la création : une palette ouverte sur Writer
-        gardait ce cap même passée sur un Calc, et l'analyse de document comme
-        les suggestions se calaient sur la mauvaise application. Les outils
-        envoyés au modèle, eux, suivaient déjà le document réel (`ctx.app`).
+        `self.app`, figé à la création, n'est qu'un défaut de repli.
         """
         try:
             desktop = self.uno_ctx.getServiceManager().createInstanceWithContext(
@@ -1225,8 +1186,6 @@ class AssistantPalette:
             pass
         return ""
 
-    # ── Zone basse à onglets ────────────────────────────────────────────
-
     @staticmethod
     def _restore_append_mode(shell):
         """Préférence « ajouter à la suite » de la session précédente."""
@@ -1247,7 +1206,7 @@ class AssistantPalette:
 
     @staticmethod
     def _restore_tab(shell):
-        """Onglet actif de la session précédente, « Historique » par défaut."""
+        """Onglet actif de la session précédente, « Conversation » par défaut."""
         try:
             stored = str(shell.get_config("assistant_active_tab", "") or "")
         except Exception:
@@ -1315,8 +1274,6 @@ class AssistantPalette:
         # ligne d'état, là où le run affiche déjà la sienne.
         self.start_document_analysis()
 
-    # ── Analyse du document (asynchrone) ────────────────────────────────
-
     def _document_text(self):
         """Texte intégral du document Writer. Thread principal uniquement."""
         desktop = self.uno_ctx.getServiceManager().createInstanceWithContext(
@@ -1335,8 +1292,7 @@ class AssistantPalette:
         pour `start_pump()` — il n'est fiable que depuis le thread principal,
         et sans lui le résultat ne serait jamais affiché.
 
-        Rend True si l'analyse a bien démarré, pour que l'appelant sache s'il
-        doit annoncer « analyse en cours ».
+        Rend True si l'analyse a démarré (lu par les tests).
         """
         if self._analysis_running or self._analysis_text or self.current_app() != "writer":
             return False
@@ -1347,15 +1303,14 @@ class AssistantPalette:
             return False
         messages = doc_analysis.build_messages(text)
         if messages is None:
-            self._analysis_text = doc_analysis.TOO_SHORT
+            self._analysis_text = _t("analysis.too_short")
             return False              # rien à analyser : pas d'attente à annoncer
         self._analysis_running = True
         self.dispatcher.start_pump()
         # Même jauge que le run : l'attente s'affiche dans la ligne d'état, au
         # format « ⠹ Analyse du document · 3 s ». Rien d'animé dans l'onglet —
         # deux animations à deux endroits apprendraient deux habitudes.
-        progress = RunProgress(activity=doc_analysis.PHASE)
-        self._analysis_progress = progress
+        progress = RunProgress(activity=_t("analysis.phase"))
         self._start_pulse(progress)
         threading.Thread(target=self._analyse_in_worker, args=(messages, progress),
                          daemon=True, name="mirai-doc-analysis").start()
@@ -1391,16 +1346,15 @@ class AssistantPalette:
             self._analysis_running = False
             self._publish_analysis(progress)
 
-    def _publish_analysis(self, progress=None):
+    def _publish_analysis(self, progress):
         """Affiche le résultat — ou rend la main au socle statique en cas d'échec."""
         final = self._analysis_text or self._analysis_base
         # La jauge n'est arrêtée que si elle est encore la NÔTRE : un run
         # démarré entre-temps a posé la sienne, et la couper afficherait un run
         # figé alors qu'il travaille.
-        if progress is None or self._progress is progress:
+        if self._progress is progress:
             self._stop_pulse()
-            self._analysis_progress = None
-            self.set_status("Prêt", tone="neutral")
+            self.set_status(_t("palette.ready"), tone="neutral")
         try:
             self.dispatcher.post(lambda: self._set_text("suggestions", final))
             # La pompe a été armée pour cette analyse : on l'éteint, sauf si un
@@ -1433,16 +1387,14 @@ class AssistantPalette:
             return suggestions.suggest("calc", cell_count=count, values=values)
         return suggestions.suggest(self.current_app())
 
-    # ── Fil de conversation (main courante : le plus récent EN HAUT) ────
-
     def journal_line(self, text, step="", detail="", **attributes):
         """Ajoute une ligne au journal d'actions (onglet « Actions »).
 
         Trois destinations, trois publics :
 
-        - l'**onglet Actions**, pour l'utilisateur, en français : `text`, suivi
-          de ` — {detail}` quand `detail` (extrait du document ou du modèle)
-          n'est pas vide ;
+        - l'**onglet Actions**, pour l'utilisateur, dans la langue de
+          l'interface : `text`, suivi de ` — {detail}` quand `detail` (extrait
+          du document ou du modèle) n'est pas vide ;
         - **le journal de l'extension** (`<profil>/user/config/mirai/mirai.log`),
           pour le diagnostic après coup : `text` et la seule longueur de
           `detail`, le fichier ne porte jamais de texte du document ;
@@ -1473,9 +1425,8 @@ class AssistantPalette:
         except Exception:
             return
         propos = clickable.payload_at(texte, offset)
-        # Une ligne par clic. Sans elle, un contrôle en lecture seule qui ne
-        # rendrait pas de position de curseur donnerait un clic sans effet ET
-        # sans trace — la panne muette qu'on a passé la journée à traquer.
+        # Une ligne par clic : un contrôle en lecture seule sans position de
+        # curseur donnerait un clic sans effet ni trace.
         self.shell.log(f"[palette] clic {name} offset={offset} "
                        f"ligne={clickable.line_at(texte, offset)} "
                        f"repris={len(propos)}c")
@@ -1508,7 +1459,7 @@ class AssistantPalette:
         clique sur « Raisonnement » avant tout run voit un rectangle blanc et
         croit à une panne.
         """
-        self._set_text(REASONING_PANE, text or REASONING_EMPTY)
+        self._set_text(REASONING_PANE, text or _t("reasoning.empty"))
         label = "ⓘ" if text else ""
         model = self._models.get("reasoning_toggle")
         if model is not None:
@@ -1516,11 +1467,6 @@ class AssistantPalette:
                 model.Label = label
             except Exception:
                 pass
-
-    def reload_history(self):
-        """Force la relecture du fil persisté au prochain rendu."""
-        self._history_cache = None
-        self._render_conversation()
 
     def _render_conversation(self):
         """Recompose le fil : échange en cours d'abord, puis l'historique.
@@ -1549,7 +1495,8 @@ class AssistantPalette:
             if entry["role"] == "user" and exchange:
                 grouped.append(exchange)
                 exchange = []
-            prefix = "Vous : " if entry["role"] == "user" else "MIrAI : "
+            prefix = (_t("palette.user_prefix") if entry["role"] == "user"
+                      else _t("palette.assistant_prefix"))
             exchange.append(prefix + entry["text"])
         if exchange:
             grouped.append(exchange)
@@ -1595,7 +1542,7 @@ class AssistantPalette:
     def _flush_deltas(self, text):
         """Le flux alimente la DERNIÈRE ligne de l'échange en cours."""
         if not self._current_exchange:
-            self._current_exchange.append("MIrAI : ")
+            self._current_exchange.append(_t("palette.assistant_prefix"))
         self._current_exchange[-1] += text
         self._render_conversation()
 
@@ -1608,9 +1555,8 @@ class AssistantPalette:
         self._history_cache = None
         self._models["response"].Text = ""
         self.set_journal_text("")
-        self.set_status("Conversation effacée.")
+        self.set_status(_t("palette.cleared"))
 
-    # ── Exécution ───────────────────────────────────────────────────────
     def _current_context(self):
         """Résout le document courant. À appeler depuis le thread principal.
 
@@ -1630,7 +1576,7 @@ class AssistantPalette:
             app = "calc"
         else:
             return None
-        return ToolContext(self.uno_ctx, model, model.CurrentController,
+        return ToolContext(model, model.CurrentController,
                            app, self.shell, dispatcher=self.dispatcher)
 
     def _prompt_text(self):
@@ -1667,7 +1613,7 @@ class AssistantPalette:
         """Demande l'arrêt du run en cours. Le worker s'arrête entre deux chunks."""
         if self._cancel is not None:
             self._cancel.set()
-            self.set_status("Arrêt en cours…")
+            self.set_status(_t("palette.stopping"))
 
     def _start_run(self, preset=None):
         """Valide la demande sur le thread principal, puis lance le worker.
@@ -1680,20 +1626,20 @@ class AssistantPalette:
             return
         prompt_text = self._prompt_text().strip()
         if preset is None and not prompt_text:
-            return self._refuse("empty_prompt", "Tapez d'abord votre demande.")
+            return self._refuse("empty_prompt", _t("palette.refuse_empty"))
         if preset is not None and preset.needs_input and not prompt_text:
             return self._refuse(
                 "preset_needs_input",
-                preset.input_hint or "Précisez votre demande.", preset)
+                preset.input_hint or _t("palette.refuse_input_hint"), preset)
 
         ctx = self._current_context()
         if ctx is None:
             return self._refuse("no_document",
-                                "Ouvrez un document Writer ou Calc.", preset)
+                                _t("palette.refuse_document"), preset)
         if preset is not None and ctx.app not in preset.apps:
             wanted = "Writer" if "writer" in preset.apps else "Calc"
             return self._refuse(
-                "wrong_app", f"Cette action nécessite un document {wanted}.",
+                "wrong_app", _t("palette.refuse_app", app=wanted),
                 preset)
 
         self._last_refusal = ""
@@ -1711,10 +1657,10 @@ class AssistantPalette:
         # regarde ailleurs, il ne verrait RIEN se produire. On bascule pour lui.
         if self.active_tab != "response":
             self.select_tab("response")
-        self.set_status("L'assistant travaille…")
+        self.set_status(_t("palette.working"))
         shown = prompt_text if preset is None else (
             preset.label + ((" — " + prompt_text) if prompt_text else ""))
-        self._append_response("Vous : ", shown)
+        self._append_response(_t("palette.user_prefix"), shown)
 
         # Instantané pris ICI, sur le thread principal. Un `call()` depuis le
         # worker dépend d'AsyncCallback, qui n'est délivré qu'au prochain
@@ -1736,11 +1682,8 @@ class AssistantPalette:
     def _refuse(self, reason, message, preset=None):
         """Refuse le lancement en le DISANT — à l'utilisateur et au parc.
 
-        Ces refus étaient invisibles : un preset systématiquement lancé sans
-        sélection, ou un raccourci utilisé dans la mauvaise application, ne
-        laissaient qu'un statut rouge que personne ne remonte. La télémétrie
-        ne part pas par `journal_line` : le journal est vidé au démarrage du
-        run suivant, et un refus n'est pas une étape de run.
+        La télémétrie ne part pas par `journal_line` : le journal est vidé au
+        démarrage du run suivant, et un refus n'est pas une étape de run.
         """
         self.set_status(message, tone="error")
         # Entrée martelée sur un prompt vide : un span, pas une rafale.
@@ -1785,7 +1728,13 @@ class AssistantPalette:
         return WriterReplaceSink(ctx)
 
     def _document_snapshot(self, ctx, preset, prompt_text):
-        """Lit d'avance ce dont le run aura besoin. Thread principal uniquement."""
+        """Lit d'avance ce dont le run aura besoin. Thread principal uniquement.
+
+        Décide aussi l'aiguillage : une demande de réécriture (document ou
+        sélection) part sur le chemin déterministe (`_run_document_rewrite` /
+        `_run_selection_rewrite`) seulement si le modèle n'a pas prouvé savoir
+        enchaîner les outils (`_model_can_chain_tools`).
+        """
         snapshot = {"selection": "", "paragraphs": [], "styles": [],
                     "rewrite": False, "rewrite_selection": False}
         try:
@@ -1851,8 +1800,9 @@ class AssistantPalette:
             summary = {"ok": False, "reason": "exception"}
             self.shell.log(f"[palette] run error: {exc}")
             self._delta_buffer.flush()
-            self.set_status(_friendly_error(exc), tone="error")
-            self._append_response("MIrAI : ", f"⚠ {_friendly_error(exc)}")
+            message = _friendly_error(exc)
+            self.set_status(message, tone="error")
+            self._append_response(_t("palette.assistant_prefix"), f"⚠ {message}")
         finally:
             # Le span AVANT de libérer l'état : `_cancel` est remis à None juste
             # après, et l'annulation ne serait plus lisible.
@@ -1874,10 +1824,8 @@ class AssistantPalette:
     def _emit_run_span(self, kind, preset, summary, started):
         """Un run = un span, quel que soit le chemin emprunté.
 
-        Le mode agentique était seul instrumenté : un preset, une réécriture de
-        sélection ou de document ne laissaient aucune trace de durée ni
-        d'issue. `assistant.reason` nomme la cause de fin — sans elle, une
-        annulation, un plafond d'itérations et un 429 se ressemblent tous.
+        `assistant.reason` nomme la cause de fin : sans elle, une annulation,
+        un plafond d'itérations et un 429 se ressemblent tous.
         """
         summary = summary or {}
         attributes = {
@@ -1902,7 +1850,7 @@ class AssistantPalette:
         Le runner touche le document ; il le fait via ctx.on_main. Son appel LLM
         reste dans ce worker.
         """
-        self.journal_line(f"⚙ {preset.label} — préparation",
+        self.journal_line(_t("palette.journal_prepare", label=preset.label),
                           step=telemetry_steps.PRESET_START,
                           **{"preset.name": preset.id})
         message = preset.runner(ctx, self.shell, prompt_text, None,
@@ -1915,19 +1863,13 @@ class AssistantPalette:
                           step=telemetry_steps.PRESET_DONE,
                           **{"preset.name": preset.id,
                              "result.chars": len(message or "")})
-        self._append_response("MIrAI : ", message)
+        self._append_response(_t("palette.assistant_prefix"), message)
         self.conversation.append("user", shown, ctx.app)
         self.conversation.append("assistant", message, ctx.app)
         return {"ok": True}
 
     def _run_agentic(self, preset, prompt_text, ctx):
-        """Run piloté par le LLM, qui appelle les outils du registre.
-
-        Exception : une demande de réécriture du document entier emprunte un
-        chemin DÉTERMINISTE (voir `_run_document_rewrite`). Les modèles de
-        taille moyenne lisent le document puis répondent du texte sans jamais
-        appeler l'outil d'écriture ; on cesse donc d'en dépendre.
-        """
+        """Run piloté par le LLM, qui appelle les outils du registre."""
 
         orchestrator = Orchestrator(
             LLMClient(self.shell), self.registry, ctx,
@@ -1938,13 +1880,13 @@ class AssistantPalette:
             progress=self._progress)
 
         extra, user_prompt, sink = self._prepare_agentic_run(preset, prompt_text, ctx)
-        self._append_response("MIrAI : ")
+        self._append_response(_t("palette.assistant_prefix"))
         result = orchestrator.run_agentic(user_prompt, sink, preset_extra=extra)
         self._delta_buffer.flush()
         if not result.ok:
             self._stream_response("⚠ " + (result.text or result.reason))
         elif not isinstance(sink, PaletteSink):
-            self._stream_response(result.text or "Modification appliquée.")
+            self._stream_response(result.text or _t("palette.applied"))
         return {"ok": result.ok, "reason": result.reason,
                 "mode": orchestrator.llm.effective_mode(),
                 "iterations": result.iterations}
@@ -1959,11 +1901,11 @@ class AssistantPalette:
         """
         from ..core.presets import text_sink
 
-        self.journal_line(f"⚙ Modification de la sélection ({len(selection)} car.)",
+        self.journal_line(_t("palette.journal_selection_start", chars=len(selection)),
                           step=telemetry_steps.SELECTION_START,
                           **{"selection.chars": len(selection),
                              "append.mode": bool(self.append_mode)})
-        self._append_response("MIrAI : ")
+        self._append_response(_t("palette.assistant_prefix"))
         sink = self.dispatcher.call(
             lambda: text_sink(ctx, self.append_mode,
                               "\n\n---début-du-texte-modifié---\n",
@@ -1971,11 +1913,12 @@ class AssistantPalette:
             timeout=10)
 
         llm = LLMClient(self.shell)
-        self.dispatcher.call(lambda: ctx.undo_begin("Modifier la sélection"),
-                             timeout=10)
+        self.dispatcher.call(
+            lambda: ctx.undo_begin(_t("preset.undo_edit_selection")),
+            timeout=10)
         try:
             step = llm.step(
-                [{"role": "system", "content": prompts.LEGACY_TEXT_SYSTEM},
+                [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
                  {"role": "user",
                   "content": (f"TEXTE :\n{selection}\n\n"
                               f"DEMANDE : {instruction}\n\n"
@@ -1995,11 +1938,12 @@ class AssistantPalette:
         finally:
             self.dispatcher.call(ctx.undo_end, timeout=10)
 
-        how = "ajouté après la sélection" if self.append_mode else "remplacée"
-        self.journal_line(f"✓ Sélection {how}",
+        how = (_t("palette.how_appended_selection") if self.append_mode
+               else _t("palette.how_replaced"))
+        self.journal_line(_t("palette.journal_selection_done", how=how),
                           step=telemetry_steps.SELECTION_DONE,
                           **{"append.mode": bool(self.append_mode)})
-        summary = f"Sélection {how}. Ctrl+Z pour annuler."
+        summary = _t("palette.selection_summary", how=how)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
         return {"ok": True}
@@ -2013,7 +1957,8 @@ class AssistantPalette:
         from ..core.tools.writer_tools import replace_paragraphs
 
         if not originals:
-            self._append_response("MIrAI : ", "Le document est vide.")
+            self._append_response(_t("palette.assistant_prefix"),
+                                  _t("palette.empty_document"))
             return {"ok": False, "reason": "empty_document"}
 
         # Les titres restent en place : les inclure dans la plage réécrite y
@@ -2022,28 +1967,30 @@ class AssistantPalette:
         span = doc_rewrite.body_range(styles)
         if span is None:
             self._append_response(
-                "MIrAI : ", "Ce document ne contient que des titres.")
+                _t("palette.assistant_prefix"), _t("palette.headings_only"))
             return {"ok": False, "reason": "headings_only"}
         first, last = span
         body = originals[first - 1:last]
         headings = [text for text, style in zip(originals, styles, strict=False)
                     if doc_rewrite.is_heading(style) and text.strip()]
 
-        self.journal_line(f"✓ Lecture du document — {len(originals)} paragraphe(s)",
+        self.journal_line(_t("palette.journal_read", count=len(originals)),
                           step=telemetry_steps.DOCUMENT_READ,
                           **{"document.paragraphs": len(originals),
                              "document.headings": len(headings)})
         if headings:
-            self.journal_line("↳ Titre conservé", detail=f"« {headings[0][:50]} »")
-        self.journal_line(f"⚙ Réécriture des paragraphes {first} à {last}",
-                          step=telemetry_steps.DOCUMENT_START,
-                          **{"body.paragraphs": len(body),
-                             "append.mode": bool(self.append_mode)})
-        self._progress.set_phase("Rédaction")
-        self._append_response("MIrAI : ")
+            self.journal_line(_t("palette.journal_heading_kept"),
+                              detail=f"« {headings[0][:50]} »")
+        self.journal_line(
+            _t("palette.journal_rewrite_start", first=first, last=last),
+            step=telemetry_steps.DOCUMENT_START,
+            **{"body.paragraphs": len(body),
+               "append.mode": bool(self.append_mode)})
+        self._progress.set_phase(_t("progress.writing"))
+        self._append_response(_t("palette.assistant_prefix"))
         llm = LLMClient(self.shell)
         step = llm.step(
-            [{"role": "system", "content": prompts.LEGACY_TEXT_SYSTEM},
+            [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
              {"role": "user",
               "content": doc_rewrite.build_rewrite_prompt(
                   body, instruction, headings=headings)}],
@@ -2064,29 +2011,24 @@ class AssistantPalette:
             # action. Si le modèle a consommé son budget en raisonnement sans
             # rien répondre — et que la reprise élargie du client n'a pas suffi —
             # le remède est un autre modèle, pas un autre prompt.
-            if getattr(step, "starved_by_reasoning", False):
+            if step.starved_by_reasoning:
                 self.journal_line(
-                    "✗ Budget épuisé par le raisonnement",
+                    _t("palette.journal_budget_starved"),
                     step=telemetry_steps.REASONING_STARVED,
                     **{"reasoning.chars": int(step.reasoning_chars),
                        "finish.reason": "length"})
-                self._stream_response(
-                    "\n⚠ Ce modèle a consacré tout son budget à réfléchir sans "
-                    "produire de réponse. Le document n'a pas été modifié. "
-                    "Essayez un modèle qui raisonne moins (Paramètres), ou une "
-                    "demande portant sur une partie du document.")
+                self._stream_response(_t("palette.budget_starved"))
                 return {"ok": False, "reason": "reasoning_starved"}
             else:
                 self.journal_line(
-                    "✗ Réponse inexploitable",
+                    _t("palette.journal_unusable"),
                     step=telemetry_steps.DOCUMENT_EMPTY,
                     **{"reply.chars": len(step.text or ""),
                        "finish.reason": (step.finish_reason or "unknown")})
-                self._stream_response(
-                    "\n⚠ Réponse inexploitable — le document n'a pas été modifié.")
+                self._stream_response(_t("palette.unusable"))
             return {"ok": False, "reason": "empty_reply"}
 
-        self._progress.set_phase("Application au document")
+        self._progress.set_phase(_t("progress.applying"))
 
         def _apply():
             if self.append_mode:
@@ -2108,16 +2050,17 @@ class AssistantPalette:
         # exposerait au délai d'AsyncCallback décrit plus haut.
         self.dispatcher.post(_apply)
         self.journal_line(
-            f"✓ Écriture appliquée — {len(body)} → {len(rewritten)} paragraphe(s)",
+            _t("palette.journal_written", before=len(body), after=len(rewritten)),
             step=telemetry_steps.DOCUMENT_DONE,
             **{"body.paragraphs": len(body),
                "result.paragraphs": len(rewritten),
                "headings.kept": len(headings),
                "append.mode": bool(self.append_mode)})
-        kept = " (titre conservé)" if headings else ""
-        how = "ajouté à la suite" if self.append_mode else "réécrit"
-        summary = (f"Document {how} : {len(body)} → {len(rewritten)} "
-                   f"paragraphe(s){kept}. Ctrl+Z pour annuler.")
+        kept = _t("palette.title_kept") if headings else ""
+        how = (_t("palette.how_appended") if self.append_mode
+               else _t("palette.how_rewritten"))
+        summary = _t("palette.document_summary", how=how,
+                     before=len(body), after=len(rewritten), kept=kept)
         self._stream_response("\n" + summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
@@ -2150,11 +2093,11 @@ class AssistantPalette:
         # visite de l'onglet, plutôt que d'afficher un constat périmé.
         self.invalidate_analysis()
         if self._cancelled():
-            self.set_status("Arrêté.", tone="neutral")
+            self.set_status(_t("run.stopped"), tone="neutral")
             return
         self.dispatcher.post(
-            lambda: self._models["prompt"].__setattr__("Text", ""))
-        self.set_status("Terminé", tone="success")
+            lambda: setattr(self._models["prompt"], "Text", ""))
+        self.set_status(_t("palette.done"), tone="success")
 
     def _set_input_enabled(self, enabled):
         """Grise le champ de saisie et les chips pendant un run.
@@ -2232,21 +2175,21 @@ class AssistantPalette:
         écriture directe et écriture postée fait diverger l'affichage de l'état
         réel — le bouton restait sur « Arrêter » après la fin du run.
         """
-        label = "Arrêter" if running else "Envoyer  ⏎"
+        label = _t("palette.stop") if running else _t("palette.send")
         self.dispatcher.post(
-            lambda: self._models["send"].__setattr__("Label", label))
+            lambda: setattr(self._models["send"], "Label", label))
 
     def _cancelled(self):
         return self._cancel is not None and self._cancel.is_set()
 
 
-def open_or_focus(uno_ctx, shell, app, callbacks):
+def open_or_focus(uno_ctx, shell, app):
     """Ouvre la palette (ou la ramène au premier plan si déjà ouverte).
 
     Ce chemin sert le menu « 🤖 MIrAI », le bouton de la barre d'outils et le
     raccourci : tous trois passent par l'action `OpenAssistant`. C'est donc ici,
     et nulle part ailleurs, que se règle « ramène-moi la fenêtre » — devenu
-    indispensable depuis qu'elle est autonome et peut passer derrière.
+    indispensable pour une fenêtre non modale qui peut passer derrière.
     """
     existing = _open_palette[0]
     if existing is not None:
@@ -2259,7 +2202,7 @@ def open_or_focus(uno_ctx, shell, app, callbacks):
             return existing
         except Exception:
             _open_palette[0] = None
-    palette = AssistantPalette(uno_ctx, shell, app, callbacks)
+    palette = AssistantPalette(uno_ctx, shell, app)
     _open_palette[0] = palette
     palette.show()
     return palette

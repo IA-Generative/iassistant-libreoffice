@@ -18,7 +18,6 @@ class FakeLLM:
     def __init__(self, steps):
         self._steps = list(steps)
         self.seen_messages = []
-        self.seen_cancel_events = []
 
     def effective_mode(self):
         return "native"
@@ -26,7 +25,6 @@ class FakeLLM:
     def step(self, messages, tools=None, on_text_delta=None, cancel_event=None,
              progress=None):
         self.seen_messages.append(list(messages))
-        self.seen_cancel_events.append(cancel_event)
         step = self._steps.pop(0)
         if step.text and not step.tool_calls and on_text_delta:
             on_text_delta(step.text)
@@ -43,7 +41,6 @@ class _Ctx:
         self.shell = shell
         self.undo_begun = []
         self.undo_ended = 0
-        self.uno_ctx = None
         self.model = None
         self.controller = None
 
@@ -97,9 +94,7 @@ def test_text_only_run():
     assert sink.text == "Réponse."
     assert ("final", "Réponse.") in observer.events
     assert ctx.undo_ended == 1
-    # Le span AssistantRun est émis par le WORKER de la palette (point unique
-    # couvrant les 4 chemins d'exécution) — plus par l'orchestrateur, dont le
-    # RunResult porte déjà tout ce que le span disait.
+    # Le span AssistantRun est émis par le worker de la palette, pas par l'orchestrateur.
     spans = [s for s, _ in shell.telemetry_events]
     assert "AssistantRun" not in spans
 
@@ -190,12 +185,10 @@ def test_conversation_not_polluted_by_failed_run():
     assert store.load() == []
 
 
-# ── Run stérile : rien produit, rien fait ────────────────────────────────────
+# Run stérile : rien produit, rien fait
 #
-# Constaté en recette le 2026-08-04 : le relais renvoyait un tool call complet
-# (229 chunks vérifiés hors plugin), le step n'en a rien récupéré, et le run se
-# déclarait RÉUSSI avec un texte vide. Écran muet pour l'utilisateur,
-# `assistant.ok=true` dans la télémétrie : l'incident était invisible partout.
+# Un run sans texte ni appel d'outil doit être un échec : sinon l'écran reste
+# muet pour l'utilisateur et la télémétrie porte `assistant.ok=true`.
 
 def test_empty_response_is_a_failure():
     shell = FakeShell()

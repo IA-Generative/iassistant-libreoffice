@@ -409,12 +409,10 @@ class SecureBootstrapFlow(object):
                 if isinstance(parsed, dict):
                     return parsed
                 raise SecureFlowError("JSON response is not an object")
-            except (urllib.error.URLError, SecureFlowError) as exc:
+            # Application-level errors (SecureFlowError) are authoritative and propagate:
+            # only network errors justify retrying through another path.
+            except urllib.error.URLError as exc:
                 last_exc = exc
-                if isinstance(exc, SecureFlowError):
-                    # Application-level errors are authoritative:
-                    # no point retrying same request through another path.
-                    raise
         if last_exc:
             raise last_exc
         raise SecureFlowError("request failed")
@@ -691,11 +689,6 @@ class SecureBootstrapFlow(object):
 
     def rebind_required(self):
         return bool(self._state.get("needs_rebind", False))
-
-    def clear_rebind_required(self):
-        with self._lock:
-            self._state["needs_rebind"] = False
-            self._save_state()
 
     def telemetry_kind(self):
         data = self._state.get("telemetry", {})

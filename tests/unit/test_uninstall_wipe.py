@@ -9,9 +9,9 @@ from tests.stubs.uno_stubs import install, make_job, seed_user_config
 
 install()
 
-from src.mirai.core.conversation import ConversationStore  # noqa: E402
-from src.mirai.entrypoint import MainJob  # noqa: E402
-from src.mirai.security_flow import FileJsonStore  # noqa: E402
+from src.mirai.core.conversation import ConversationStore
+from src.mirai.entrypoint import MainJob
+from src.mirai.security_flow import FileJsonStore
 
 
 def _populated(tmp_path):
@@ -92,7 +92,6 @@ def test_install_and_restart_marks_the_update_in_flight(tmp_path):
         return False
 
     job._run_install_on_main_thread = _install
-    job._install_oxt_inprocess = MagicMock(return_value=False)
     job._make_silent_command_env = MagicMock(return_value=None)
     job._install_and_restart_in_process(str(oxt))
     assert seen["flag"] is True

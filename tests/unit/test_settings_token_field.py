@@ -1,4 +1,5 @@
-"""Le champ « Token OWUI » n'expose plus le llmToken minté par le DM."""
+"""En mode DM, le champ « Token OWUI » reste vide ; les requêtes utilisent le
+llmToken minté par le DM. Hors DM, le champ affiche la clé de l'utilisateur."""
 
 from unittest.mock import MagicMock
 

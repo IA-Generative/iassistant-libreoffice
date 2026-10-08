@@ -9,8 +9,9 @@ Invariant : aucune logique métier ici — uniquement de l'adaptation.
 import json
 import urllib.request
 
-# Clamps max_tokens par modèle — miroir de make_api_request (coquille).
-# make_chat_request ne les applique pas ; la façade comble ce trou.
+# Clamps max_tokens par modèle. Source unique : make_api_request (coquille)
+# importe cette table. make_chat_request ne l'applique pas ; la façade
+# comble ce trou.
 MODEL_TOKEN_LIMITS = {
     "deepseek-r1-distill-llama-70b": 8196,
     "llama-3.3-70b-instruct": 4096,
@@ -36,7 +37,6 @@ class MainJobShell:
     def __init__(self, job):
         self._job = job
 
-    # ── Config ──────────────────────────────────────────────────────────
     def get_config(self, key, default=None):
         return self._job.get_config(key, default)
 
@@ -46,7 +46,6 @@ class MainJobShell:
     def data_dir(self):
         return self._job._data_dir()
 
-    # ── Transport LLM ───────────────────────────────────────────────────
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):
         """Request chat/completions authentifiée, clamps réappliqués, corps enrichi.
 
@@ -70,7 +69,6 @@ class MainJobShell:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers = dict(request.header_items())
         rebuilt = urllib.request.Request(request.full_url, data=data, headers=headers)
-        rebuilt.get_method = lambda: "POST"
         return rebuilt
 
     def recover_llm_auth(self):
@@ -97,10 +95,6 @@ class MainJobShell:
             timeout = 45
         return max(timeout, 5)
 
-    def extract_content(self, chunk):
-        return self._job.extract_content_from_response(chunk, "chat")
-
-    # ── Erreurs / télémétrie / journal ──────────────────────────────────
     def report_llm_error(self, status_code, body, headers=None):
         """Émet LlmRelayError (parse + dédup côté coquille). Jamais de contenu."""
         try:
@@ -137,7 +131,6 @@ class MainJobShell:
         except Exception:
             pass
 
-    # ── UNO ─────────────────────────────────────────────────────────────
     @property
     def uno_ctx(self):
         return self._job.ctx

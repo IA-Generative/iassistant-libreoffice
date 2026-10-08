@@ -18,9 +18,9 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai import entrypoint, feed_rewrite  # noqa: E402
-from src.mirai.entrypoint import MainJob  # noqa: E402
-from tests.unit.test_update_features import (  # noqa: E402
+from src.mirai import entrypoint, feed_rewrite
+from src.mirai.entrypoint import MainJob
+from tests.unit.test_update_features import (
     _enriched_v2,
     _json_response,
     _make_update_directive,
@@ -265,11 +265,11 @@ def test_file_mode_and_crlf_are_preserved():
     assert b"\r\n" in raw and b"\n\n" not in raw.replace(b"\r\n", b"")
 
 
-def test_startup_rewrite_does_not_overwrite_a_directive_target(installed):
+def test_startup_rewrite_does_not_overwrite_a_directive_target(installed, monkeypatch):
     """Le fetch de /config peut aboutir avant le Timer de démarrage (2 s) :
     la cible posée par la directive ne doit pas être écrasée."""
     job = _job()
-    MainJob._feed_rewrite_started_cls = False
+    monkeypatch.setattr(MainJob, "_feed_rewrite_started_cls", False)
     job._rewrite_feed_for_directive({"action": "update", "target_version": "0.0.1.0.32"})
     fired = []
 
@@ -281,14 +281,8 @@ def test_startup_rewrite_does_not_overwrite_a_directive_target(installed):
         def start(self):
             pass
 
-    import threading as _threading
-    original = _threading.Timer
-    _threading.Timer = _Timer
-    try:
-        job._schedule_feed_rewrite()
-    finally:
-        _threading.Timer = original
-        MainJob._feed_rewrite_started_cls = False
+    monkeypatch.setattr(entrypoint.threading, "Timer", _Timer)
+    job._schedule_feed_rewrite()
     fired[0]()
     assert _hrefs(_read(installed))[0] == BASE_1 + "?version=0.0.1.0.32"
 

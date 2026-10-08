@@ -60,7 +60,7 @@ Le DM est une **source de vérité unique** : version courante, version cible, c
 
 | Plate-forme              | Format artefact | Manifest natif         | Hôte d'exécution                  | Mise à jour                                       | Statut MIrAI |
 |---|---|---|---|---|---|
-| **LibreOffice (Writer/Calc/Impress)** | `.oxt` (zip) | `description.xml`, `Addons.xcu`, `Jobs.xcu` | Python UNO bridge intégré | Auto via DM (download `.oxt` + `unopkg`) | ✅ Production |
+| **LibreOffice (Writer/Calc/Impress)** | `.oxt` (zip) | `description.xml`, `Addons.xcu`, `Jobs.xcu` | Python UNO bridge intégré | Auto via DM (dialogue natif `<update-information>`, repli `addExtension` in-process) | ✅ Production |
 | **Chrome / Edge / Chromium** | `.crx` (zip signé) | `manifest.json` (MV3) | Service worker + content scripts | Chrome Web Store (notification DM seulement) | ✅ Production |
 | **Firefox / Firefox ESR** | `.xpi` (zip signé) | `manifest.json` (MV3 partiel) + `browser_specific_settings.gecko` | Background scripts + content | AMO ou self-host (notification DM) | ✅ Production |
 | **Thunderbird**         | `.xpi` (WebExtension)  | `manifest.json` + APIs `messenger.*` | Background script | AMO Thunderbird ou self-host | 🛠 Roadmap |
@@ -75,7 +75,7 @@ Le DM est une **source de vérité unique** : version courante, version cible, c
 
 ### Spécificités UNO (LibreOffice)
 
-- **Pas de pip** : seuls les modules de la stdlib Python (≥ 3.8) sont disponibles. Toutes les requêtes HTTP passent par `urllib.request`.
+- **Pas de pip** : seuls les modules de la stdlib Python (3.11, celle embarquée dans LibreOffice 25.8) sont disponibles. Toutes les requêtes HTTP passent par `urllib.request`.
 - **Pas de threads UI** : `processEventsToIdle()`, `desktop.terminate()` ou tout dialog UNO **DOIT** être appelé depuis le main thread, sinon LO crash. Le plug-in LibreOffice utilise des callbacks postés via `XCallback` ou `threading.Timer` + flag class-level partagé entre instances (cf. [`entrypoint.py:353-355`](../src/mirai/entrypoint.py#L353-L355)).
 - Toute UI passe par `com.sun.star.awt.*` (dialogs natifs), pas de Tk/Qt.
 
@@ -248,7 +248,7 @@ Deux fichiers JSON doivent être présents à la racine (ou dans n'importe quel 
 
 - `device_type` accepté : `libreoffice`, `chrome`, `firefox`, `thunderbird`, `office`.
 - Stocké dans `plugins.changelog` (JSONB).
-- Le `version` doit correspondre à celui du manifest natif (description.xml ou manifest.json) — un script `bump-version.sh` gère la synchro côté LibreOffice.
+- Le `version` doit correspondre à celui du manifest natif (description.xml ou manifest.json) — côté LibreOffice, release-please met à jour `description.xml` et le build recopie la version dans `dm-manifest.json`.
 
 ---
 
@@ -322,7 +322,7 @@ Et l'**update directive** que le plug-in reçoit dans la réponse `/config` :
 - **code_challenge** : `base64url(SHA-256(code_verifier))` sans padding.
 - **scope** : `openid profile email`.
 - **redirect_uri** :
-  - LibreOffice : `http://127.0.0.1:{port}/callback` (port aléatoire libre, écouteur `socketserver` éphémère).
+  - LibreOffice : `http://localhost:{port}/callback` (localhost ou 127.0.0.1, `entrypoint.py` `_wait_for_auth_code`) où le port est celui de `keycloak_redirect_uri` (28443 par convention), à libérer avant tout test SSO (`lsof -nP -iTCP:28443`).
   - Navigateur : `chrome.identity.getRedirectURL()` ou onglet `callback.html` (plus compatible password managers).
   - Office Add-in : Office Dialog API `displayDialogAsync()` + redirect URI déclaré dans le manifest.
 
@@ -660,10 +660,10 @@ R. Non, sauf `/enroll/confirm` et `/identity/bind` (Ed25519). Les autres appels 
 R. L'admin peut révoquer la paire dans l'UI DM (table `relay_clients`, colonne `revoked_at`). Le plug-in ré-enrôlera automatiquement au prochain `401`.
 
 **Q. Mon plug-in fonctionne offline. Que faire ?**
-R. Cacher la dernière config valide dans le storage local + utiliser un profil `local-llm` qui désactive le bootstrap (`bootstrap_url: ""`). Cf. profil [`config/profiles/`](../config/profiles/).
+R. Cacher la dernière config valide dans le storage local + utiliser un profil `local-llm` qui désactive le bootstrap (`enabled: false`, `bootstrap_urls: []`). Cf. profil [`config/profiles/`](../config/profiles/).
 
 **Q. Comment tester sans déployer ?**
-R. `cd ../device-management/deploy/docker && docker compose up` lance un DM local complet (FastAPI + Postgres + Keycloak + relay-assistant). Pointer `dm-config.json` profil `dev` vers `http://localhost:8081`.
+R. `cd ../device-management/deploy/docker && docker compose up` lance un DM local complet (FastAPI + Postgres + Keycloak + relay-assistant). Utiliser le profil `config/profiles/config.default.dev.json` (`bootstrap_urls`) qui pointe sur `http://localhost:8089`.
 
 **Q. Mon WAF bloque mes requêtes — pourquoi ?**
 R. Vérifier (1) `User-Agent` (pas de spoof navigateur), (2) `Content-Type: application/json` strict, (3) corps < 2 MB ou utiliser chunked, (4) tous les binaires en base64url dans des champs JSON.

@@ -1,7 +1,5 @@
-"""« Recharger la configuration » ne recopie plus toutes les clés du DM.
-
-La recopie écrivait aussi les jetons et `proxy_allow_insecure_ssl: true` (valeur
-du gabarit DM), qui coupait la vérification TLS de tous les appels.
+"""« Recharger la configuration » renvoie les réglages du DM sans les écrire : ni jetons,
+ni `proxy_allow_insecure_ssl` (dont la valeur True du gabarit DM couperait la vérification TLS).
 """
 
 from unittest.mock import MagicMock

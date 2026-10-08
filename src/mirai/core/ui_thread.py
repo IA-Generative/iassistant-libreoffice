@@ -39,29 +39,18 @@ _CALLBACK_BASES = (unohelper.Base, XCallback) if XCallback is not None else ()
 class _Task(*_CALLBACK_BASES):
     """Une unité de travail livrée au thread principal par AsyncCallback."""
 
-    def __init__(self, fn, result_queue=None, on_done=None):
+    def __init__(self, fn):
         self._fn = fn
-        self._result_queue = result_queue
-        self._on_done = on_done      # purge la référence gardée par le dispatcher
 
     def notify(self, _data=None):
         self.run()
 
     def run(self):
         """S'exécute sur le thread principal ; ne laisse jamais fuir d'exception."""
-        if self._result_queue is None:
-            try:
-                self._fn()
-            except Exception:
-                pass
-            finally:
-                if self._on_done is not None:
-                    self._on_done(self)
-            return
         try:
-            self._result_queue.put(("ok", self._fn()))
-        except Exception as exc:
-            self._result_queue.put(("error", exc))
+            self._fn()
+        except Exception:
+            pass
 
 
 class DispatcherClosed(RuntimeError):
@@ -84,27 +73,17 @@ class MainThreadDispatcher:
         self.uno_ctx = uno_ctx
         self._log = log
         self._closed = False
-        self._pending = []          # garde les _Task en vie jusqu'à leur notify
         self._callback_service = None   # créé une fois, conservé (voir _async_callback)
         self._queue = queue.Queue()     # tâches en attente du thread principal
         self._pump = None               # tâche de pompe en vol (auto-réarmée)
         self._pumping = False
 
-    # ── cycle de vie ────────────────────────────────────────────────────
-
     def close(self):
         """Rend le dispatcher inerte. Idempotent, appelable de n'importe où."""
         self._closed = True
         self._pumping = False
-        self._pending.clear()
         self._pump = None
         self._callback_service = None
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-    # ── primitives ──────────────────────────────────────────────────────
 
     def post(self, fn) -> bool:
         """Planifie fn sur le thread principal sans attendre. True si accepté.
@@ -153,7 +132,7 @@ class MainThreadDispatcher:
         def _run_and_report():
             try:
                 result_queue.put(("ok", fn()))
-            except Exception as exc:      # noqa: BLE001 — relayée à l'appelant
+            except Exception as exc:      # relayée à l'appelant
                 result_queue.put(("error", exc))
 
         self._queue.put(_run_and_report)
@@ -167,8 +146,6 @@ class MainThreadDispatcher:
         if status == "error":
             raise payload
         return payload
-
-    # ── pompe ───────────────────────────────────────────────────────────
 
     def start_pump(self):
         """Démarre le drain de la file. À APPELER DEPUIS LE THREAD PRINCIPAL.
@@ -237,8 +214,6 @@ class MainThreadDispatcher:
             return
         self._arm_pump()
 
-    # ── interne ─────────────────────────────────────────────────────────
-
     def _async_callback(self):
         """Rend le service AsyncCallback, créé une seule fois et CONSERVÉ.
 
@@ -265,12 +240,6 @@ class MainThreadDispatcher:
             self._note(f"AsyncCallback indisponible ({exc})")
             return None
 
-    def _forget(self, task):
-        try:
-            self._pending.remove(task)
-        except ValueError:
-            pass
-
     def _note(self, message):
         if self._log is not None:
             try:
@@ -280,11 +249,7 @@ class MainThreadDispatcher:
 
 
 class DirectDispatcher:
-    """Dispatcher synchrone : exécute tout sur place.
-
-    Utilisé par les tests (`FakeDispatcher` en est l'alias) et comme repli
-    quand aucun contexte UNO n'est disponible. Même interface publique.
-    """
+    """Dispatcher synchrone pour les tests : exécute tout sur place. Même interface publique."""
 
     def __init__(self, log=None):
         self._log = log
@@ -292,10 +257,6 @@ class DirectDispatcher:
 
     def close(self):
         self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
 
     def post(self, fn) -> bool:
         if self._closed:

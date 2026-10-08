@@ -18,7 +18,7 @@
 | Usage | développement, démo hors ligne, tests destructifs | intégration et production |
 | Base bootstrap | `http://localhost:8089` | `https://<BOOTSTRAP_HOST>` |
 | Profil DM | `?profile=dev` | `?profile=prod` |
-| Profil plugin | `config/profiles/config.default.dev.json` | `config.default.production.json` / `config.default.kubernetes.json` |
+| Profil plugin | `config/profiles/config.default.dev.json` | `config.default.production.json` / `config.default.kubernetes.json` (à créer depuis les `.example`, gitignorés) |
 | Backend LLM | Ollama sur l'hôte (`llama3.2:latest`) | passerelle LLM du ministère |
 | SSO Keycloak | absent par défaut (voir « mode dev sans SSO ») | Keycloak réel, flux PKCE complet |
 | Coût d'un appel | nul | facturé |
@@ -108,7 +108,7 @@ services:
 ### Démarrage
 
 ```bash
-cd ~/Documents/GitHub/device-management/deploy/docker
+cd ../device-management/deploy/docker
 
 # Une seule fois : les réseaux déclarés externes par le compose
 docker network create owui-net    2>/dev/null || true
@@ -123,7 +123,7 @@ docker compose -p mirai-dm-local \
 
 ```bash
 # 1. Le DM répond et sert bien le contrat d'auth /llm/v1
-curl -s "http://localhost:8089/config/libreoffice/config.json?profile=dev"
+curl -s "http://localhost:8089/config/mirai-libreoffice/config.json?profile=dev"
 #    ✅ HTTP 200, et le bloc "config" contient llmEndpoint, llmToken,
 #       llmTokenExpiresAt, embdUrl  (llmToken vide tant qu'on n'est pas enrôlé)
 
@@ -153,7 +153,7 @@ curl -s -X POST http://localhost:8089/enroll \
 #    ✅ {"ok":true, "relayClientId":"rc_…", "relayClientKey":"…", "relayKeyExpiresAt":…}
 
 # 2) /config AVEC les en-têtes relais → mint du llmToken (scopé llm, TTL 1 h)
-curl -s "http://localhost:8089/config/libreoffice/config.json?profile=dev" \
+curl -s "http://localhost:8089/config/mirai-libreoffice/config.json?profile=dev" \
   -H "X-Relay-Client: <RELAY_CLIENT_ID>" -H "X-Relay-Key: <RELAY_CLIENT_KEY>"
 #    ✅ config.llmToken non vide, et llm_api_tokens = la MÊME valeur
 
@@ -177,8 +177,8 @@ et `/update/status`.
 ### Basculer le plugin sur le tier local
 
 ```bash
-cd ~/Documents/GitHub/AssistantMiraiLibreOffice
-./scripts/06-use-config-profile.sh dev      # bootstrap http://localhost:8089, ?profile=dev
+cd <racine du dépôt>
+./scripts/06-use-config-profile.sh --profile dev      # bootstrap http://localhost:8089, ?profile=dev
 ./scripts/00-clean-install.sh --uninstall
 ./scripts/02-build-oxt.sh
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
@@ -210,7 +210,7 @@ docker compose -p mirai-dm-local -f docker-compose.yml -f docker-compose.ollama.
 |---|---|
 | Base bootstrap | `https://<BOOTSTRAP_HOST>` (Kapsule Scaleway) |
 | Profil DM | `?profile=prod` |
-| Profils plugin | `config/profiles/config.default.production.json`, `config.default.kubernetes.json` |
+| Profils plugin | `config/profiles/config.default.production.json`, `config.default.kubernetes.json` (à créer depuis les `.example`, gitignorés) |
 | SSO | Keycloak réel, flux PKCE, callback `http://localhost:28443/callback` |
 | Déploiement | `cd ../device-management && ./scripts/k8s/deploy.sh scaleway` |
 | Dépôt de référence | **`device-management-private`** pour l'environnement `prod-sdid` |
@@ -221,8 +221,9 @@ Disponibilité vérifiée le 2026-07-26 : ✅ `/config?profile=prod` → **HTTP 
 ### Bascule vers Scaleway
 
 ```bash
-cd ~/Documents/GitHub/AssistantMiraiLibreOffice
-./scripts/06-use-config-profile.sh prod
+cd <racine du dépôt>
+cp config/profiles/config.default.production.example.json config/profiles/config.default.production.json   # renseigner bootstrap_urls
+./scripts/06-use-config-profile.sh --profile production
 ./scripts/00-clean-install.sh --uninstall
 ./scripts/02-build-oxt.sh
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
