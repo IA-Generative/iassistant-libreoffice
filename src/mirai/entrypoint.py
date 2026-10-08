@@ -194,9 +194,9 @@ from .menu_actions.shared import apply_settings_result
 from .i18n import t as _t
 from .i18n import (
     get_locale as _i18n_get_locale,
-    resolve_locale as _i18n_resolve_locale,
     set_locale as _i18n_set_locale,
 )
+from .shell.ui_locale import ui_locale as _ui_locale
 from .security_flow import (
     SecureBootstrapFlow,
     FileJsonStore,
@@ -693,7 +693,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # The extension speaks LibreOffice's own UI language, like its menu
         # entries (oxt/Addons.xcu), and English when it does not offer it.
         try:
-            resolved_language = _i18n_set_locale(_i18n_resolve_locale(self.ctx))
+            resolved_language = _i18n_set_locale(_ui_locale(self.ctx))
             log_to_file(f"UI language set to: {resolved_language}")
         except Exception as e:
             log_to_file(f"Failed to resolve UI language: {str(e)}")
