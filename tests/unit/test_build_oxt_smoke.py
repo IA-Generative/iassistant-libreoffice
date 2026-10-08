@@ -134,3 +134,27 @@ def test_description_version_matches_dm_manifest(oxt_path):
     assert dm.get("version") == m.group(1), (
         f"dm-manifest.json version={dm.get('version')} != description.xml {m.group(1)}"
     )
+
+
+def test_dm_changelog_starts_with_the_packaged_version(oxt_path):
+    """Le DM affiche le changelog embarqué : son entrée la plus récente est la
+    version de l'OXT."""
+    import re
+    with zipfile.ZipFile(oxt_path) as z:
+        desc = z.read("description.xml").decode("utf-8", "replace")
+        dm = json.loads(z.read("dm-manifest.json"))
+    version = re.search(r'<version value="([^"]+)"', desc).group(1)
+    assert dm["changelog"][0]["version"] == version
+
+
+def test_license_shows_the_description_version(oxt_path):
+    """La licence affichée à l'installation porte la version de description.xml."""
+    import re
+    with zipfile.ZipFile(oxt_path) as z:
+        desc = z.read("description.xml").decode("utf-8", "replace")
+        licenses = [z.read(name).decode("utf-8") for name in
+                    ("registration/license.txt", "docs/license.txt")]
+    version = re.search(r'<version value="([^"]+)"', desc).group(1)
+    for text in licenses:
+        assert f"version {version}" in text
+        assert "@VERSION@" not in text

@@ -11,19 +11,30 @@
 Un seul appel fait tout : upload de l'artefact, creation de la version,
 extraction des manifests, creation de la campagne de rollout.
 
-### 1. Preparer la version
+### 1. Publier la version
 
-```bash
-# Bump version, build, affiche les instructions
-./scripts/bump-version.sh 0.0.8.0.0
+Les versions sont publiees par release-please (`.github/workflows/release.yml`) :
 
-# Commit + push
-git add oxt/description.xml dm-manifest.json oxt/registration/license.txt
-git commit -m "release: v0.0.8.0.0"
-git push
-```
+1. Fusionner `develop` dans `master`. release-please ouvre ou met a jour la PR
+   « chore(master): release X.Y.Z », qui porte la version dans
+   `oxt/description.xml` et le `CHANGELOG.md`, deduits des messages de commit
+   (Conventional Commits ; seuls `feat`, `fix`, `perf` et `revert` y figurent).
+2. Fusionner cette PR : le tag `vX.Y.Z` et la release GitHub sont crees, et
+   l'OXT de production `mirai-X.Y.Z.oxt` y est attache.
+3. Fusionner `master` dans `develop`, pour y ramener la version et le
+   `CHANGELOG.md`.
+
+Le changelog affiche par le Device Management est derive de `CHANGELOG.md` au
+build (`scripts/dm_manifest.py`). Les entrees d'avant release-please restent
+dans `dm-manifest.json` et suivent les entrees derivees.
+
+Prerequis du depot : le secret `MIRAI_PROD_CONFIG_JSON` (configuration de
+production, transport seul) et l'option « Allow GitHub Actions to create and
+approve pull requests ».
 
 ### 2. Deployer
+
+Depuis le tag de la version (`git checkout vX.Y.Z`) :
 
 ```bash
 # Canary (rollout progressif — recommande)

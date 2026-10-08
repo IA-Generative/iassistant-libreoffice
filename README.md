@@ -121,18 +121,16 @@ Ou via l'interface : **Outils → Gestionnaire d'extensions → Ajouter** → s�
 
 Un seul appel fait tout : upload de l'artefact, création de la version, extraction des manifests, création de la campagne.
 
+Les versions sont publiées par release-please : la fusion de `develop` dans
+`master` met à jour une PR de release, dont la fusion crée le tag, la release
+GitHub et l'OXT de production (voir [docs/DEPLOY.md](docs/DEPLOY.md)).
+
 ```bash
-# 1. Bump version + build
-./scripts/bump-version.sh 0.0.8.0.0
-
-# 2. Commit + push
-git add oxt/description.xml dm-manifest.json oxt/registration/license.txt
-git commit -m "release: v0.0.8.0.0"
-git push
-
-# 3. Déployer
+# Déployer la version publiée, depuis son tag
+git checkout vX.Y.Z
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
+  --config config/profiles/config.default.production.json \
   --strategy canary
 ```
 
@@ -249,7 +247,6 @@ scripts/
 ├── 00-clean-install.sh        # Efface données locales, entrées Keychain, journaux LO, cache extension (--uninstall : retire aussi l'extension)
 ├── 02-build-oxt.sh            # Produit dist/mirai.oxt
 ├── dev-launch.sh              # Build + install + launch LibreOffice
-├── bump-version.sh            # Bump version + build + instructions deploy
 └── deploy-release.sh          # Déploiement unifié via DM
 
 docs/
@@ -276,9 +273,6 @@ tests/
 
 # Tests unitaires
 python3 -m pytest tests/unit/ -v
-
-# Bump version + build
-./scripts/bump-version.sh
 
 # Déployer en intégration
 ./scripts/deploy-release.sh \

@@ -1,0 +1,28 @@
+# Les sujets de commit suivent Conventional Commits : release-please en tire la
+# version et le CHANGELOG. Les commits de merge sont ignorés.
+name: Lint commits
+
+on:
+  pull_request:
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit subjects
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bad=$(git log --no-merges --format=%s "$BASE_SHA..$HEAD_SHA" \
+            | grep -vE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Sujets de commit hors Conventional Commits :"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
