@@ -248,7 +248,7 @@ Deux fichiers JSON doivent être présents à la racine (ou dans n'importe quel 
 
 - `device_type` accepté : `libreoffice`, `chrome`, `firefox`, `thunderbird`, `office`.
 - Stocké dans `plugins.changelog` (JSONB).
-- Le `version` doit correspondre à celui du manifest natif (description.xml ou manifest.json) — un script `bump-version.sh` gère la synchro côté LibreOffice.
+- Le `version` doit correspondre à celui du manifest natif (description.xml ou manifest.json) — côté LibreOffice, release-please met à jour `description.xml` et le build recopie la version dans `dm-manifest.json`.
 
 ---
 

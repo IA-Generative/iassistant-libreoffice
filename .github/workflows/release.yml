@@ -1,0 +1,65 @@
+# Releases : release-please tient à jour une PR de release sur master (version
+# dans oxt/description.xml, CHANGELOG.md). Sa fusion crée le tag et la release
+# GitHub, à laquelle on attache l'OXT construit avec la configuration de
+# production (secret MIRAI_PROD_CONFIG_JSON, transport seul).
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: ${{ github.ref_name }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-oxt:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      VERSION: ${{ needs.release-please.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Check the version set by the release PR
+        run: |
+          grep -q "<version value=\"$VERSION\"/>" oxt/description.xml \
+            || { echo "::error::oxt/description.xml ne porte pas la version $VERSION"; exit 1; }
+
+      - name: Production config from the repository secret
+        env:
+          PROD_CONFIG: ${{ secrets.MIRAI_PROD_CONFIG_JSON }}
+        run: |
+          if [ -z "$PROD_CONFIG" ]; then
+            echo "::error::secret MIRAI_PROD_CONFIG_JSON absent : pas d'OXT de production sans configuration réelle"
+            exit 1
+          fi
+          printf '%s' "$PROD_CONFIG" > "$RUNNER_TEMP/config.production.json"
+          python3 -m json.tool "$RUNNER_TEMP/config.production.json" > /dev/null
+
+      - name: Build the OXT
+        run: ./scripts/02-build-oxt.sh --config "$RUNNER_TEMP/config.production.json" --output "dist/mirai-$VERSION.oxt"
+
+      - name: Attach the OXT to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" "dist/mirai-$VERSION.oxt"
