@@ -206,7 +206,7 @@ if [ -f "$ROOT_DIR/config/calc-functions.json" ]; then
   cp "$ROOT_DIR/config/calc-functions.json" "$STAGE_DIR/config/calc-functions.json"
 fi
 # Device Management packaging
-# Sync version from description.xml into dm-manifest.json
+# Version et identifiant de l'extension, seule source : description.xml
 OXT_VERSION=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 OXT_IDENTIFIER=$(sed -n 's/.*<identifier value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 
@@ -216,21 +216,13 @@ if [ -n "$OXT_VERSION" ] && [ -f "$STAGE_DIR/registration/license.txt" ]; then
   rm -f "$STAGE_DIR/registration/license.txt.bak"
 fi
 
-# dm-manifest.json — plugin metadata for DM auto-registration
+# dm-manifest.json : métadonnées lues par le DM à l'upload. La copie embarquée
+# prend la version de description.xml et un changelog dérivé de CHANGELOG.md.
 if [ -f "$ROOT_DIR/dm-manifest.json" ]; then
   if [ -n "$OXT_VERSION" ]; then
-    # Sync version (and identifier) from description.xml into dm-manifest.json top-level keys
-    python3 -c "
-import json, sys
-with open('$ROOT_DIR/dm-manifest.json') as f:
-    m = json.load(f)
-m['version'] = '$OXT_VERSION'
-if '$OXT_IDENTIFIER':
-    m['identifier'] = '$OXT_IDENTIFIER'
-with open('$STAGE_DIR/dm-manifest.json', 'w') as f:
-    json.dump(m, f, indent=2, ensure_ascii=False)
-    f.write('\n')
-" 2>/dev/null || cp "$ROOT_DIR/dm-manifest.json" "$STAGE_DIR/dm-manifest.json"
+    python3 "$ROOT_DIR/scripts/dm_manifest.py" "$ROOT_DIR/dm-manifest.json" \
+      "$STAGE_DIR/dm-manifest.json" "$OXT_VERSION" "$OXT_IDENTIFIER" "$ROOT_DIR/CHANGELOG.md" \
+      || { err "dm-manifest.json embarqué impossible à produire"; exit 1; }
   else
     cp "$ROOT_DIR/dm-manifest.json" "$STAGE_DIR/dm-manifest.json"
   fi
