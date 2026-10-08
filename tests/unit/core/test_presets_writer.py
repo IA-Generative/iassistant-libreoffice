@@ -10,7 +10,7 @@ from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
 
 def _ctx(doc, shell):
-    return ToolContext(None, doc, doc.controller, "writer", shell)
+    return ToolContext(doc, doc.controller, "writer", shell)
 
 
 def test_extend_inserts_between_legacy_markers():

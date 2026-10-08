@@ -7,33 +7,20 @@ en 401 sans aucun chemin de sortie automatique.
 
 Aucun LibreOffice requis — les modules UNO sont bouchonnés.
 """
-import base64
-import json
+import shutil
 import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 from src.mirai import credentials
-from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
+from tests.stubs.uno_stubs import install, make_job, make_jwt, read_user_config, seed_user_config
 
 install()
 
 
 BOOTSTRAP = "https://dm.example.test"
 PROXY_URL = BOOTSTRAP + "/llm/v1"
-
-
-def _jwt(claims):
-    """JWT non signé, suffisant : le code ne lit que la charge utile."""
-    head = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    body = base64.urlsafe_b64encode(
-        json.dumps(claims).encode()).rstrip(b"=").decode()
-    return f"{head}.{body}.sig"
-
-
-def _write_config(config_dir, data):
-    return seed_user_config(config_dir, data)
 
 
 def _dm_response(**inner_overrides):
@@ -56,15 +43,8 @@ def _dm_response(**inner_overrides):
 class _JobCase(unittest.TestCase):
     def setUp(self):
         self.config_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.config_dir, ignore_errors=True)
         self.job = make_job(config_dir=self.config_dir)
-        # `MainJob.__init__` lance un rafraîchissement de configuration en tâche
-        # de fond, qui réécrit config.json. Sans le laisser finir puis le
-        # désarmer, ce thread entre en course avec les écritures du test : selon
-        # la charge de la machine, il écrase la valeur qu'on vient de persister.
-        # C'est ce qui rendait ces tests dépendants de l'ordre d'exécution.
-        time.sleep(0.05)
-        self.job._fetching_config = False
-        self.job._schedule_config_refresh = MagicMock()
         self.job._device_management_enabled = MagicMock(return_value=True)
         self.job._active_bootstrap_url = MagicMock(return_value=BOOTSTRAP)
 
@@ -73,22 +53,22 @@ class TestRelayCredentialsValid(_JobCase):
     """_relay_credentials_valid : la vraie source de vérité de l'enrôlement."""
 
     def test_missing_creds(self):
-        _write_config(self.config_dir, {"enrolled": True})
+        seed_user_config(self.config_dir, {"enrolled": True})
         self.assertFalse(self.job._relay_credentials_valid())
 
     def test_present_creds_without_expiry(self):
-        _write_config(self.config_dir, {
+        seed_user_config(self.config_dir, {
             "relay_client_id": "id", "relay_client_key": "key"})
         self.assertTrue(self.job._relay_credentials_valid())
 
     def test_expired_creds(self):
-        _write_config(self.config_dir, {
+        seed_user_config(self.config_dir, {
             "relay_client_id": "id", "relay_client_key": "key",
             "relay_key_expires_at": int(time.time()) - 10})
         self.assertFalse(self.job._relay_credentials_valid())
 
     def test_future_expiry_is_valid(self):
-        _write_config(self.config_dir, {
+        seed_user_config(self.config_dir, {
             "relay_client_id": "id", "relay_client_key": "key",
             "relay_key_expires_at": int(time.time()) + 7200})
         self.assertTrue(self.job._relay_credentials_valid())
@@ -99,7 +79,7 @@ class TestEnsureDeviceManagementStateGuard(_JobCase):
 
     def _enroll_calls(self, config_file, force_enroll=False):
         """Nombre de requêtes émises vers l'endpoint /enroll."""
-        _write_config(self.config_dir, config_file)
+        seed_user_config(self.config_dir, config_file)
         self.job._fetch_config = MagicMock(return_value=_dm_response())
         self.job._ensure_access_token = MagicMock(return_value="tok")
         self.job._token_email = MagicMock(return_value="a@b.c")
@@ -118,11 +98,10 @@ class TestEnsureDeviceManagementStateGuard(_JobCase):
             )
 
     def test_enrolled_without_relay_creds_still_enrolls(self):
-        """Régression : `enrolled=True` sans cred relay ne doit PLUS court-circuiter.
+        """`enrolled=True` sans cred relay ne court-circuite pas l'enrôlement.
 
-        C'était l'état absorbant — le poste restait marqué enrôlé, ne renvoyait
-        jamais d'en-tête X-Relay-*, et le DM ne lui mintait donc jamais de
-        llmToken.
+        Sans paire relais, aucun en-tête X-Relay-* n'est envoyé et le DM ne mint
+        aucun llmToken.
         """
         self.assertEqual(self._enroll_calls({"enrolled": True}), 1)
 
@@ -160,7 +139,7 @@ class TestAbsorbingStateHasAnExit(_JobCase):
     """
 
     def _needs_wizard(self, config):
-        _write_config(self.config_dir, config)
+        seed_user_config(self.config_dir, config)
         return self.job._needs_first_enrollment()
 
     def test_absorbing_state_without_session_opens_the_wizard(self):
@@ -169,7 +148,7 @@ class TestAbsorbingStateHasAnExit(_JobCase):
 
     def test_absorbing_state_with_expired_session_opens_the_wizard(self):
         """Un jeton périmé ne permet pas le ré-enrôlement silencieux."""
-        expired = _jwt({"email": "a@b.c", "exp": int(time.time()) - 3600})
+        expired = make_jwt({"email": "a@b.c", "exp": int(time.time()) - 3600})
         self.assertTrue(self._needs_wizard({
             "enrolled": True, "access_token": expired}))
 
@@ -178,7 +157,7 @@ class TestAbsorbingStateHasAnExit(_JobCase):
 
         Il dérive l'e-mail du jeton — inutile d'importuner l'utilisateur.
         """
-        fresh = _jwt({"email": "a@b.c", "exp": int(time.time()) + 3600})
+        fresh = make_jwt({"email": "a@b.c", "exp": int(time.time()) + 3600})
         self.assertFalse(self._needs_wizard({
             "enrolled": True, "access_token": fresh}))
 
@@ -194,7 +173,7 @@ class TestLlmTokenExpiry(_JobCase):
     """D5 : le llmToken est court (TTL DM 3600 s) — son expiration fait foi."""
 
     def test_expired_persisted_token_is_ignored(self):
-        _write_config(self.config_dir, {"llm_base_urls": PROXY_URL})
+        seed_user_config(self.config_dir, {"llm_base_urls": PROXY_URL})
         credentials.remember(
             credentials.DM_LLM_TOKEN, "payload.signature", int(time.time()) - 10)
         self.job._schedule_config_refresh = MagicMock()
@@ -204,7 +183,7 @@ class TestLlmTokenExpiry(_JobCase):
         self.assertIn("llm_token_expired", reasons)
 
     def test_valid_persisted_token_is_served(self):
-        _write_config(self.config_dir, {"llm_base_urls": PROXY_URL})
+        seed_user_config(self.config_dir, {"llm_base_urls": PROXY_URL})
         credentials.remember(
             credentials.DM_LLM_TOKEN, "payload.signature", int(time.time()) + 3600)
         self.assertEqual(
@@ -212,7 +191,7 @@ class TestLlmTokenExpiry(_JobCase):
 
     def test_token_without_expiry_is_served(self):
         """Expiration inconnue → on ne périme rien : le serveur reste l'autorité."""
-        _write_config(self.config_dir, {
+        seed_user_config(self.config_dir, {
             "llm_base_urls": PROXY_URL, "llm_api_tokens": "payload.signature"})
         self.assertEqual(
             self.job.get_config("llm_api_tokens", ""), "payload.signature")
@@ -246,19 +225,19 @@ class TestNoKeycloakFallbackInProxyMode(_JobCase):
     """
 
     def test_proxy_mode_refuses_keycloak_fallback(self):
-        _write_config(self.config_dir, {"llm_base_urls": PROXY_URL})
+        seed_user_config(self.config_dir, {"llm_base_urls": PROXY_URL})
         self.job._get_openwebui_access_token = MagicMock(return_value="jwt.head.sig")
         self.assertEqual(self.job._effective_api_token(""), "")
         self.job._get_openwebui_access_token.assert_not_called()
 
     def test_direct_mode_keeps_fallback(self):
-        """Hors proxy DM (LLM direct/local), le repli historique reste valable."""
-        _write_config(self.config_dir, {"llm_base_urls": "http://localhost:11434/v1"})
+        """Hors proxy DM (LLM direct/local), le repli reste valable."""
+        seed_user_config(self.config_dir, {"llm_base_urls": "http://localhost:11434/v1"})
         self.job._get_openwebui_access_token = MagicMock(return_value="api-key")
         self.assertEqual(self.job._effective_api_token(""), "api-key")
 
     def test_explicit_token_always_wins(self):
-        _write_config(self.config_dir, {"llm_base_urls": PROXY_URL})
+        seed_user_config(self.config_dir, {"llm_base_urls": PROXY_URL})
         self.assertEqual(self.job._effective_api_token("given"), "given")
 
 
@@ -266,7 +245,7 @@ class TestAuthNoticeTriggersRecovery(_JobCase):
     """D3 : le DM annonce lui-même l'auth manquante — il faut y réagir."""
 
     def test_auth_notice_schedules_relay_recovery(self):
-        _write_config(self.config_dir, {"enrolled": True})
+        seed_user_config(self.config_dir, {"enrolled": True})
         self.job._schedule_relay_recovery = MagicMock(return_value=True)
         self.job._check_relay_auth_notice(_dm_response(
             _auth_notice="Authentification requise. Effectuez un enrollment."))
@@ -274,13 +253,13 @@ class TestAuthNoticeTriggersRecovery(_JobCase):
 
     def test_empty_llm_token_alone_schedules_recovery(self):
         """Même sans `_auth_notice` : mode proxy + llmToken vide = impasse."""
-        _write_config(self.config_dir, {"enrolled": True})
+        seed_user_config(self.config_dir, {"enrolled": True})
         self.job._schedule_relay_recovery = MagicMock(return_value=True)
         self.job._check_relay_auth_notice(_dm_response())
         self.job._schedule_relay_recovery.assert_called_once()
 
     def test_minted_token_does_not_schedule_recovery(self):
-        _write_config(self.config_dir, {"enrolled": True})
+        seed_user_config(self.config_dir, {"enrolled": True})
         self.job._schedule_relay_recovery = MagicMock(return_value=True)
         self.job._check_relay_auth_notice(_dm_response(
             llmToken="fresh.token", llm_api_tokens="fresh.token"))
@@ -291,7 +270,7 @@ class TestRecoverLlmAuth(_JobCase):
     """D7 : reprise après 401 — refresh /config, puis ré-enrôlement si besoin."""
 
     def test_config_refresh_alone_is_enough(self):
-        _write_config(self.config_dir, {})
+        seed_user_config(self.config_dir, {})
         self.job._fetch_config = MagicMock()
         self.job.get_config = MagicMock(return_value="fresh.token")
         self.job._ensure_device_management_state = MagicMock()
@@ -300,7 +279,7 @@ class TestRecoverLlmAuth(_JobCase):
         self.job._ensure_device_management_state.assert_not_called()
 
     def test_falls_back_to_re_enrollment(self):
-        _write_config(self.config_dir, {"enrolled": True})
+        seed_user_config(self.config_dir, {"enrolled": True})
         self.job._fetch_config = MagicMock()
         self.job.get_config = MagicMock(return_value="")
         self.job._ensure_device_management_state = MagicMock()
@@ -309,7 +288,7 @@ class TestRecoverLlmAuth(_JobCase):
             force_enroll=True)
 
     def test_backoff_prevents_hammering(self):
-        _write_config(self.config_dir, {})
+        seed_user_config(self.config_dir, {})
         self.job._fetch_config = MagicMock()
         self.job.get_config = MagicMock(return_value="fresh.token")
         self.job._recover_llm_auth()

@@ -29,13 +29,20 @@ git push
 # Canary (rollout progressif — recommande)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
+  --config config/profiles/config.default.integration.json \
   --strategy canary
 
 # Ou immediat (100% direct)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
+  --config config/profiles/config.default.production.json \
   --strategy immediate
 ```
+
+L'environnement cible est defini par `--bootstrap-url` + `--config` (sans
+`--config`, le build prend `config/config.default.json`, fichier local non suivi).
+Les profils `config.default.integration.json` et `config.default.production.json`
+sont a creer depuis les `.example` (gitignores).
 
 Le script utilise l'endpoint unifie `POST /api/plugins/{slug}/deploy` qui
 fait tout en une seule requete :
@@ -177,6 +184,7 @@ L'endpoint gere automatiquement :
 # Deployer l'ancienne version en urgence
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
+  --config config/profiles/config.default.production.json \
   --version 0.0.7.0.0 \
   --strategy immediate
 ```
@@ -186,11 +194,19 @@ L'endpoint gere automatiquement :
 1. Le plugin appelle `/config/{slug}/config.json` au demarrage et a chaque action
 2. Le DM compare la version du plugin (`X-Plugin-Version` header) avec la campagne active
 3. Si une mise a jour est disponible, le DM renvoie un bloc `"update"` dans la reponse
-4. Le plugin telecharge l'artefact via `/catalog/{slug}/download`
-5. Verifie le checksum SHA-256
-6. Cree un script d'installation (quit LO -> `unopkg remove` -> `unopkg add` -> relaunch)
-7. Propose a l'utilisateur de redemarrer (Oui / Non)
-8. Si Oui : LO quitte, le script installe la nouvelle version et relance LO
+4. Le plugin choisit la route : **native** si le feed `<update-information>` de
+   l'extension installee annonce exactement la version cible (LibreOffice
+   telecharge l'OXT lui-meme) ; sinon **dirigee** : telechargement via
+   `/catalog/{slug}/download` avec failover multi-bootstrap, puis verification
+   du checksum SHA-256
+5. Installation par `addExtension` sur le thread principal, en cascade : route
+   native pilotee (dialogue natif "Mise a jour des extensions"), sinon route
+   dirigee (`addExtension` in-process, aucun processus enfant), sinon boite
+   "mise a jour bloquee" avec bouton "Ouvrir le dossier". Apres installation,
+   le plugin ferme LibreOffice proprement. Un refus n'est pas repropose avant 24 h
+6. Le plugin rapporte le statut au DM via `/update/status`
+
+Details : [update-natif-libreoffice.md](update-natif-libreoffice.md)
 
 ## Simulation (test sans impact)
 

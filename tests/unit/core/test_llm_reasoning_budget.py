@@ -1,6 +1,6 @@
 """Le raisonnement et la réponse se partagent `max_tokens` — et la réponse vient en dernier.
 
-Panne mesurée le 2026-07-26 sur le relais Scaleway, modèle `gemma-4-26b-a4b-it` :
+Panne mesurée sur le relais Scaleway, modèle `gemma-4-26b-a4b-it` :
 l'utilisateur voyait « ⚠ Réponse inexploitable — le document n'a pas été modifié »
 de façon INTERMITTENTE, sur un prompt identique qui marchait l'instant d'avant.
 
@@ -33,7 +33,7 @@ from tests.stubs.fake_shell import (
     text_chunks,
 )
 
-# ── La signature de la panne ────────────────────────────────────────────
+# La signature de la panne
 
 def test_budget_starved_by_reasoning_is_recognised():
     step = StepResult(finish_reason="length", reasoning_chars=8060, text="")
@@ -59,7 +59,7 @@ def test_a_tool_call_is_a_real_answer():
     assert not step.starved_by_reasoning
 
 
-# ── La reprise ──────────────────────────────────────────────────────────
+# La reprise
 
 def test_reasoning_is_counted_from_both_field_names():
     """Les relais nomment le champ `reasoning` ou `reasoning_content`."""
@@ -134,7 +134,7 @@ def test_cancelling_prevents_the_retry():
     assert len(shell.requests) < 2
 
 
-# ── La reprise réussie doit se VOIR ─────────────────────────────────────
+# La reprise réussie doit se VOIR
 # L'échec est télémétré par la palette (`llm.reasoning_starved`). Sans le
 # pendant « réussi », impossible de savoir si la reprise élargie sert à
 # quelque chose — ou si elle coûte un aller-retour pour rien.

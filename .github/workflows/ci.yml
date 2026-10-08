@@ -23,17 +23,5 @@ jobs:
       - name: Install test runner
         run: pip install pytest
 
-      # Les 6 tests summarize_writer désélectionnés échouent déjà sur master
-      # (préexistant, sans lien avec le mécanisme de MAJ — constaté le
-      # 2026-09-04 sur HEAD et sur fix/MAJ à l'identique). Ils sont exclus
-      # explicitement, test par test, pour ne masquer AUCUN nouvel échec du
-      # fichier ; retirer ces lignes une fois le bug summarize corrigé.
       - name: Tests unitaires + intégration + build smoke
-        run: |
-          python -m pytest tests/unit tests/integration -q \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseNormal::test_all_chunks_inserted" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseAtEndOfChunk::test_text_before_stop_phrase_is_present" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseMidChunk::test_end_of_document_phrase_passes_through" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseMidChunk::test_partial_chunk_before_stop_phrase_is_inserted" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseMidChunk::test_stop_phrase_first_chunk_not_empty" \
-            --deselect "tests/unit/test_summarize_writer.py::TestSummarizeStopPhraseNoLeakAfterDetection::test_no_leak_after_stop_phrase"
+        run: python -m pytest tests/unit tests/integration -q

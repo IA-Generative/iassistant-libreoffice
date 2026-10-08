@@ -6,7 +6,7 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai.entrypoint import _send_telemetry_trace_impl  # noqa: E402
+from src.mirai.entrypoint import _send_telemetry_trace_impl
 
 
 def test_trace_without_any_configured_key_carries_no_authorization(tmp_path):

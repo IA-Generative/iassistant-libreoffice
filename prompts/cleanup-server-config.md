@@ -114,7 +114,7 @@ Dans `config.int.json`, supprimer aussi ces clés qui ne sont pas dans les autre
 ```json
 "telemetryHost": "",
 "telemetryFormatProtobuf": false,
-"obfuscated_telemetry_key": "dGVzdC1lcmljOnRlc3QtZXJpYw=="
+"obfuscated_telemetry_key": "<base64(user:pass)>"
 ```
 
 ---

@@ -41,7 +41,6 @@ import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -119,7 +118,7 @@ def _simulate_device(
         with urlopen(req, timeout=15) as resp:
             body = json.loads(resp.read().decode("utf-8"))
         result["latency_config_ms"] = round((time.monotonic() - t0) * 1000)
-    except (HTTPError, URLError, Exception) as e:
+    except Exception as e:
         result["latency_config_ms"] = round((time.monotonic() - t0) * 1000)
         result["status"] = "config_error"
         result["error"] = str(e)
@@ -154,7 +153,7 @@ def _simulate_device(
             _post_status(bootstrap_url, campaign_id, client_uuid, status,
                          plugin_version, "", error_detail, user_agent, relay_headers)
             result["phases"].append(status)
-        except (HTTPError, URLError, Exception) as e:
+        except Exception as e:
             result["error"] = f"status_report_failed: {e}"
         result["latency_update_ms"] = round((time.monotonic() - t1) * 1000)
         result["status"] = status
@@ -174,7 +173,7 @@ def _simulate_device(
                      plugin_version, target_version, "", user_agent, relay_headers)
         result["phases"].append("installed")
         result["status"] = "installed"
-    except (HTTPError, URLError, Exception) as e:
+    except Exception as e:
         # Status reporting failure is non-fatal, mais on garde la trace de la
         # phase atteinte : « deferred sans installed » = signal que le DM (ou le
         # réseau) casse le cycle en deux temps.

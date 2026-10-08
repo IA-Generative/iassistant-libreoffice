@@ -10,7 +10,7 @@ import os
 import sys
 import zipfile
 
-# ── Wikipedia source content (fr.wikipedia.org/wiki/OpenClaw) ────────────────
+# Source: fr.wikipedia.org/wiki/OpenClaw
 
 TITLE = "OpenClaw"
 
@@ -84,8 +84,6 @@ Une critique publiée dans Platformer cite la flexibilité et la licence libre d
 OpenClaw pourrait donc contribuer à la tendance générale qui conduit vers des systèmes d'IA autonomes agissant indépendamment, plutôt que donnant de simples réponses aux sollicitations d'utilisateurs humains.
 """
 
-# ── ODT templates ─────────────────────────────────────────────────────────────
-
 MIMETYPE = b"application/vnd.oasis.opendocument.text"
 
 MANIFEST = """\
@@ -150,8 +148,6 @@ CONTENT_FOOTER = """\
 """
 
 
-# ── Parser ────────────────────────────────────────────────────────────────────
-
 def _xml_escape(s: str) -> str:
     return (
         s.replace("&", "&amp;")
@@ -202,8 +198,6 @@ def _build_content_xml(title: str, elements: list[tuple[str, str]]) -> str:
     parts.append(CONTENT_FOOTER)
     return "".join(parts)
 
-
-# ── ODT writer ────────────────────────────────────────────────────────────────
 
 def create_odt(path: str) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)

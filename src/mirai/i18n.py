@@ -357,42 +357,6 @@ CATALOG = {
         "pt": "Nenhum modelo disponível (verifique o endpoint e o token).",
         "zh": "没有可用的模型（请检查端点和令牌）。",
     },
-    # --- Menu contextuel -----------------------------------------------------
-    "menu.root": {
-        "fr": "MIrAI",
-        "en": "MIrAI",
-        "es": "MIrAI",
-        "pt": "MIrAI",
-        "zh": "MIrAI",
-    },
-    "menu.summarize": {
-        "fr": "Résumer la sélection",
-        "en": "Summarize selection",
-        "es": "Resumir la selección",
-        "pt": "Resumir a seleção",
-        "zh": "总结所选内容",
-    },
-    "menu.reformulate": {
-        "fr": "Reformuler",
-        "en": "Reformulate",
-        "es": "Reformular",
-        "pt": "Reformular",
-        "zh": "改写",
-    },
-    "menu.correct": {
-        "fr": "Corriger",
-        "en": "Correct",
-        "es": "Corregir",
-        "pt": "Corrigir",
-        "zh": "纠正",
-    },
-    "menu.translate": {
-        "fr": "Traduire",
-        "en": "Translate",
-        "es": "Traducir",
-        "pt": "Traduzir",
-        "zh": "翻译",
-    },
     # --- Barre de menu / barre d'outils (oxt/Addons.xcu) ---------------------
     "addon.menubar": {
         "fr": "🤖 MIrAI",

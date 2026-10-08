@@ -201,17 +201,9 @@ class LLMClient:
                 telemetry_steps.emit(self.shell, telemetry_steps.AUTH_RECOVERED)
 
         # Budget épuisé par le raisonnement : une seule reprise, plus large.
-        #
-        # Mesuré sur `gemma-4-26b-a4b-it` (relais Scaleway, 2026-07-26) : le
-        # modèle émet 8 000 à 14 300 caractères de raisonnement AVANT la moindre
-        # ligne de réponse, alors que raisonnement et réponse se partagent le
-        # même `max_tokens`. À 4 000 tokens (~16 000 caractères) ça passe le plus
-        # souvent, et ça échoue quand le modèle est un peu plus bavard —
-        # l'utilisateur voit un échec intermittent sur un prompt identique.
-        #
-        # On n'envoie PAS `reasoning_effort` pour couper la réflexion : trois
-        # modèles du relais sur cinq le refusent en HTTP 400 (llama-3.3,
-        # mistral-small, gpt-oss). Élargir le plafond est accepté partout.
+        # Réflexion et réponse partagent `max_tokens` et la réponse vient en dernier.
+        # On n'envoie pas `reasoning_effort` : plusieurs modèles du relais le
+        # refusent (HTTP 400) ; élargir le plafond est accepté partout.
         if result.starved_by_reasoning and not cancelled:
             widened = max(self.max_tokens * 3, 12000)
             self.shell.log(
@@ -326,11 +318,7 @@ class LLMClient:
         outcome = sse_pump.run_stream(self.shell, _build_request, _on_event,
                                       cancel_event=cancel_event)
 
-        # Bilan du flux — sans lui, un step qui ne rend RIEN est indiscernable
-        # d'un step qui rend une réponse vide, et l'on ne sait pas si les chunks
-        # ne sont pas arrivés ou s'ils n'ont pas été exploités. Une seule ligne,
-        # émise à chaque step : c'est ce qui manquait pour instruire l'incident
-        # du 2026-08-04 (run à 0 chunk exploité, sans erreur remontée).
+        # Bilan du flux : distingue un step muet (0 chunk) d'un step qui rend une réponse vide.
         try:
             self.shell.log(
                 f"[llm] step mode={mode} chunks={chunks[0]} "

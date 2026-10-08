@@ -13,7 +13,7 @@ def _texte(n):
     return "Un paragraphe de démonstration. " * n
 
 
-# ── Fabrication de la demande ────────────────────────────────────────────────
+# Fabrication de la demande
 
 def test_short_document_is_not_sent():
     """Rien à structurer, et l'appel coûterait un aller-retour pour rien."""
@@ -48,7 +48,7 @@ def test_system_prompt_states_the_item_cap():
     assert str(doc_analysis.MAX_ITEMS) in doc_analysis.SYSTEM_PROMPT
 
 
-# ── Lecture de la réponse ────────────────────────────────────────────────────
+# Lecture de la réponse
 
 def test_parses_dashed_list():
     raw = "- Ajouter des intertitres\n- Scinder le paragraphe 4\n"
@@ -98,7 +98,7 @@ def test_prose_without_any_list_yields_nothing():
     assert doc_analysis.parse("Le document me paraît clair et bien construit.") == []
 
 
-# ── Rendu ────────────────────────────────────────────────────────────────────
+# Rendu
 
 def test_render_lists_the_items():
     texte = doc_analysis.render(["Ajouter des intertitres", "Scinder le §4"])
@@ -110,13 +110,12 @@ def test_render_without_items_says_so():
     assert doc_analysis.render([]) == _t("analysis.unavailable")
 
 
-# ── Réponse tronquée (constaté en recette avec gemma-4) ──────────────────────
+# Réponse tronquée
 
 def test_truncated_answer_drops_the_last_item():
     """Le flux s'arrête sur `length` : la dernière ligne est coupée en plein mot.
 
-    Recette du 2026-08-04 : l'onglet affichait « Fusionner les sections en une
-    seule chron ». Une proposition tronquée ne vaut pas mieux qu'aucune.
+    Une proposition tronquée ne vaut pas mieux qu'aucune.
     """
     raw = ("- Supprimer les redondances de l'introduction\n"
            "- Fusionner les sections Historique et Version initiale en une seule chron")

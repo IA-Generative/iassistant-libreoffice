@@ -3,7 +3,8 @@
 import io
 import urllib.error
 
-from src.mirai.core.llm_client import LLMClient
+from src.mirai.core.llm_client import LLMClient, StepResult
+from src.mirai.core.tool_calls import ToolCall, ToolResult
 from tests.stubs.fake_shell import (
     FakeShell,
     FakeSSEResponse,
@@ -152,8 +153,8 @@ def test_401_twice_gives_up_without_looping():
 def test_401_recovery_happens_inside_the_stream():
     """La reprise d'authentification fait du réseau bloquant.
 
-    Elle doit donc se produire à l'intérieur du pump — c'est-à-dire dans le
-    thread qui exécute le run (le worker depuis l'itération 2) — et jamais sur
+    Elle doit donc se produire à l'intérieur du pump, c'est-à-dire dans le
+    thread qui exécute le run (le worker), et jamais sur
     le thread principal. On le vérifie par la position de l'appel dans la
     séquence : la reprise s'intercale entre l'échec et la reconstruction de la
     requête, sans repasser par l'appelant.
@@ -192,9 +193,7 @@ def test_network_error_returned_as_step_error():
 
 
 def test_encode_tool_exchange_native():
-    from src.mirai.core.tool_calls import ToolCall, ToolResult
     client = LLMClient(FakeShell(config={"llm_tool_mode": "native"}))
-    from src.mirai.core.llm_client import StepResult
     step = StepResult(tool_calls=[ToolCall(id="c1", name="t", arguments={"a": 1})])
     results = [ToolResult(call_id="c1", ok=True, content="résultat")]
     messages = client.encode_tool_exchange(step, results)
@@ -205,8 +204,6 @@ def test_encode_tool_exchange_native():
 
 
 def test_encode_tool_exchange_json():
-    from src.mirai.core.llm_client import StepResult
-    from src.mirai.core.tool_calls import ToolCall, ToolResult
     client = LLMClient(FakeShell(config={"llm_tool_mode": "json"}))
     raw = '{"tool_calls": [{"name": "t", "arguments": {}}]}'
     step = StepResult(tool_calls=[ToolCall(id="call_0", name="t", arguments={})],
@@ -218,7 +215,7 @@ def test_encode_tool_exchange_json():
     assert "cassé" in messages[1]["content"]
 
 
-# ── Bilan de flux ────────────────────────────────────────────────────────────
+# Bilan de flux
 
 def _summary(shell):
     lines = [line for line in shell.logs if line.startswith("[llm] step")]
@@ -239,9 +236,8 @@ def test_step_logs_stream_summary():
 def test_empty_stream_is_visible_in_log():
     """Un flux sans erreur qui ne livre RIEN doit rester lisible dans le log.
 
-    C'est le trou de l'incident du 2026-08-04 : sans ce bilan, « aucun chunk
-    reçu » et « chunks reçus mais non exploités » produisent exactement la même
-    trace, c'est-à-dire aucune.
+    Sans ce bilan, « aucun chunk reçu » et « chunks reçus mais non exploités »
+    produisent exactement la même trace, c'est-à-dire aucune.
     """
     shell = FakeShell(config={"llm_tool_mode": "native"},
                       responses=[FakeSSEResponse([])])

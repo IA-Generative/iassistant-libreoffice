@@ -73,7 +73,6 @@
 ### B.4 — Actions de base (non-régression)
 - [ ] Writer : sélectionner du texte → action MirAI (résumé / correction…) → résultat inséré.
 - [ ] Calc : génération de formule / analyse → résultat OK.
-- [ ] Menu contextuel (clic droit) Writer → correction / traduction (branche `menuContext` si fusionnée).
 
 ---
 

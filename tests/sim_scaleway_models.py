@@ -419,7 +419,6 @@ def build_report(all_results, run_time, text_source=None):
 
 def _resolve_texts(no_wikipedia):
     """Fetch Wikipedia texts or return fallback. Returns (extend, summarize, simplify, source)."""
-    global EXTEND_TEXT, SUMMARIZE_TEXT, SIMPLIFY_TEXT
     if no_wikipedia:
         print("Wikipedia fetch skipped (--no-wikipedia)")
         return _FALLBACK_EXTEND, _FALLBACK_SUMMARIZE, _FALLBACK_SIMPLIFY, "built-in fallback"
@@ -446,7 +445,7 @@ def _parse_args():
     parser.add_argument("--no-wikipedia", action="store_true",
                         help="Skip Wikipedia fetch and use built-in fallback texts")
     parser.add_argument("--output", default=str(_OUTPUT_FILE),
-                        help="Output file path (default: tests/results/scaleway_model_comparison.md)")
+                        help="Output file path (default: bench/scaleway_model_comparison.md)")
     return parser.parse_args()
 
 

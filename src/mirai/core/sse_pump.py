@@ -5,11 +5,6 @@ sur le thread principal. Il ne touche donc à aucun objet UNO et ne pompe aucun
 événement — c'est `MainThreadDispatcher` qui reporte les mises à jour d'affichage
 sur le thread principal, lequel reste libre pour LibreOffice pendant toute la
 génération.
-
-C'est le point de bascule par rapport à l'implémentation historique : le drain
-`processEventsToIdle` a disparu, donc la classe de gel (et l'abort
-`std::terminate` dans `DispatchUserEvents`) n'est plus possible ici — non pas
-évitée par vigilance, mais impossible par construction.
 """
 
 from __future__ import annotations
@@ -61,7 +56,7 @@ def iter_sse_chunks(response):
             continue
 
 
-def run_stream(shell, request, on_event, tick=None, cancel_event=None):
+def run_stream(shell, request, on_event, cancel_event=None):
     """Lit le flux et dispatche les événements — dans le thread appelant.
 
     `request` peut être une requête urllib déjà construite ou un CALLABLE qui la
@@ -70,9 +65,9 @@ def run_stream(shell, request, on_event, tick=None, cancel_event=None):
     après un 401, une reprise d'authentification — autant d'appels réseau qui
     doivent rester dans ce thread.
 
-    `on_event(event)` reçoit des RawChunk dans l'ordre. `tick()` est appelé entre
-    les chunks (animation). `cancel_event` (threading.Event) est consulté entre
-    chaque chunk : dès qu'il est armé, la lecture s'arrête proprement.
+    `on_event(event)` reçoit des RawChunk dans l'ordre. `cancel_event`
+    (threading.Event) est consulté entre chaque chunk : dès qu'il est armé, la
+    lecture s'arrête proprement.
 
     Les erreurs ne sont jamais levées : elles sont journalisées et rapportées
     dans l'outcome.
@@ -94,11 +89,6 @@ def run_stream(shell, request, on_event, tick=None, cancel_event=None):
                     on_event(RawChunk(chunk))
                 except Exception as exc:
                     shell.log(f"[sse] on_event error: {exc}")
-                if tick is not None:
-                    try:
-                        tick()
-                    except Exception:
-                        pass
     except urllib.error.HTTPError as exc:
         try:
             body = exc.read().decode("utf-8")

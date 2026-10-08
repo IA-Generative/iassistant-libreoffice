@@ -31,18 +31,17 @@ _EXTENSION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", 
 if _EXTENSION_ROOT not in sys.path:
     sys.path.insert(0, _EXTENSION_ROOT)
 
-from src.mirai import credentials, local_config, log_setup  # noqa: E402
+from src.mirai import credentials, local_config, log_setup
 
 
 def _log(message: str) -> None:
     logging.info("[calc_prompt_function] %s", message)
 
 
-# ---------------------------------------------------------------------------
-# SSL context — local reimplementation (no dependency on entrypoint.py).
-# Logic mirrors MainJob.get_ssl_context(); never uses CERT_NONE unless the
-# user explicitly enables proxy_allow_insecure_ssl in their config.
-# ---------------------------------------------------------------------------
+# SSL context: local reimplementation (no dependency on entrypoint.py).
+# Narrower than MainJob.get_ssl_context(): no `bootstrap_insecure_urls` opt-out
+# and no `file://` or user-config-relative `ca_bundle_path`; CERT_NONE only when
+# the user sets proxy_allow_insecure_ssl.
 
 def _get_bundled_ca_path() -> str:
     """Return the path to the bundled Scaleway CA chain shipped with the extension."""
@@ -106,10 +105,8 @@ def build_ssl_context(config: dict) -> ssl.SSLContext:
     return ctx
 
 
-# ---------------------------------------------------------------------------
 # Config reader — mirrors _get_config_from_file in entrypoint.py but is
 # standalone (no UNO service manager required once user_config_path is known).
-# ---------------------------------------------------------------------------
 
 def _user_config_path(ctx) -> str:
     try:
@@ -160,12 +157,9 @@ def load_config(ctx) -> dict:
     return merged
 
 
-# ---------------------------------------------------------------------------
 # HTTP helper
-# ---------------------------------------------------------------------------
 
-_PLUGIN_NAME = "MIrAI-LibreOffice"
-_USER_AGENT = _PLUGIN_NAME
+_USER_AGENT = "MIrAI-LibreOffice"
 
 
 def _urlopen(request: urllib.request.Request, ssl_context: ssl.SSLContext, timeout: int = 60):
@@ -173,9 +167,7 @@ def _urlopen(request: urllib.request.Request, ssl_context: ssl.SSLContext, timeo
     return urllib.request.urlopen(request, context=ssl_context, timeout=timeout)
 
 
-# ---------------------------------------------------------------------------
 # LLM call — synchronous, stream=False
-# ---------------------------------------------------------------------------
 
 def _split_endpoint(endpoint: str) -> tuple[str, str]:
     """
@@ -293,24 +285,13 @@ def call_llm(
             if text is not None:
                 return str(text)
         _log(f"Unexpected response structure: keys={sorted(data)}")
-        return f"#PROMPT_ERROR: unexpected response structure"
+        return "#PROMPT_ERROR: unexpected response structure"
     except Exception as exc:
         _log(f"Response parse error: {exc}")
         return f"#PROMPT_ERROR: response parse error — {exc}"
 
 
-# ---------------------------------------------------------------------------
 # UNO CalcAddIn component
-# ---------------------------------------------------------------------------
-
-# Sentinel: loaded outside LibreOffice (e.g., in unit tests)?
-_IN_LIBREOFFICE = True
-try:
-    import unohelper as _unohelper_check  # noqa: F401 — already imported above
-    from com.sun.star.sheet import XAddIn  # type: ignore[import]
-    from com.sun.star.lang import XServiceInfo  # type: ignore[import]
-except (ImportError, ModuleNotFoundError):
-    _IN_LIBREOFFICE = False
 
 
 class PromptFunction(unohelper.Base):
@@ -328,9 +309,7 @@ class PromptFunction(unohelper.Base):
         self._config: dict | None = None
         self._ssl_ctx: ssl.SSLContext | None = None
 
-    # ------------------------------------------------------------------
     # Lazy initialisation helpers
-    # ------------------------------------------------------------------
 
     def _get_config(self) -> dict:
         if self._config is None:
@@ -350,32 +329,30 @@ class PromptFunction(unohelper.Base):
                 self._ssl_ctx = ssl.create_default_context()
         return self._ssl_ctx
 
-    # ------------------------------------------------------------------
     # XAddIn interface (duck typing — IDL not compiled for this project)
-    # ------------------------------------------------------------------
 
-    def getProgrammaticFuntionName(self, display_name: str) -> str:  # noqa: N802 — UNO spelling
+    def getProgrammaticFuntionName(self, display_name: str) -> str:  # UNO spelling
         if display_name.upper() == "PROMPT":
             return "prompt"
         return display_name.lower()
 
-    def getDisplayFunctionName(self, programmatic_name: str) -> str:  # noqa: N802
+    def getDisplayFunctionName(self, programmatic_name: str) -> str:
         if programmatic_name == "prompt":
             return "PROMPT"
         return programmatic_name.upper()
 
-    def getFunctionDescription(self, programmatic_name: str) -> str:  # noqa: N802
+    def getFunctionDescription(self, programmatic_name: str) -> str:
         if programmatic_name == "prompt":
             return "Send a prompt to the LLM and return the response."
         return ""
 
-    def getDisplayArgumentName(self, programmatic_name: str, index: int) -> str:  # noqa: N802
+    def getDisplayArgumentName(self, programmatic_name: str, index: int) -> str:
         names = ["message", "system_prompt", "model", "max_tokens"]
         if 0 <= index < len(names):
             return names[index]
         return ""
 
-    def getArgumentDescription(self, programmatic_name: str, index: int) -> str:  # noqa: N802
+    def getArgumentDescription(self, programmatic_name: str, index: int) -> str:
         descs = [
             "The prompt/question to send to the LLM.",
             "(Optional) System prompt / instructions for the LLM.",
@@ -386,28 +363,24 @@ class PromptFunction(unohelper.Base):
             return descs[index]
         return ""
 
-    def getProgrammaticCategoryName(self, programmatic_name: str) -> str:  # noqa: N802
+    def getProgrammaticCategoryName(self, programmatic_name: str) -> str:
         return "Text"
 
-    def getDisplayCategoryName(self, programmatic_name: str) -> str:  # noqa: N802
+    def getDisplayCategoryName(self, programmatic_name: str) -> str:
         return "Text"
 
-    # ------------------------------------------------------------------
     # XServiceInfo interface
-    # ------------------------------------------------------------------
 
-    def getImplementationName(self) -> str:  # noqa: N802
+    def getImplementationName(self) -> str:
         return self.IMPLEMENTATION_NAME
 
-    def supportsService(self, service_name: str) -> bool:  # noqa: N802
+    def supportsService(self, service_name: str) -> bool:
         return service_name in self.SUPPORTED_SERVICES
 
-    def getSupportedServiceNames(self):  # noqa: N802
+    def getSupportedServiceNames(self):
         return self.SUPPORTED_SERVICES
 
-    # ------------------------------------------------------------------
     # The actual formula function
-    # ------------------------------------------------------------------
 
     def prompt(
         self,
@@ -445,7 +418,7 @@ class PromptFunction(unohelper.Base):
                  or credentials.recall("llm_api_tokens")
                  or credentials.get_secret("llm_api_tokens", scope)
                  or str(config.get("llm_api_tokens", "") or "").strip())
-        if not token and local_config._truthy(config.get("enabled")):
+        if not token and local_config.truthy(config.get("enabled")):
             self._config = None
             return ("#PROMPT_ERROR: jeton LLM indisponible — ouvrez l'assistant MIrAI "
                     "puis recalculez la feuille")
@@ -466,17 +439,7 @@ class PromptFunction(unohelper.Base):
         )
 
 
-# ---------------------------------------------------------------------------
 # UNO component registration boilerplate
-# ---------------------------------------------------------------------------
-
-def createInstance(ctx):  # noqa: N802 — UNO naming convention
-    return PromptFunction(ctx)
-
-
-def getServiceManager(ctx):  # noqa: N802
-    return ctx.getServiceManager()
-
 
 # UNO component registration table
 g_ImplementationHelper = unohelper.ImplementationHelper()

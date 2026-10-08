@@ -18,7 +18,7 @@ class FakeShell:
         self.spans.append((name, attributes or {}))
 
 
-# ── Ce qui ne doit JAMAIS partir ────────────────────────────────────────
+# Ce qui ne doit JAMAIS partir
 
 def test_document_content_never_reaches_telemetry():
     """Le cas réel : un titre de document passé par mégarde en attribut."""
@@ -62,7 +62,7 @@ def test_a_hostile_key_is_refused():
     assert telemetry_steps.safe_attributes({"Contenu du document": 3}) == {}
 
 
-# ── Ce qui doit partir ──────────────────────────────────────────────────
+# Ce qui doit partir
 
 def test_a_known_step_is_emitted_with_its_name():
     shell = FakeShell()
@@ -97,7 +97,7 @@ def test_a_broken_telemetry_never_breaks_the_run():
     assert telemetry_steps.emit(Broken(), telemetry_steps.DOCUMENT_READ) is False
 
 
-# ── Vocabulaire étendu (fiabilité, usage, santé) ────────────────────────
+# Vocabulaire étendu (fiabilité, usage, santé)
 
 def test_reliability_and_usage_steps_are_declared():
     """Chaque angle mort identifié a sa constante — jamais de chaîne libre."""
@@ -115,7 +115,7 @@ def test_reliability_and_usage_steps_are_declared():
         assert constant in telemetry_steps.STEPS, value
 
 
-# ── Span de run unifié (emit_run) ───────────────────────────────────────
+# Span de run unifié (emit_run)
 
 def test_emit_run_uses_the_assistant_run_span():
     shell = FakeShell()

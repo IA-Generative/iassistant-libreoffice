@@ -120,8 +120,7 @@ def test_default_store_is_memory_on_linux():
 
 def _capture_log(monkeypatch):
     logged = []
-    monkeypatch.setattr(credentials, "_log", credentials._log)
-    credentials.set_log(logged.append)
+    monkeypatch.setattr(credentials, "_log", logged.append)
     return logged
 
 

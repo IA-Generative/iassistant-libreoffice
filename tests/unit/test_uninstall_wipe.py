@@ -9,9 +9,9 @@ from tests.stubs.uno_stubs import install, make_job, seed_user_config
 
 install()
 
-from src.mirai.core.conversation import ConversationStore  # noqa: E402
-from src.mirai.entrypoint import MainJob  # noqa: E402
-from src.mirai.security_flow import FileJsonStore  # noqa: E402
+from src.mirai.core.conversation import ConversationStore
+from src.mirai.entrypoint import MainJob
+from src.mirai.security_flow import FileJsonStore
 
 
 def _populated(tmp_path):

@@ -21,9 +21,6 @@ class ToolRegistry:
     def register(self, spec):
         self._tools[spec.name] = spec
 
-    def get(self, name):
-        return self._tools.get(name)
-
     def list_tools(self, app):
         return [spec for spec in self._tools.values() if app in spec.apps]
 

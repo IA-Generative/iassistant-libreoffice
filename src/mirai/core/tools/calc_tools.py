@@ -1,11 +1,10 @@
-"""Tools Calc — helpers portés depuis menu_actions/calc.py (comportement conservé).
-
-Comme pour Writer : lectures de contexte + mutations structurelles courtes ;
-la colonne « Résultat IA » non destructive et la recopie de formule vers le
-bas reproduisent exactement les comportements historiques.
+"""Tools Calc : lectures de contexte (sélection, plage, aperçu de feuille) et
+mutations courtes (écriture de cellules, colonne « Résultat IA » non destructive
+à droite de la sélection, formule et recopie vers le bas).
 """
 
 import re
+from collections import Counter
 
 from ..text_filters import strip_markdown
 from ..tool_calls import ToolResult, ToolSpec
@@ -18,8 +17,6 @@ _HEADER_STYLE_PROPS = (
     "HoriJustify", "VertJustify", "IsTextWrapped",
 )
 
-
-# ── Helpers portés ──────────────────────────────────────────────────────
 
 def col_letter(col):
     """Index de colonne 0-based → lettre (0→A, 25→Z, 26→AA…)."""
@@ -98,7 +95,7 @@ def find_last_data_row(sheet, num_cols, num_rows):
 
 
 def build_schema_context(sheet, area):
-    """Description concise de la table pour le contexte formule (porté)."""
+    """Description concise de la table pour le contexte formule."""
     target_col, target_row = area.StartColumn, area.StartRow
     lines = [f"Target cell: {col_letter(target_col)}{target_row + 1}"]
     try:
@@ -153,8 +150,7 @@ def next_result_header(sheet):
 
 
 def apply_dominant_header_style(target_cell, sheet, col_range):
-    """Copie le style d'en-tête modal des colonnes sources (porté)."""
-    from collections import Counter
+    """Copie le style d'en-tête modal des colonnes sources."""
     samples = [sheet.getCellByPosition(c, 0) for c in col_range]
     for prop in _HEADER_STYLE_PROPS:
         values = []
@@ -176,7 +172,7 @@ def apply_dominant_header_style(target_cell, sheet, col_range):
 
 
 def find_free_output_column(sheet, col_range, row_range):
-    """(index_colonne, besoin_en_tête) — première colonne libre à droite (porté)."""
+    """(index_colonne, besoin_en_tête) : première colonne libre à droite."""
     first = col_range.stop
     check_rows = list(row_range) + [0]
     for offset in range(50):
@@ -200,8 +196,6 @@ def _selection_area(ctx):
 def _active_sheet(ctx):
     return ctx.controller.ActiveSheet
 
-
-# ── Handlers ────────────────────────────────────────────────────────────
 
 def get_selection(ctx, args):
     sheet = _active_sheet(ctx)
@@ -275,7 +269,7 @@ def write_cells(ctx, args):
 
 
 def write_result_column(ctx, args):
-    """Colonne « Résultat IA » non destructive à droite de la sélection (porté)."""
+    """Colonne « Résultat IA » non destructive à droite de la sélection."""
     sheet = _active_sheet(ctx)
     area = _selection_area(ctx)
     values = args["values"]
@@ -349,7 +343,7 @@ def set_formula(ctx, args):
 
 def fill_formula_down(ctx, args):
     """Recopie la formule vers le bas en décalant les références de ligne,
-    arrêt à la première ligne vide (porté de _fill_formula_down)."""
+    arrêt à la première ligne vide."""
     sheet = _active_sheet(ctx)
     from_ref = str(args["from_ref"]).strip()
     to_row = int(args["to_row"])  # 1-based inclus

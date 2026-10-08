@@ -1,7 +1,9 @@
 """Smoke test du BUILD .oxt (plugin LibreOffice).
 
-Exécute réellement ``scripts/02-build-oxt.sh`` vers une sortie temporaire, puis
-valide que l'archive produite est un paquet LibreOffice cohérent et installable :
+Exécute réellement ``scripts/02-build-oxt.sh`` avec le profil suivi par git
+``config/profiles/config.default.dev.json`` (même entrée sur tous les postes) vers
+une sortie temporaire, puis valide que l'archive produite est un paquet LibreOffice
+cohérent et installable :
 
   - c'est un ZIP valide ;
   - tous les membres requis sont présents (manifeste UNO, sources, config, DM) ;
@@ -52,7 +54,9 @@ def oxt_path(tmp_path_factory):
 
     out = tmp_path_factory.mktemp("oxt") / "mirai-smoke.oxt"
     res = subprocess.run(
-        ["bash", BUILD_SCRIPT, "--output", str(out)],
+        ["bash", BUILD_SCRIPT,
+         "--config", os.path.join(ROOT, "config", "profiles", "config.default.dev.json"),
+         "--output", str(out)],
         cwd=ROOT, capture_output=True, text=True, timeout=240,
     )
     if res.returncode != 0:

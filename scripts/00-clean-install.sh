@@ -14,7 +14,6 @@
 
 set -euo pipefail
 
-SOFFICE="/Applications/LibreOffice.app/Contents/MacOS/soffice"
 UNOPKG="/Applications/LibreOffice.app/Contents/MacOS/unopkg"
 LO_USER_DIR="$HOME/Library/Application Support/LibreOffice/4/user"
 KEYCHAIN_SERVICE="MIrAI-LibreOffice"
@@ -36,7 +35,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# ── 1. Quit LibreOffice ───────────────────────────────────────────────────────
 if pgrep -x soffice >/dev/null 2>&1; then
   log "Closing LibreOffice..."
   osascript -e 'tell application "LibreOffice" to quit' 2>/dev/null || true
@@ -47,7 +45,6 @@ if pgrep -x soffice >/dev/null 2>&1; then
   ok "LibreOffice closed"
 fi
 
-# ── 2. Erase local data ───────────────────────────────────────────────────────
 log "Erasing local data..."
 rm -rf "$LO_USER_DIR/config/mirai"
 rm -f "$LO_USER_DIR/config/config.json"
@@ -60,18 +57,15 @@ for account in "${KEYCHAIN_ACCOUNTS[@]}"; do
 done
 ok "Local data erased"
 
-# ── 3. Delete log files ───────────────────────────────────────────────────────
 log "Deleting log files..."
 rm -f "$LO_USER_DIR/unopkg.log"
 rm -f "$LO_USER_DIR/GraphicsRenderTests.log"
 ok "Log files deleted"
 
-# ── 4. Purge extension temp cache ─────────────────────────────────────────────
 log "Purging extension temp cache..."
 rm -rf "$LO_USER_DIR/extensions/tmp/"
 ok "Extension temp cache purged"
 
-# ── 5. Uninstall extension (optional) ────────────────────────────────────────
 if [ "$DO_UNINSTALL" = true ]; then
   if [ -x "$UNOPKG" ]; then
     log "Uninstalling Mirai extension..."

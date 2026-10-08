@@ -29,8 +29,6 @@ def _offset_de_ligne(texte, numero):
     return sum(len(ligne) + 1 for ligne in texte.split("\n")[:numero])
 
 
-# ── Traduction décalage → ligne ──────────────────────────────────────────────
-
 def test_offset_maps_to_the_right_line():
     for numero in range(3):
         offset = _offset_de_ligne(SUGGESTIONS, numero)
@@ -48,8 +46,6 @@ def test_line_at_tolerates_absurd_offsets():
     assert clickable.line_at("", 42) == 0
     assert clickable.line_at(SUGGESTIONS, 10_000) <= SUGGESTIONS.count("\n")
 
-
-# ── Nettoyage de la ligne ────────────────────────────────────────────────────
 
 def test_numbering_and_bullet_are_stripped():
     assert clickable.clean("1. ▸ Résumer la sélection") == "Résumer la sélection"
@@ -76,8 +72,6 @@ def test_a_date_is_not_mistaken_for_numbering():
     """« 2026. » en tête ne doit pas manger le début de la ligne."""
     assert clickable.clean("2026. année de bascule") == "année de bascule"
 
-
-# ── Contenu rendu au clic ────────────────────────────────────────────────────
 
 def test_click_on_a_suggestion_returns_the_bare_request():
     offset = _offset_de_ligne(SUGGESTIONS, 1)

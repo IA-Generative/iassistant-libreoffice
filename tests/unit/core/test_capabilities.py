@@ -28,7 +28,6 @@ class _Step:
         self.tool_calls = tool_calls or []
         self.text = text
         self.error = error
-        self.streamed = False
 
 
 class ScriptedLLM:
@@ -54,8 +53,6 @@ def _write_call():
     return ToolCall(id="2", name="writer_replace_paragraphs",
                     arguments={"start": 1, "text": "x"})
 
-
-# ── Les trois profils observés en vrai ──────────────────────────────────
 
 def test_model_that_chains_read_then_write():
     """Profil llama3.2 : lit au premier tour, écrit au second."""
@@ -118,8 +115,6 @@ def test_second_turn_failure_is_not_a_chain():
     assert "second tour" in verdict.detail
 
 
-# ── Message destiné à l'utilisateur ─────────────────────────────────────
-
 def test_summary_is_actionable_and_jargon_free():
     for verdict, expected in (
         (Capabilities(chains=True, calls_tool=True, accepts_tools=True),
@@ -132,8 +127,6 @@ def test_summary_is_actionable_and_jargon_free():
         assert expected in summary
         assert "tool_call" not in summary, "pas de jargon dans un message utilisateur"
 
-
-# ── Cache ───────────────────────────────────────────────────────────────
 
 class FakeShell:
     def __init__(self):

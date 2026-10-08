@@ -2,8 +2,7 @@
 
 Targets exactly the constructs LLMs commonly emit — headings, emphasis,
 lists, blockquotes, links, simple pipe tables, fenced code — not full
-CommonMark. Plain prose with no markers simply becomes a single Paragraph,
-so plain-text responses render exactly as before.
+CommonMark. Plain prose with no markers simply becomes a single Paragraph.
 """
 
 import re

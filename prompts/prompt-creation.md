@@ -61,7 +61,6 @@ AssistantMiraiLibreOffice/
 ├── config/
 │   ├── config.default.json          # ⛔ gitignored — config active
 │   ├── config.default.example.json  # Template (bootstrap_url, config_path)
-│   ├── bootstrap.server.minimal.json # Template réponse du serveur bootstrap
 │   ├── keycloak-client-export.json  # ⛔ gitignored — ClientRepresentation Keycloak
 │   ├── keycloak-client-export.example.json
 │   └── profiles/

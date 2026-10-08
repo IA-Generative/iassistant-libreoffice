@@ -11,11 +11,8 @@ d'exécution : un modèle qui lit le document puis répond du texte laisse le
 document intact, le run se termine en succès, et l'utilisateur voit « il ne se
 passe rien ».
 
-Mesures réelles (Ollama, 2026-07-26) — trois modèles, trois comportements :
-
-    llama3.2      A ✓  B ✓  C ✓   écrit dès le premier tour
-    gemma4:12b    A ✓  B ✓  C ✗   lit le document puis s'arrête
-    mistral       A ✓  B ✗  C ✗   répond du texte, n'appelle rien
+Des modèles de taille moyenne satisfont A et B mais pas C (voir
+tests/unit/core/test_capabilities.py) ; d'où la sonde.
 
 La sonde coûte deux allers-retours : elle est donc déclenchée explicitement
 (menu « Tester le modèle ») et son verdict mis en cache par couple
@@ -28,6 +25,7 @@ import dataclasses
 import json
 
 from ..i18n import t as _t
+from .tool_calls import ToolResult
 
 CONFIG_KEY = "assistant_model_capabilities"
 
@@ -65,7 +63,6 @@ PROBE_MAP = (
     "[P3] Deuxième paragraphe de contenu.\n"
     "[FIN DU DOCUMENT — 3 paragraphes au total, de [P1] à [P3]]")
 
-READ_TOOL = "writer_get_document_map"
 WRITE_TOOL = "writer_replace_paragraphs"
 
 
@@ -172,7 +169,7 @@ def probe(llm, model=""):
 
     # Le modèle a lu : lui rendre le document et voir s'il écrit ensuite.
     exchange = llm.encode_tool_exchange(
-        first, [_FakeResult(call_id=getattr(c, "id", ""), content=PROBE_MAP)
+        first, [ToolResult(call_id=getattr(c, "id", ""), ok=True, content=PROBE_MAP)
                 for c in (first.tool_calls or [])])
     second = llm.step(messages + exchange, tools=PROBE_TOOLS)
     if second.error:
@@ -185,13 +182,3 @@ def probe(llm, model=""):
         f"1er tour : {', '.join(names)} | "
         f"2e tour : {', '.join(second_names) or 'texte seul'}")
     return capabilities
-
-
-@dataclasses.dataclass
-class _FakeResult:
-    """Résultat d'outil minimal, juste ce qu'attend `encode_tool_exchange`."""
-    call_id: str = ""
-    content: str = ""
-    ok: bool = True
-    data: dict = None
-    error: str = ""

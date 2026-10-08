@@ -24,7 +24,6 @@ log()  { printf '▶ %s\n' "$*"; }
 ok()   { printf '✓ %s\n' "$*"; }
 err()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-# ── Parse arguments ───────────────────────────────────────────────────────────
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --doc)
@@ -41,14 +40,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# ── Sanity checks ─────────────────────────────────────────────────────────────
 [ -x "$SOFFICE" ] || err "LibreOffice not found at $SOFFICE"
 [ -x "$UNOPKG"  ] || err "unopkg not found at $UNOPKG"
 
-# ── 0. Purge log ─────────────────────────────────────────────────────────────
 : > "$HOME/Library/Application Support/LibreOffice/4/user/config/mirai/mirai.log" 2>/dev/null || true
 
-# ── 1. Quit LibreOffice if running ───────────────────────────────────────────
 if pgrep -x soffice >/dev/null 2>&1; then
   log "Closing LibreOffice..."
   osascript -e 'tell application "LibreOffice" to quit' 2>/dev/null || true
@@ -59,7 +55,6 @@ if pgrep -x soffice >/dev/null 2>&1; then
   done
 fi
 
-# ── 2. Build OXT ─────────────────────────────────────────────────────────────
 if [ "$DO_BUILD" = true ]; then
   log "Building OXT..."
   "$ROOT_DIR/scripts/02-build-oxt.sh" "${BUILD_EXTRA_ARGS[@]+"${BUILD_EXTRA_ARGS[@]}"}"
@@ -69,7 +64,6 @@ else
   log "Skipping build, using: $OXT_PATH"
 fi
 
-# ── 2b. Apply config profile to local config ────────────────────────────────
 if [ -n "$CONFIG_PROFILE" ] && [ -f "$CONFIG_PROFILE" ]; then
   LO_CONFIG_DIR="$HOME/Library/Application Support/LibreOffice/4/user/config"
   LO_CONFIG_FILE="$LO_CONFIG_DIR/config.json"
@@ -100,20 +94,17 @@ PY
   log "Config profile applied: $CONFIG_PROFILE"
 fi
 
-# ── 3. Install extension ──────────────────────────────────────────────────────
 log "Installing extension..."
 "$UNOPKG" remove "fr.gouv.interieur.mirai" 2>/dev/null || true
 "$UNOPKG" add --force --suppress-license "$OXT_PATH"
 ok "Extension installed"
 
-# ── 4. Create test document if needed ────────────────────────────────────────
 if [ ! -f "$TEST_DOC" ]; then
   log "Creating test document: $TEST_DOC"
   python3 "$ROOT_DIR/scripts/_make_sample_odt.py" "$TEST_DOC"
   ok "Test document created"
 fi
 
-# ── 5. Launch LibreOffice with the document ───────────────────────────────────
 log "Opening: $TEST_DOC"
 open -a LibreOffice "$TEST_DOC"
 ok "LibreOffice launched"

@@ -1,6 +1,7 @@
 """Pump SSE : ordre des événements, [DONE], erreurs HTTP/réseau → coquille."""
 
 import io
+import threading
 import urllib.error
 
 from src.mirai.core import sse_pump
@@ -91,8 +92,7 @@ def test_llm_client_builds_request_inside_the_stream():
     résolution de modèle et, après un 401, une reprise d'authentification — donc
     du réseau. Tant que la construction reste à l'intérieur du pump, elle vit
     dans le thread qui exécute le run (le worker), et jamais sur le thread
-    principal. C'est la garantie qui remplace l'ancien « hors du thread
-    appelant » : depuis l'itération 2, le thread appelant EST le worker.
+    principal.
     """
     from src.mirai.core.llm_client import LLMClient
 
@@ -116,11 +116,11 @@ def test_llm_client_builds_request_inside_the_stream():
 
 
 def test_run_stream_never_pumps_uno_events():
-    """Le pump ne doit plus toucher au toolkit : ce n'est plus son rôle."""
+    """Le pump ne touche jamais au toolkit UNO : ce n'est pas son rôle."""
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("a", "b"))])
 
     def _explode():
-        raise AssertionError("run_stream ne doit plus demander le toolkit UNO")
+        raise AssertionError("run_stream ne demande jamais le toolkit UNO")
 
     shell.toolkit = _explode
     outcome = sse_pump.run_stream(shell, object(), lambda e: None)
@@ -129,8 +129,6 @@ def test_run_stream_never_pumps_uno_events():
 
 def test_cancel_event_stops_the_stream():
     """Le bouton « Arrêter » : la lecture cesse entre deux chunks."""
-    import threading
-
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("a", "b", "c", "d"))])
     cancel = threading.Event()
     seen = []
@@ -146,8 +144,6 @@ def test_cancel_event_stops_the_stream():
 
 
 def test_cancel_before_start_does_no_network():
-    import threading
-
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("a"))])
     cancel = threading.Event()
     cancel.set()

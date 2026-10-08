@@ -297,11 +297,6 @@ def test_every_referenced_key_exists_in_the_catalog(relative_path):
     assert sorted(key for key in keys if key not in i18n.CATALOG) == []
 
 
-def test_context_menu_keys_are_translated():
-    for key in ("menu.summarize", "menu.reformulate", "menu.correct", "menu.translate"):
-        assert set(i18n.CATALOG[key]) == set(i18n.SUPPORTED)
-
-
 @pytest.mark.parametrize("code", i18n.SUPPORTED)
 def test_calc_fallback_prompts_follow_the_locale(code):
     job = make_job()
@@ -334,7 +329,6 @@ _IDENTICAL_BY_DESIGN = {
     "common.ok",  # "OK" : sigle international
     "common.suggestions",  # "Suggestions..." : mot identique
     "edit.suggestions_plain",  # "Suggestions" : mot identique
-    "menu.root",  # "MIrAI" : nom de la marque
     "palette.header",  # "  MIrAI — Assistant ({app})" : nom de la marque
     "palette.title",  # "MIrAI — Assistant" : nom de la marque
     "proxy.title",  # "Proxy" : terme technique identique
@@ -488,7 +482,7 @@ def test_palette_transformations_keep_the_document_language(runner, make_target)
     doc, app = make_target()
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("x")) for _ in range(2)])
     getattr(presets, runner)(
-        ToolContext(None, doc, doc.controller, app, shell), shell, "uppercase", None
+        ToolContext(doc, doc.controller, app, shell), shell, "uppercase", None
     )
     _assert_document_language(shell.requests[0]["messages"][0]["content"])
 

@@ -119,7 +119,7 @@ class FakeDoc:
 
 def _ctx(paragraphs, styles=None):
     doc = FakeDoc(paragraphs, styles)
-    return ToolContext(None, doc, object(), "writer", FakeShell()), doc
+    return ToolContext(doc, object(), "writer", FakeShell()), doc
 
 
 def test_replaces_a_single_paragraph():
@@ -198,8 +198,6 @@ def test_tool_is_not_offered_in_calc():
              for t in register_all(ToolRegistry()).openai_tools("calc")]
     assert "writer_replace_paragraphs" not in names
 
-
-# ── Préservation des styles ─────────────────────────────────────────────
 
 def test_each_paragraph_keeps_its_own_style():
     """Le défaut observé : tout le document repassait en style « Titre ».

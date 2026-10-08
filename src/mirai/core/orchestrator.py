@@ -49,12 +49,7 @@ ERROR_KEYS = {
     "http_403": "run.err_403",
     "http_429": "run.err_429",
     "network_error": "run.err_network",
-    # Le flux s'est terminé sans erreur mais n'a rien livré : ni texte, ni appel
-    # d'outil, et aucun outil n'avait agi plus tôt dans le run. Constaté en
-    # recette le 2026-08-04 — le relais renvoyait pourtant un tool call complet
-    # (229 chunks), le plugin n'en a rien récupéré. Sans cette garde le run se
-    # déclarait RÉUSSI avec un texte vide : écran muet côté utilisateur, et
-    # `assistant.ok=true` côté télémétrie, donc invisible dans les tableaux.
+    # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
     "empty_response": "run.err_empty",
 }
 
@@ -204,8 +199,6 @@ class Orchestrator:
                     "ne modifierait rien.")
         return ("PORTÉE : aucune plage sélectionnée — appuie-toi sur la vue "
                 "d'ensemble de la feuille avant d'agir.")
-
-    # ── Exécution des outils ────────────────────────────────────────────
 
     @property
     def cancelled(self):

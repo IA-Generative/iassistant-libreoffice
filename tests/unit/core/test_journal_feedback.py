@@ -16,10 +16,10 @@ from tests.stubs.uno_stubs import install
 
 install()
 
-from src.mirai.core.registry import ToolRegistry  # noqa: E402
-from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec  # noqa: E402
-from src.mirai.i18n import t as _t  # noqa: E402
-from src.mirai.ui.palette import TOOL_LABELS, _JournalObserver  # noqa: E402
+from src.mirai.core.registry import ToolRegistry
+from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
+from src.mirai.i18n import t as _t
+from src.mirai.ui.palette import TOOL_LABELS, _JournalObserver
 
 
 class _FakePalette:
@@ -53,7 +53,7 @@ def _observer(palette=None):
     return observer, palette
 
 
-# ── Le run sans action ───────────────────────────────────────────────────────
+# Le run sans action
 
 def test_run_without_any_tool_says_so():
     observer, palette = _observer()
@@ -84,7 +84,7 @@ def test_capabilities_are_scoped_to_the_current_app():
     assert "Lecture de la sélection" not in palette.journal
 
 
-# ── Le run qui a agi : pas de bruit ──────────────────────────────────────────
+# Le run qui a agi : pas de bruit
 
 def test_run_with_a_tool_stays_silent():
     observer, palette = _observer()
@@ -121,7 +121,7 @@ def test_flag_resets_between_runs():
     assert "Aucune action sur le document" in palette.journal
 
 
-# ── Libellés lisibles (issue #35) ────────────────────────────────────────────
+# Libellés lisibles
 
 def test_replace_paragraphs_has_a_human_label():
     assert _t(TOOL_LABELS["writer_replace_paragraphs"]) == "Réécriture des paragraphes"
@@ -136,10 +136,9 @@ def test_unknown_tool_name_is_shown_as_is():
 
 
 def test_every_registered_tool_has_a_label():
-    """Un outil sans libellé s'affiche sous son nom technique dans le journal —
-    c'est le défaut #35. Le test couvre les DEUX applications : la liste des
-    capacités est désormais rendue à l'utilisateur, un nom technique qui s'y
-    glisse est visible immédiatement."""
+    """Un outil sans libellé s'affiche sous son nom technique dans le journal.
+    Le test couvre les DEUX applications : la liste des capacités est rendue à
+    l'utilisateur, un nom technique qui s'y glisse est visible immédiatement."""
     from src.mirai.core.tools import register_all
     registry = register_all(ToolRegistry())
     manquants = {}

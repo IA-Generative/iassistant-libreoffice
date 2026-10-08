@@ -8,11 +8,11 @@ from tests.stubs.fake_shell import FakeShell
 
 
 def _writer_ctx(doc):
-    return ToolContext(None, doc, doc.controller, "writer", FakeShell())
+    return ToolContext(doc, doc.controller, "writer", FakeShell())
 
 
 def _calc_ctx(doc):
-    return ToolContext(None, doc, doc.controller, "calc", FakeShell())
+    return ToolContext(doc, doc.controller, "calc", FakeShell())
 
 
 def _registry():

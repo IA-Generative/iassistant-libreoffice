@@ -3,6 +3,7 @@ par la politique du poste (WinError 5 — AppLocker / Defender ASR).
 
 Run:  pytest tests/unit/test_update_blocked.py -v
 """
+import os
 import threading
 from unittest.mock import MagicMock
 
@@ -86,31 +87,23 @@ def test_in_process_install_degrades_gracefully(tmp_path):
     """Fichier réel mais installation en échec sur le thread principal → False,
     LibreOffice reste ouvert (l'appelant retombera sur le script puis le message
     manuel)."""
-    import os
-    import tempfile
-
-    fd, path = tempfile.mkstemp(suffix=".oxt")
-    os.close(fd)
-    try:
-        job = make_job()
-        job._terminate_on_main_thread = MagicMock()  # sécurité (ne pas SIGTERM le test)
-        job._run_install_on_main_thread = MagicMock(return_value=False)  # main thread KO
-        job._close_after_inprocess_update = MagicMock()
-        assert job._install_and_restart_in_process(path) is False
-        job._close_after_inprocess_update.assert_not_called()
-        job._terminate_on_main_thread.assert_not_called()
-    finally:
-        os.remove(path)
+    path = str(tmp_path / "u.oxt")
+    open(path, "w").close()
+    job = make_job()
+    job._terminate_on_main_thread = MagicMock()  # sécurité (ne pas SIGTERM le test)
+    job._run_install_on_main_thread = MagicMock(return_value=False)  # main thread KO
+    job._close_after_inprocess_update = MagicMock()
+    assert job._install_and_restart_in_process(path) is False
+    job._close_after_inprocess_update.assert_not_called()
+    job._terminate_on_main_thread.assert_not_called()
 
 
 # ── Bouton « Ouvrir le dossier » : ouverture native, sans cmd.exe ────
 
-def test_open_folder_native_uses_shell_execute():
+def test_open_folder_native_uses_shell_execute(tmp_path):
     """Ouvre le dossier via UNO SystemShellExecute (ShellExecute) — jamais un
     subprocess/cmd.exe. On vérifie l'URL file:// et le flag NO_SYSTEM_ERROR_MESSAGE."""
-    import tempfile
-
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     shell = MagicMock()
     job = make_job()
     job.ctx.getServiceManager.return_value.createInstanceWithContext.return_value = shell
@@ -130,13 +123,10 @@ def test_open_folder_native_rejects_bad_path():
     assert job._open_folder_native("/nope/does-not-exist-xyz") is False
 
 
-def test_notify_update_blocked_opens_folder_on_yes():
+def test_notify_update_blocked_opens_folder_on_yes(tmp_path):
     """Quand le .oxt téléchargé existe et que l'utilisateur clique « Oui » (result==2),
     la boîte déclenche l'ouverture native du dossier."""
-    import os
-    import tempfile
-
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     open(os.path.join(d, "mirai_update.oxt"), "w").close()
     script = os.path.join(d, "mirai_update.bat")
 
@@ -151,12 +141,9 @@ def test_notify_update_blocked_opens_folder_on_yes():
     job._open_folder_native.assert_called_once_with(d)
 
 
-def test_notify_update_blocked_no_open_on_no():
+def test_notify_update_blocked_no_open_on_no(tmp_path):
     """« Non » (result==3) : aucune ouverture de dossier."""
-    import os
-    import tempfile
-
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     open(os.path.join(d, "mirai_update.oxt"), "w").close()
     script = os.path.join(d, "mirai_update.bat")
 
@@ -170,14 +157,11 @@ def test_notify_update_blocked_no_open_on_no():
     job._open_folder_native.assert_not_called()
 
 
-def test_notify_update_blocked_uses_querybox_when_folder_offered():
+def test_notify_update_blocked_uses_querybox_when_folder_offered(tmp_path):
     """Régression : avec un dossier connu, la boîte doit être un QUERYBOX (type 4)
     pour afficher Oui/Non. Un INFOBOX (type 1) n'affiche qu'OK → le bouton « Oui »
     ne s'affichait pas (bug observé en test réel sur la 0.0.1.0.18)."""
-    import os
-    import tempfile
-
-    d = tempfile.mkdtemp()
+    d = str(tmp_path)
     open(os.path.join(d, "mirai_update.oxt"), "w").close()
     script = os.path.join(d, "mirai_update.bat")
 
@@ -192,11 +176,9 @@ def test_notify_update_blocked_uses_querybox_when_folder_offered():
     assert args[1] == 4, "doit être un QUERYBOX (4) pour afficher Oui/Non"
 
 
-def test_notify_update_blocked_uses_infobox_without_folder():
+def test_notify_update_blocked_uses_infobox_without_folder(tmp_path):
     """Sans dossier connu : INFOBOX (type 1) + OK seul (rien à ouvrir)."""
-    import tempfile
-
-    job = make_job(config_dir=tempfile.mkdtemp())  # pas de sous-dossier pending_update
+    job = make_job(config_dir=str(tmp_path))  # pas de sous-dossier pending_update
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 1
 

@@ -67,13 +67,11 @@ done
 [ -n "$BOOTSTRAP_URL" ] || err "Missing --bootstrap-url"
 [ -n "$ADMIN_TOKEN" ]   || err "Missing --admin-token or DM_ADMIN_TOKEN env var"
 
-# ── 1. Extract version from description.xml if not provided ──────────────
 if [ -z "$VERSION" ]; then
   VERSION=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$ROOT_DIR/oxt/description.xml" 2>/dev/null || echo "")
 fi
 log "Version: ${VERSION:-auto-detect from package}"
 
-# ── 2. Build OXT ─────────────────────────────────────────────────────────
 log "Building OXT..."
 BUILD_ARGS=()
 if [ -n "$BUILD_CONFIG" ]; then
@@ -82,13 +80,11 @@ fi
 "$ROOT_DIR/scripts/02-build-oxt.sh" "${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}"
 ok "OXT built: $OXT_PATH"
 
-# ── 3. Compute checksum ──────────────────────────────────────────────────
 CHECKSUM="sha256:$(shasum -a 256 "$OXT_PATH" | awk '{print $1}')"
 FILE_SIZE=$(stat -f%z "$OXT_PATH" 2>/dev/null || stat --printf=%s "$OXT_PATH")
 log "Checksum: $CHECKSUM"
 log "Size: $((FILE_SIZE / 1024)) KB"
 
-# ── 4. Show plan ─────────────────────────────────────────────────────────
 printf '\n'
 printf '┌─────────────────────────────────────────┐\n'
 printf '│  MIrAI Release Deployment Plan          │\n'
@@ -111,7 +107,6 @@ if [ "$DRY_RUN" = true ]; then
   exit 0
 fi
 
-# ── 5. Deploy (single unified call) ─────────────────────────────────────
 log "Deploying to ${BOOTSTRAP_URL}..."
 
 DEPLOY_ARGS=(
@@ -153,7 +148,6 @@ printf '  Campaign:    ID=%s\n' "$CAMPAIGN_ID"
 printf '  Checksum:    %s\n' "$DEPLOYED_CHECKSUM"
 printf '  Strategy:    %s\n' "$STRATEGY"
 
-# ── 6. Show tracking info ────────────────────────────────────────────────
 printf '\n'
 printf '  Track progress:\n'
 printf '    curl -s -H "X-Admin-Token: $DM_ADMIN_TOKEN" \\\n'

@@ -129,15 +129,15 @@ def test_null_progress_accepts_everything():
     progress.set_phase("peu importe")
 
 
-# ── Raisonnement consultable au survol ──────────────────────────────────
+# Raisonnement consultable au survol
 
 def test_reasoning_is_kept_for_the_tooltip():
     progress = RunProgress()
     progress.on_reasoning("Je commence par lire le document. ")
     progress.on_reasoning("Puis je le découpe en deux.")
 
-    assert "lire le document" in progress.reasoning
-    assert "découpe en deux" in progress.reasoning
+    assert "lire le document" in progress.tooltip
+    assert "découpe en deux" in progress.tooltip
 
 
 def test_reasoning_keeps_the_end_not_the_beginning():
@@ -148,20 +148,10 @@ def test_reasoning_keeps_the_end_not_the_beginning():
     progress.on_reasoning("DÉBUT" + "x" * (REASONING_TOOLTIP_CHARS * 2))
     progress.on_reasoning("FIN")
 
-    reasoning = progress.reasoning
+    reasoning = progress.tooltip.partition("\n\n")[2]
     assert len(reasoning) <= REASONING_TOOLTIP_CHARS
     assert reasoning.endswith("FIN")
     assert "DÉBUT" not in reasoning
-
-
-def test_reasoning_is_empty_without_reasoning():
-    progress = RunProgress()
-    progress.on_text("du texte")
-    assert progress.reasoning == ""
-
-
-def test_null_progress_exposes_an_empty_reasoning():
-    assert NullProgress().reasoning == ""
 
 
 def test_tooltip_falls_back_to_the_streamed_text():
@@ -190,7 +180,7 @@ def test_tooltip_is_empty_before_anything_arrives():
     assert NullProgress().tooltip == ""
 
 
-# ── Activité nommée (tâche de fond) ─────────────────────────────────────────
+# Activité nommée (tâche de fond)
 #
 # Une tâche partie d'un simple clic d'onglet — l'analyse du document — doit
 # rester identifiable. Sans cela `on_reasoning` écrase la phase et la ligne

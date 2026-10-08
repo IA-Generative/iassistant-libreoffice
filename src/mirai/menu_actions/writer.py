@@ -3,7 +3,6 @@
 import re
 
 from ..formatting import insert_formatted
-from .shared import apply_settings_result
 
 _RE_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
@@ -196,142 +195,6 @@ def _resize_selection(job, text, selection, text_range, controller=None, model=N
         text_range.setString(text_range.getString() + ": " + str(e))
 
 
-def _summarize_selection(job, text, selection, text_range, controller=None, model=None):
-    job._send_telemetry(
-        "SummarizeSelection",
-        {
-            "action": "summarize_selection",
-            "text_length": str(len(text_range.getString())),
-        },
-    )
-
-    try:
-        original_text = text_range.getString()
-        if len(original_text.strip()) == 0:
-            return
-
-        prompt = (
-            """TEXTE À RÉSUMER :
-"""
-            + original_text
-            + """
-
-Crée le résumé le plus court possible qui capture les informations essentielles.
-Sois extrêmement concis — utilise le minimum de mots nécessaire.
-Ne pose AUCUNE question.
-Produis UNIQUEMENT le texte du résumé, sans introduction ni explication.
-IMPORTANT : Réponds dans la MÊME LANGUE que le texte original.
-
-RÉSUMÉ :
-"""
-        )
-
-        system_prompt = (
-            "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
-            "en utilisant le minimum de mots nécessaire tout en préservant "
-            "les informations clés. Tu réponds TOUJOURS dans la même langue "
-            "que le texte fourni."
-        )
-        max_tokens = int(job.get_config("summarize_selection_max_tokens", 15000))
-        request = job.make_api_request(prompt, system_prompt, max_tokens)
-
-        cursor = text.createTextCursorByRange(text_range)
-        cursor.collapseToEnd()
-
-        with _undo_context(model, "Résumer"):
-            text.insertString(cursor, "\n\n---début-du-résumé---\n", False)
-
-            summary, _ = _collect_stream(job, request, "chat", stop_phrases=["[END]", "---END---"])
-            if summary:
-                insert_formatted(model, text, cursor, summary)
-                _scroll_to_cursor(controller, cursor)
-
-            text.insertString(cursor, "\n---fin-du-résumé---\n", False)
-    except Exception as e:
-        text_range = selection.getByIndex(0)
-        text_range.setString(text_range.getString() + ": " + str(e))
-
-
-def _simplify_selection(job, text, selection, text_range, controller=None, model=None):
-    job._send_telemetry(
-        "SimplifySelection",
-        {
-            "action": "simplify_selection",
-            "text_length": str(len(text_range.getString())),
-        },
-    )
-
-    try:
-        original_text = text_range.getString()
-        if len(original_text.strip()) == 0:
-            return
-
-        prompt = (
-            """TEXTE À REFORMULER :
-"""
-            + original_text
-            + """
-
-Réécris ce texte dans un langage clair et simple compréhensible par tous.
-Utilise :
-- Des phrases courtes
-- Des mots courants (évite le jargon et les termes techniques)
-- La voix active
-- Des exemples concrets quand c'est possible
-
-RÈGLES :
-- Garde la MÊME LANGUE que le texte original
-- Ne traduis PAS dans une autre langue
-- Ne pose AUCUNE question
-- N'ajoute AUCUNE explication
-- Produis UNIQUEMENT le texte reformulé
-
-VERSION REFORMULÉE :
-"""
-        )
-
-        system_prompt = (
-            "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
-            "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
-            "la même langue que le texte fourni. Tu utilises des phrases courtes "
-            "et des mots courants."
-        )
-        configured_sp = str(job.get_config("simplify_selection_system_prompt", "") or "").strip()
-        if configured_sp:
-            system_prompt = configured_sp + " " + system_prompt
-        max_tokens = len(original_text) + job.get_config("simplify_selection_max_tokens", 15000)
-        request = job.make_api_request(prompt, system_prompt, max_tokens)
-
-        cursor = text.createTextCursorByRange(text_range)
-        cursor.collapseToEnd()
-
-        # Only true conversational questions — NOT response format prefixes like
-        # "Voici le texte reformulé" which are normal model output patterns.
-        question_patterns = [
-            "would you like", "do you want", "should i", "can i help",
-            "voulez-vous", "souhaitez-vous", "dois-je", "puis-je",
-        ]
-
-        with _undo_context(model, "Reformuler"):
-            text.insertString(cursor, "\n\n---reformulation-du-texte---\n", False)
-
-            simplified, asked_question = _collect_stream(
-                job, request, "chat",
-                question_patterns=question_patterns,
-                stop_phrases=["[END]", "---END---"],
-            )
-            if asked_question:
-                text.insertString(cursor, "[Le modèle a posé une question. Veuillez réessayer.]", False)
-            elif simplified:
-                insert_formatted(model, text, cursor, simplified)
-                _scroll_to_cursor(controller, cursor)
-
-            text.insertString(cursor, "\n---fin-de-reformulation---\n", False)
-    except Exception as e:
-        text_range = selection.getByIndex(0)
-        text_range.setString(text_range.getString() + ": " + str(e))
-
-
 def _open_mirai_website(job):
     job._send_telemetry("OpenmiraiWebsite", {"action": "open_website"})
     try:
@@ -362,16 +225,6 @@ def _open_documentation(job):
         job._log(f"Error opening documentation: {str(e)}")
 
 
-def _open_settings(job, selection):
-    job._send_telemetry("OpenSettings", {"action": "open_settings"})
-    try:
-        result = job.settings_box("Settings")
-        apply_settings_result(job, result)
-    except Exception as e:
-        text_range = selection.getByIndex(0)
-        text_range.setString(text_range.getString() + ":error: " + str(e))
-
-
 def _get_writer_selection(job, model):
     text = model.Text
     ctrl = model.CurrentController
@@ -393,128 +246,7 @@ def _get_writer_selection(job, model):
     return text, ctrl, selection, text_range, selected_text
 
 
-def _correct_selection(job, text, selection, text_range, controller=None, model=None):
-    job._send_telemetry(
-        "CorrectSelection",
-        {
-            "action": "correct_selection",
-            "text_length": str(len(text_range.getString())),
-        },
-    )
-
-    try:
-        original_text = text_range.getString()
-        if not original_text.strip():
-            return
-
-        prompt = (
-            "TEXTE À CORRIGER :\n"
-            + original_text
-            + """
-
-Corrige les fautes d'orthographe, de grammaire et de syntaxe de ce texte.
-Garde le sens, le style et la structure d'origine.
-
-RÈGLES :
-- Garde la MÊME LANGUE que le texte original
-- Ne change PAS le sens ou le registre
-- Ne reformule PAS inutilement, corrige uniquement les erreurs
-- Ne pose AUCUNE question
-- N'ajoute AUCUNE explication
-- Produis UNIQUEMENT le texte corrigé
-
-TEXTE CORRIGÉ :
-"""
-        )
-
-        system_prompt = (
-            "Tu es un correcteur orthographique et grammatical expert. "
-            "Tu corriges les fautes d'orthographe, de grammaire et de syntaxe "
-            "en préservant le sens, le style et la langue du texte original. "
-            "Tu ne reformules pas — tu corriges uniquement."
-        )
-        max_tokens = len(original_text) + int(job.get_config("correct_selection_max_tokens", 4000))
-        request = job.make_api_request(prompt, system_prompt, max_tokens)
-
-        cursor = text.createTextCursorByRange(text_range)
-        cursor.collapseToEnd()
-
-        with _undo_context(model, "Corriger"):
-            text.insertString(cursor, "\n\n---début-de-correction---\n", False)
-
-            corrected, _ = _collect_stream(job, request, "chat", stop_phrases=["[END]", "---END---"])
-            if corrected:
-                insert_formatted(model, text, cursor, corrected)
-                _scroll_to_cursor(controller, cursor)
-
-            text.insertString(cursor, "\n---fin-de-correction---\n", False)
-    except Exception as e:
-        text_range = selection.getByIndex(0)
-        text_range.setString(text_range.getString() + ": " + str(e))
-
-
-def _translate_selection(job, text, selection, text_range, controller=None, model=None):
-    job._send_telemetry(
-        "TranslateSelection",
-        {
-            "action": "translate_selection",
-            "text_length": str(len(text_range.getString())),
-        },
-    )
-
-    try:
-        original_text = text_range.getString()
-        if not original_text.strip():
-            return
-
-        prompt = (
-            "TEXTE À TRADUIRE :\n"
-            + original_text
-            + """
-
-Traduis ce texte. Si le texte est en français, traduis-le en anglais. Sinon, traduis-le en français.
-
-RÈGLES :
-- Traduis fidèlement le sens, sans paraphraser
-- Garde le registre (formel/informel) du texte original
-- Ne pose AUCUNE question
-- N'ajoute AUCUNE explication ni note du traducteur
-- Produis UNIQUEMENT le texte traduit
-
-TRADUCTION :
-"""
-        )
-
-        system_prompt = (
-            "Tu es un traducteur professionnel expert. "
-            "Tu traduis fidèlement entre le français et l'anglais "
-            "en respectant le sens, le registre et le style du texte original. "
-            "Tu produis uniquement la traduction, sans commentaire."
-        )
-        max_tokens = len(original_text) + int(job.get_config("translate_selection_max_tokens", 4000))
-        request = job.make_api_request(prompt, system_prompt, max_tokens)
-
-        cursor = text.createTextCursorByRange(text_range)
-        cursor.collapseToEnd()
-
-        with _undo_context(model, "Traduire"):
-            text.insertString(cursor, "\n\n---début-de-traduction---\n", False)
-
-            translated, _ = _collect_stream(job, request, "chat", stop_phrases=["[END]", "---END---"])
-            if translated:
-                insert_formatted(model, text, cursor, translated)
-                _scroll_to_cursor(controller, cursor)
-
-            text.insertString(cursor, "\n---fin-de-traduction---\n", False)
-    except Exception as e:
-        text_range = selection.getByIndex(0)
-        text_range.setString(text_range.getString() + ": " + str(e))
-
-
-_WRITER_TEXT_ACTIONS = (
-    "ExtendSelection", "EditSelection", "SummarizeSelection", "SimplifySelection",
-    "ResizeSelection", "CorrectSelection", "TranslateSelection",
-)
+_WRITER_TEXT_ACTIONS = ("ExtendSelection", "EditSelection", "ResizeSelection")
 
 
 def handle_writer_action(job, args, model):
@@ -529,9 +261,7 @@ def handle_writer_action(job, args, model):
     job._log("Processing Writer document")
     text, ctrl, selection, text_range, selected_text = _get_writer_selection(job, model)
     if text_range is None:
-        # Sélection non résoluble : le dire. Auparavant on rendait la main en
-        # silence, et l'utilisateur ne pouvait pas distinguer « rien à traiter »
-        # d'une panne.
+        # Sélection non résoluble : le signaler à l'utilisateur.
         job._log(f"[writer] {args} : aucune plage de texte exploitable")
         job._show_message(
             "Rien à traiter",
@@ -543,15 +273,7 @@ def handle_writer_action(job, args, model):
         _extend_selection(job, text, selection, text_range, controller=ctrl, model=model)
     elif args == "EditSelection":
         _edit_selection(job, text, selection, text_range)
-    elif args == "SummarizeSelection":
-        _summarize_selection(job, text, selection, text_range, controller=ctrl, model=model)
-    elif args == "SimplifySelection":
-        _simplify_selection(job, text, selection, text_range, controller=ctrl, model=model)
     elif args == "ResizeSelection":
         _resize_selection(job, text, selection, text_range, controller=ctrl, model=model)
-    elif args == "CorrectSelection":
-        _correct_selection(job, text, selection, text_range, controller=ctrl, model=model)
-    elif args == "TranslateSelection":
-        _translate_selection(job, text, selection, text_range, controller=ctrl, model=model)
 
     return True

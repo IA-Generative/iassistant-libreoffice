@@ -1,8 +1,5 @@
 """
 Unit tests for src/mirai/calc_prompt_function.py
-
-Run with:
-    .venv/bin/pytest tests/unit/test_calc_prompt_function.py -v
 """
 import io
 import json
@@ -17,16 +14,14 @@ from tests.stubs.uno_stubs import install
 install()
 
 # ── Now safe to import the module under test ──────────────────────────────────
-from src.mirai.calc_prompt_function import (  # noqa: E402
+from src.mirai.calc_prompt_function import (
     PromptFunction,
     build_ssl_context,
     call_llm,
     load_config,
 )
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _make_ctx(config_dir: str = "/tmp/test_calc_prompt"):
     """Build a minimal UNO context mock that points PathSettings at config_dir."""
@@ -82,9 +77,7 @@ def _base_config() -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Tests for call_llm()
-# ---------------------------------------------------------------------------
 
 class TestCallLlmSuccess(unittest.TestCase):
     """Happy-path: the LLM returns a chat-completions response."""
@@ -235,9 +228,7 @@ class TestCallLlmSuccess(unittest.TestCase):
         self.assertNotIn("authorization", hdrs)
 
 
-# ---------------------------------------------------------------------------
 # Tests for error handling in call_llm()
-# ---------------------------------------------------------------------------
 
 class TestCallLlmErrors(unittest.TestCase):
 
@@ -308,9 +299,7 @@ class TestCallLlmErrors(unittest.TestCase):
                     self.fail(f"call_llm raised {propagated!r} instead of returning an error string")
 
 
-# ---------------------------------------------------------------------------
 # Tests for PromptFunction (UNO component)
-# ---------------------------------------------------------------------------
 
 class TestPromptFunction(unittest.TestCase):
 
@@ -405,9 +394,7 @@ class TestPromptFunction(unittest.TestCase):
         self.assertFalse(fn.supportsService("com.sun.star.text.TextDocument"))
 
 
-# ---------------------------------------------------------------------------
 # Tests for build_ssl_context()
-# ---------------------------------------------------------------------------
 
 class TestBuildSslContext(unittest.TestCase):
 
@@ -438,31 +425,28 @@ class TestBuildSslContext(unittest.TestCase):
         self.assertIsInstance(ctx, ssl.SSLContext)
 
 
-# ---------------------------------------------------------------------------
 # Tests for load_config()
-# ---------------------------------------------------------------------------
 
 class TestLoadConfig(unittest.TestCase):
 
-    def _make_ctx_with_dir(self, tmpdir: str):
-        return _make_ctx(config_dir=tmpdir)
-
     def test_returns_dict(self):
-        ctx = self._make_ctx_with_dir("/tmp")
+        ctx = _make_ctx("/tmp")
         result = load_config(ctx)
         self.assertIsInstance(result, dict)
 
     def test_reads_user_config_json(self):
         import json
         import os
+        import shutil
         import tempfile
 
         tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
         config_path = os.path.join(tmpdir, "config.json")
         with open(config_path, "w") as fh:
             json.dump({"llm_base_urls": "http://my-server:8080", "llm_api_tokens": "secret"}, fh)
 
-        ctx = self._make_ctx_with_dir(tmpdir)
+        ctx = _make_ctx(tmpdir)
         result = load_config(ctx)
         self.assertEqual(result.get("llm_base_urls"), "http://my-server:8080")
         self.assertEqual(result.get("llm_api_tokens"), "secret")
@@ -474,30 +458,14 @@ class TestLoadConfig(unittest.TestCase):
         self.assertIsInstance(result, dict)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-# ---------------------------------------------------------------------------
 # Sources de la configuration et du jeton (disposition mirai/)
-# ---------------------------------------------------------------------------
-
-def _ctx_for(config_dir):
-    path_settings = MagicMock()
-    path_settings.UserConfig = config_dir
-    sm = MagicMock()
-    sm.createInstanceWithContext.return_value = path_settings
-    ctx = MagicMock()
-    ctx.getServiceManager.return_value = sm
-    return ctx
-
 
 def test_load_config_reads_settings_and_dm_snapshot(tmp_path):
     from src.mirai import local_config
     cfg = local_config.LocalConfig(str(tmp_path), [])
     cfg.set("llm_default_models", "modele-choisi")
     cfg.save_dm_snapshot({"config": {"llm_base_urls": "https://dm/llm/v1"}})
-    config = load_config(_ctx_for(str(tmp_path)))
+    config = load_config(_make_ctx(str(tmp_path)))
     assert config["llm_default_models"] == "modele-choisi"
     assert config["llm_base_urls"] == "https://dm/llm/v1"
 
@@ -505,7 +473,7 @@ def test_load_config_reads_settings_and_dm_snapshot(tmp_path):
 def test_prompt_uses_the_remembered_dm_token(tmp_path):
     from src.mirai import credentials
     credentials.remember(credentials.DM_LLM_TOKEN, "dm-token-123")
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"llm_base_urls": "https://dm/llm/v1"}
     seen = {}
 
@@ -521,7 +489,7 @@ def test_prompt_uses_the_remembered_dm_token(tmp_path):
 def test_prompt_without_token_returns_a_readable_error(tmp_path):
     from src.mirai import credentials
     credentials.forget_all()
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"llm_base_urls": "https://dm/llm/v1"}
     result = fn.prompt("bonjour")
     assert result.startswith("#PROMPT_ERROR:")
@@ -530,7 +498,7 @@ def test_prompt_without_token_returns_a_readable_error(tmp_path):
 def test_prompt_reloads_a_config_cached_without_endpoint(tmp_path):
     from src.mirai import credentials
     credentials.remember(credentials.DM_LLM_TOKEN, "dm-token-123")
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"enabled": True}
     seen = {}
 
@@ -549,7 +517,7 @@ def test_prompt_reloads_a_config_cached_without_endpoint(tmp_path):
 def test_prompt_without_endpoint_never_calls_the_llm(tmp_path):
     from src.mirai import credentials
     credentials.remember(credentials.DM_LLM_TOKEN, "dm-token-123")
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {}
     with patch("src.mirai.calc_prompt_function.load_config", return_value={}), \
             patch("src.mirai.calc_prompt_function.call_llm") as call:
@@ -560,7 +528,7 @@ def test_prompt_without_endpoint_never_calls_the_llm(tmp_path):
 def test_offline_tier_calls_the_llm_without_key(tmp_path):
     from src.mirai import credentials
     credentials.forget_all()
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"enabled": False, "llm_base_urls": "http://localhost:11434/v1"}
     seen = {}
 
@@ -576,7 +544,7 @@ def test_offline_tier_calls_the_llm_without_key(tmp_path):
 def test_dm_tier_without_token_still_returns_the_error(tmp_path):
     from src.mirai import credentials
     credentials.forget_all()
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"enabled": True, "llm_base_urls": "https://dm/llm/v1"}
     with patch("src.mirai.calc_prompt_function.call_llm") as call:
         assert fn.prompt("bonjour").startswith("#PROMPT_ERROR:")
@@ -587,7 +555,7 @@ def test_prompt_uses_the_user_key_from_the_store(tmp_path):
     from src.mirai import credentials
     credentials.forget_all()
     credentials.set_secret("llm_api_tokens", "user-key", "")
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"enabled": False, "llm_base_urls": "http://localhost:11434/v1"}
     seen = {}
 
@@ -605,7 +573,7 @@ def test_prompt_prefers_the_session_copy_of_a_key_refused_by_the_store(tmp_path)
     credentials.forget_all()
     credentials.set_secret("llm_api_tokens", "ancienne", "")
     credentials.remember("llm_api_tokens", "nouvelle")
-    fn = PromptFunction(_ctx_for(str(tmp_path)))
+    fn = PromptFunction(_make_ctx(str(tmp_path)))
     fn._config = {"enabled": False, "llm_base_urls": "http://localhost:11434/v1"}
     seen = {}
 
@@ -616,3 +584,7 @@ def test_prompt_prefers_the_session_copy_of_a_key_refused_by_the_store(tmp_path)
     with patch("src.mirai.calc_prompt_function.call_llm", side_effect=_fake_call):
         assert fn.prompt("bonjour") == "ok"
     assert seen["llm_api_tokens"] == "nouvelle"
+
+
+if __name__ == "__main__":
+    unittest.main()

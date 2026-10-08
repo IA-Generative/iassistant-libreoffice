@@ -109,8 +109,8 @@ def data_dir(user_config_dir):
 
 
 def _dm_base_url(url):
-    """scheme://hôte[:port]/chemin en minuscules, sans barre finale. Le chemin
-    reste : un DM peut être servi sous un préfixe."""
+    """schéma et hôte en minuscules, port conservé, chemin repris tel quel sans barre
+    finale : un DM peut être servi sous un préfixe."""
     parts = urllib.parse.urlsplit(str(url).strip())
     try:
         port = parts.port
@@ -287,7 +287,7 @@ class LocalConfig:
                 return []
             return ["config.json : souche d'identité écrite"]
         keep = set(LEGACY_KEEP_KEYS)
-        if not _truthy(self.transport().get("enabled", legacy.get("enabled", False))):
+        if not truthy(self.transport().get("enabled", legacy.get("enabled", False))):
             keep |= LEGACY_OFFLINE_KEEP_KEYS
         if RELOAD_FOOTPRINT_KEYS & set(legacy):
             keep.discard("proxy_allow_insecure_ssl")
@@ -389,7 +389,7 @@ LEGACY_LOG_MARKERS = ("MainJob.__init__", "DM config fetch", "[llm-auth]", "[pal
 _migration_lock = threading.Lock()
 
 
-def _truthy(value):
+def truthy(value):
     if isinstance(value, bool):
         return value
     if isinstance(value, str):

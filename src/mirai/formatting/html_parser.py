@@ -9,7 +9,19 @@ to Writer paragraph alignment.
 import re
 from html.parser import HTMLParser
 
-from .ast_nodes import Blockquote, Bold, Code, CodeBlock, Heading, Italic, Link, ListItem, Paragraph, Table, Text
+from .ast_nodes import (
+    Blockquote,
+    Bold,
+    Code,
+    CodeBlock,
+    Heading,
+    Italic,
+    Link,
+    ListItem,
+    Paragraph,
+    Table,
+    Text,
+)
 
 _HEADING_LEVELS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
 _ALIGN_RE = re.compile(r"text-align\s*:\s*(left|right|center|justify)", re.IGNORECASE)

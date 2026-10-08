@@ -64,11 +64,9 @@ def test_enum_rejected():
 
 
 def test_out_of_bounds_is_clamped_not_rejected():
-    """Incident réel : « ✗ Lecture du document — paramètre 'max_chars' : maximum
-    20000 ». Le modèle avait demandé une lecture plus large que le plafond ;
-    l'appel entier était refusé, il perdait un tour et abandonnait souvent.
-    Ces bornes protègent l'appel, elles n'expriment pas une exigence métier :
-    on ramène dans les clous, comme `maxLength` tronque déjà les chaînes.
+    """Les bornes protègent l'appel, elles n'expriment pas une exigence métier :
+    on ramène dans les clous au lieu de rejeter, comme `maxLength` tronque déjà
+    les chaînes.
     """
     ok, err, args = validate_args(SCHEMA, {"text": "x", "count": 99})
     assert ok and err == ""

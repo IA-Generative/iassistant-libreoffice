@@ -3,22 +3,12 @@ Tests for token/JWT logic and PKCE in MainJob.
 No LibreOffice required — UNO modules are stubbed.
 """
 import base64
-import json
 import time
 import unittest
 
-from tests.stubs.uno_stubs import install, make_job
+from tests.stubs.uno_stubs import install, make_job, make_jwt
 
 install()
-
-
-def _make_jwt(payload: dict) -> str:
-    """Craft a minimal JWT (unsigned) for testing."""
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    body = base64.urlsafe_b64encode(
-        json.dumps(payload).encode()
-    ).rstrip(b"=").decode()
-    return f"{header}.{body}.sig"
 
 
 class TestJwtPayload(unittest.TestCase):
@@ -26,7 +16,7 @@ class TestJwtPayload(unittest.TestCase):
         self.job = make_job()
 
     def test_valid_jwt_returns_payload(self):
-        token = _make_jwt({"sub": "user1", "exp": 9999999999})
+        token = make_jwt({"sub": "user1", "exp": 9999999999})
         payload = self.job._jwt_payload(token)
         self.assertEqual(payload["sub"], "user1")
         self.assertEqual(payload["exp"], 9999999999)
@@ -46,32 +36,32 @@ class TestTokenIsExpired(unittest.TestCase):
         self.job = make_job()
 
     def test_expired_token_returns_true(self):
-        token = _make_jwt({"exp": int(time.time()) - 100})
+        token = make_jwt({"exp": int(time.time()) - 100})
         self.assertTrue(self.job._token_is_expired(token, skew_seconds=0))
 
     def test_valid_token_returns_false(self):
-        token = _make_jwt({"exp": int(time.time()) + 3600})
+        token = make_jwt({"exp": int(time.time()) + 3600})
         self.assertFalse(self.job._token_is_expired(token, skew_seconds=0))
 
     def test_missing_exp_claim_returns_false(self):
         # Token without "exp" should be treated as non-expired (not blocked)
-        token = _make_jwt({"sub": "user1"})
+        token = make_jwt({"sub": "user1"})
         self.assertFalse(self.job._token_is_expired(token))
 
     def test_skew_makes_future_token_appear_expired(self):
         # Token expires in 30s, skew=60 → should appear expired
-        token = _make_jwt({"exp": int(time.time()) + 30})
+        token = make_jwt({"exp": int(time.time()) + 30})
         self.assertTrue(self.job._token_is_expired(token, skew_seconds=60))
 
     def test_boundary_exact_expiry_is_expired(self):
         # Token exp == now + skew exactly → should be expired (>= boundary fix)
         skew = 60
-        token = _make_jwt({"exp": int(time.time()) + skew})
+        token = make_jwt({"exp": int(time.time()) + skew})
         # With skew=60, effective check is time.time() >= (exp - 60) = now → True
         self.assertTrue(self.job._token_is_expired(token, skew_seconds=skew))
 
     def test_non_numeric_exp_returns_false(self):
-        token = _make_jwt({"exp": "not-a-number"})
+        token = make_jwt({"exp": "not-a-number"})
         self.assertFalse(self.job._token_is_expired(token))
 
 
