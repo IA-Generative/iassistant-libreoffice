@@ -85,7 +85,7 @@ def test_no_raw_pump_call_remains_in_the_shell():
     import os
 
     path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "src", "mirai", "entrypoint.py")
+        os.path.dirname(__file__), "..", "..", "..", "src", "mirai", "entrypoint.py")
     with open(path, encoding="utf-8") as fh:
         tree = ast.parse(fh.read())
 
