@@ -6,6 +6,7 @@ mutations courtes (écriture de cellules, colonne « Résultat IA » non destruc
 import re
 from collections import Counter
 
+from ..calc_functions import formula_refusal
 from ..text_filters import strip_markdown
 from ..tool_calls import ToolResult, ToolSpec
 
@@ -327,6 +328,11 @@ def write_result_column(ctx, args):
 def set_formula(ctx, args):
     sheet = _active_sheet(ctx)
     formula = clean_formula(str(args["formula"]))
+    refusal = formula_refusal(formula)
+    if refusal:
+        return ToolResult(call_id="", ok=False, content="", error=(
+            f"Formule refusée, {refusal}. N'utilise que des fonctions de calcul, "
+            "sans accès réseau, fichier ni référence externe."))
     cell = cell_by_ref(sheet, args["ref"])
     cell.setFormula(formula)
     error_token = get_cell_error(cell)
@@ -353,6 +359,10 @@ def fill_formula_down(ctx, args):
     if not formula.startswith("="):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"{from_ref} ne contient pas de formule.")
+    refusal = formula_refusal(formula)
+    if refusal:
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"Formule de {from_ref} non recopiée, {refusal}.")
     num_cols = sheet.getColumns().Count
     filled = 0
     for row_idx in range(start_row + 1, to_row):
@@ -423,8 +433,10 @@ def register(registry):
     registry.register(ToolSpec(
         name="calc_set_formula",
         description=("Applique une formule Calc dans une cellule (séparateur ';', "
-                     "plages 'A1:A10'). Retourne l'erreur affichée (#…, Err:…) le "
-                     "cas échéant pour te permettre de corriger."),
+                     "plages 'A1:A10'). Seules les fonctions de calcul sont "
+                     "permises : ni réseau, ni fichier, ni référence externe. "
+                     "Retourne l'erreur affichée (#…, Err:…) le cas échéant pour "
+                     "te permettre de corriger."),
         parameters={"type": "object", "properties": {
             "ref": {"type": "string"},
             "formula": {"type": "string"},
