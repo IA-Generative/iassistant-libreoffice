@@ -9,6 +9,7 @@ import urllib.error
 from unittest.mock import MagicMock, patch
 
 # ── Install UNO stubs FIRST so the module can be imported outside LibreOffice ──
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install
 
 install()
@@ -44,12 +45,7 @@ def _chat_response(content: str, status: int = 200) -> MagicMock:
             {"message": {"content": content}, "finish_reason": "stop"}
         ]
     }
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(payload).encode()
-    resp.status = status
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
+    return http_response(payload, status)
 
 
 def _completions_response(text: str) -> MagicMock:
@@ -57,12 +53,7 @@ def _completions_response(text: str) -> MagicMock:
     payload = {
         "choices": [{"text": text, "finish_reason": "stop"}]
     }
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(payload).encode()
-    resp.status = 200
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
+    return http_response(payload)
 
 
 def _base_config() -> dict:

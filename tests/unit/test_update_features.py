@@ -6,11 +6,11 @@ Run with:
     pytest tests/unit/test_update_features.py -v --tb=short
 """
 import hashlib
-import json
 import time
 from unittest.mock import MagicMock
 
 # ── Stubs must be installed before importing entrypoint ──────────────
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -18,22 +18,6 @@ install()
 from src.mirai.entrypoint import MainJob
 
 # ── helpers ──────────────────────────────────────────────────────────
-
-def _response(data: bytes, status: int = 200):
-    """Build a minimal HTTP response mock for _urlopen."""
-    resp = MagicMock()
-    resp.read.return_value = data
-    resp.status = status
-    resp.headers = MagicMock()
-    resp.headers.items.return_value = []
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
-
-
-def _json_response(obj, status: int = 200):
-    return _response(json.dumps(obj).encode(), status)
-
 
 def _enriched_v2(features=None, update=None):
     """Build a minimal EnrichedConfigResponse (schema_version=2)."""
@@ -60,9 +44,8 @@ def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
     return d
 
 
-# ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
-
-def test_lo04_fetch_v2_populates_features_cache():
+def _dm_job(payload):
+    """Job dont le fetch de config reçoit *payload* du DM."""
     job = make_job()
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
         "bootstrap_url": "http://localhost:9999",
@@ -76,9 +59,14 @@ def test_lo04_fetch_v2_populates_features_cache():
     job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
     job._persist_bootstrap_config = MagicMock()
     job._schedule_update = MagicMock()
+    job._urlopen = MagicMock(return_value=http_response(payload))
+    return job
 
-    payload = _enriched_v2(features={"writer_assistant": True, "calc_assistant": False})
-    job._urlopen = MagicMock(return_value=_json_response(payload))
+
+# ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
+
+def test_lo04_fetch_v2_populates_features_cache():
+    job = _dm_job(_enriched_v2(features={"writer_assistant": True, "calc_assistant": False}))
 
     result = job._fetch_config(force=True)
 
@@ -89,23 +77,8 @@ def test_lo04_fetch_v2_populates_features_cache():
 # ── TC-LO-05 : fetch v2 schedule_update appelé si action présente ────
 
 def test_lo05_fetch_v2_calls_schedule_update():
-    job = make_job()
-    job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
-        "bootstrap_url": "http://localhost:9999",
-        "config_path": "/config/lo/config.json",
-        "enabled": True,
-        "proxy_enabled": False,
-    }.get(k, d))
-    job._relay_headers = MagicMock(return_value={})
-    job._get_extension_version = MagicMock(return_value="1.0.0")
-    job._get_lo_version = MagicMock(return_value="24.8.0")
-    job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
-    job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
-
     directive = _make_update_directive()
-    payload = _enriched_v2(features={}, update=directive)
-    job._urlopen = MagicMock(return_value=_json_response(payload))
+    job = _dm_job(_enriched_v2(features={}, update=directive))
 
     job._fetch_config(force=True)
 
@@ -115,22 +88,7 @@ def test_lo05_fetch_v2_calls_schedule_update():
 # ── TC-LO-06 : fetch v2 update=null → schedule_update non appelé ────
 
 def test_lo06_fetch_v2_no_update_directive():
-    job = make_job()
-    job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
-        "bootstrap_url": "http://localhost:9999",
-        "config_path": "/config/lo/config.json",
-        "enabled": True,
-        "proxy_enabled": False,
-    }.get(k, d))
-    job._relay_headers = MagicMock(return_value={})
-    job._get_extension_version = MagicMock(return_value="1.0.0")
-    job._get_lo_version = MagicMock(return_value="24.8.0")
-    job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
-    job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
-
-    payload = _enriched_v2(features={}, update=None)
-    job._urlopen = MagicMock(return_value=_json_response(payload))
+    job = _dm_job(_enriched_v2(features={}, update=None))
 
     job._fetch_config(force=True)
 
@@ -140,24 +98,9 @@ def test_lo06_fetch_v2_no_update_directive():
 # ── TC-LO-07 : fetch legacy (schema_version absent) → features_cache inchangé
 
 def test_lo07_fetch_legacy_does_not_touch_features_cache():
-    job = make_job()
-    job._features_cache = {"existing_flag": True}
-    job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
-        "bootstrap_url": "http://localhost:9999",
-        "config_path": "/config/lo/config.json",
-        "enabled": True,
-        "proxy_enabled": False,
-    }.get(k, d))
-    job._relay_headers = MagicMock(return_value={})
-    job._get_extension_version = MagicMock(return_value="")
-    job._get_lo_version = MagicMock(return_value="")
-    job._ensure_plugin_uuid = MagicMock(return_value="")
-    job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
-
     # Legacy flat response without meta.schema_version
-    legacy_payload = {"config": {"telemetryEnabled": False}, "update_url": "http://old"}
-    job._urlopen = MagicMock(return_value=_json_response(legacy_payload))
+    job = _dm_job({"config": {"telemetryEnabled": False}, "update_url": "http://old"})
+    job._features_cache = {"existing_flag": True}
 
     job._fetch_config(force=True)
 
@@ -208,7 +151,7 @@ def test_lo09_perform_update_checksum_ok_stages(fast_clock):
         checksum=expected_checksum,
         artifact_url="/binaries/lo/2.0.0/mirai.oxt",
     )
-    job._urlopen = MagicMock(return_value=_response(fake_binary))
+    job._urlopen = MagicMock(return_value=http_response(fake_binary))
 
     job._perform_update(directive)
 
@@ -240,7 +183,7 @@ def test_lo09b_download_fails_over_to_next_bootstrap(fast_clock):
         tried.append(url)
         if "onyxia" in url:
             raise OSError("nodename nor servname provided, or not known")
-        return _response(fake_binary)
+        return http_response(fake_binary)
 
     job._urlopen = _fake_urlopen
 
@@ -282,7 +225,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
     job._install_and_restart_in_process = MagicMock()
 
     directive = _make_update_directive(checksum=wrong_checksum)
-    job._urlopen = MagicMock(return_value=_response(fake_binary))
+    job._urlopen = MagicMock(return_value=http_response(fake_binary))
 
     job._perform_update(directive)
 

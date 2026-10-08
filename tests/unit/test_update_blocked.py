@@ -7,6 +7,7 @@ import os
 import threading
 from unittest.mock import MagicMock
 
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -59,11 +60,7 @@ def test_report_update_status_sends_relay_headers():
 
     def _fake_urlopen(req, **kw):
         captured["headers"] = {k.lower(): v for k, v in req.header_items()}
-        resp = MagicMock()
-        resp.read.return_value = b"{}"
-        resp.__enter__ = lambda s: s
-        resp.__exit__ = MagicMock(return_value=False)
-        return resp
+        return http_response(b"{}")
 
     job._urlopen = _fake_urlopen
     job._report_update_status(1, "installed", "0.0.1.0.13", "0.0.1.0.14")
