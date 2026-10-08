@@ -210,6 +210,12 @@ fi
 OXT_VERSION=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 OXT_IDENTIFIER=$(sed -n 's/.*<identifier value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 
+# La licence affiche la version de description.xml, seule source de version.
+if [ -n "$OXT_VERSION" ] && [ -f "$STAGE_DIR/registration/license.txt" ]; then
+  sed -i.bak "s|@VERSION@|${OXT_VERSION}|" "$STAGE_DIR/registration/license.txt"
+  rm -f "$STAGE_DIR/registration/license.txt.bak"
+fi
+
 # dm-manifest.json — plugin metadata for DM auto-registration
 if [ -f "$ROOT_DIR/dm-manifest.json" ]; then
   if [ -n "$OXT_VERSION" ]; then
