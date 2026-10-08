@@ -8,7 +8,7 @@ Run with:
 import hashlib
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # ── Stubs must be installed before importing entrypoint ──────────────
 from tests.stubs.uno_stubs import install, make_job
@@ -186,7 +186,7 @@ def test_lo08_update_not_retriggered_if_in_progress():
 
 # ── TC-LO-09 : _perform_update checksum OK → install ────────────────
 
-def test_lo09_perform_update_checksum_ok_stages():
+def test_lo09_perform_update_checksum_ok_stages(fast_clock):
     """checksum OK → l'artefact est stagé (statut 'deferred' rapporté — le
     rapport « installed » n'arrive qu'à la réconciliation post-redémarrage,
     quand la nouvelle version est réellement active). L'install
@@ -210,8 +210,7 @@ def test_lo09_perform_update_checksum_ok_stages():
     )
     job._urlopen = MagicMock(return_value=_response(fake_binary))
 
-    with patch("src.mirai.entrypoint.time.sleep"):
-        job._perform_update(directive)
+    job._perform_update(directive)
 
     statuses = [c.args[1] for c in job._report_update_status.call_args_list if len(c.args) > 1]
     assert "deferred" in statuses                  # stagé, install à suivre
@@ -222,7 +221,7 @@ def test_lo09_perform_update_checksum_ok_stages():
 
 # ── TC-LO-09b : download failover multi-bootstrap ───────────────────
 
-def test_lo09b_download_fails_over_to_next_bootstrap():
+def test_lo09b_download_fails_over_to_next_bootstrap(fast_clock):
     """Si la 1re base bootstrap est injoignable (DGX hors réseau : Errno 8), le
     download bascule sur la suivante au lieu d'abandonner (bug observé : figé sur
     l'hôte GPU interne)."""
@@ -249,8 +248,7 @@ def test_lo09b_download_fails_over_to_next_bootstrap():
         action="update", target="0.0.1.0.23", checksum=checksum,
         artifact_url="/catalog/mirai-libreoffice/download",
     )
-    with patch("src.mirai.entrypoint.time.sleep"):
-        job._perform_update(directive)
+    job._perform_update(directive)
 
     assert any("onyxia" in u for u in tried), "doit d'abord tenter la 1re base"
     assert "https://scaleway.ok/catalog/mirai-libreoffice/download" in tried, \
@@ -294,7 +292,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
 
 # ── TC-LO-11 : _perform_update libère flag sur exception ─────────────
 
-def test_lo11_perform_update_releases_flag_on_exception():
+def test_lo11_perform_update_releases_flag_on_exception(fast_clock):
     job = make_job()
     job._get_config_from_file = MagicMock(return_value="http://localhost:9999")
 
