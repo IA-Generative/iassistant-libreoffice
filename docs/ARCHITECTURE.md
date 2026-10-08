@@ -1,14 +1,14 @@
-# Architecture — Démonstrateur « moteur MCP interne + palette universelle »
+# Architecture — moteur MCP interne + palette universelle
 
-> ⚠️ Branche `exp-jetable/demonstrateur-v2` — **expérimentation jetable**,
-> ne pas merger vers master. Ce document est la carte pour qu'un humain **et**
-> un assistant de codage puissent reprendre le code sans archéologie.
+> Ce document est la carte pour qu'un humain **et** un assistant de codage
+> puissent reprendre le code sans archéologie. La refacto de la coquille suit
+> [l'ADR 0001](adr/0001-refacto-strangler.md).
 
 ## Vue en couches
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ COQUILLE (inchangée) — src/mirai/entrypoint.py (MainJob)   │
+│ COQUILLE — src/mirai/entrypoint.py (MainJob)               │
 │ enrollment · Keycloak/SSO · device management · auto-update│
 │ télémétrie · proxy/_urlopen · SSL · config bootstrap       │
 └────────────┬───────────────────────────────────────────────┘
@@ -249,7 +249,10 @@ Golden iso-fonctionnels : `test_presets_writer.py` / `test_presets_calc.py`
 rejouent chaque fonction historique via le moteur (FakeShell + SSE scripté +
 faux documents à état réel).
 
-## De démonstrateur à produit (dette nommée, si on poursuit)
+## Dette nommée
+
+La refacto de la coquille et les suppressions décidées sont suivies par
+[l'ADR 0001](adr/0001-refacto-strangler.md) et le ticket #98.
 
 1. Supprimer le cœur legacy d'entrypoint.py + `menu_actions/` (commit de pure
    suppression, une fois la validation utilisateur passée) puis, une release
@@ -257,7 +260,7 @@ faux documents à état réel).
 2. Unifier `=PROMPT()` (`calc_prompt_function.py`) sur la façade (≈150 lignes
    dupliquées de la coquille, sans Keycloak ni relais).
 3. `ui_ask_user` (questions de clarification interactives dans la palette).
-4. i18n ; multi-conversations + recherche ; sidebar historique ;
+4. Multi-conversations + recherche ; sidebar historique ;
    permissions par tool ; rafraîchir les chips quand l'app change sous une
    palette ouverte.
 

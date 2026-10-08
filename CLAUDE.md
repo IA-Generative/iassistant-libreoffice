@@ -20,12 +20,14 @@ Extension LibreOffice (OXT) intégrant un assistant IA dans Writer et Calc. Se c
 # Deploy release (canary rollout)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy canary --profile int
+  --config config/profiles/config.default.integration.json \
+  --strategy canary
 
 # Deploy release (immediate)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy immediate --profile prod
+  --config config/profiles/config.default.production.json \
+  --strategy immediate
 
 # Check campaign progress
 curl -s -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
@@ -45,19 +47,19 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 
 ## Architecture
 
-> ⚠️ Branche `exp-jetable/demonstrateur-v2` : démonstrateur jetable —
-> le cœur est réécrit en moteur MCP interne + palette universelle DSFR.
-> Voir **docs/ARCHITECTURE.md** (carte des couches, tools, règles, checklist
-> « ajouter un tool »). La coquille (enrollment/SSO/DM/update/télémétrie)
-> reste dans entrypoint.py, inchangée.
+> Le cœur est un moteur MCP interne + une palette universelle DSFR : voir
+> **docs/ARCHITECTURE.md** (carte des couches, tools, règles, checklist
+> « ajouter un tool »). La coquille (enrollment/SSO/DM/update/télémétrie) est
+> extraite progressivement d'entrypoint.py : voir
+> **docs/adr/0001-refacto-strangler.md**.
 
 - `src/mirai/entrypoint.py` — Coquille (MainJob) + dispatch `OpenAssistant`
 - `src/mirai/core/` — Moteur : registry de tools UNO, orchestrateur agentique,
   client LLM double-mode (natif/JSON), sinks, presets, conversation, façade
   (`shell_facade.py` — seul pont vers MainJob, duck-typé, jamais d'import)
 - `src/mirai/ui/` — Palette universelle (dsfr.py tokens + palette.py)
-- `src/mirai/menu_actions/` — legacy, encore présent (suppression prévue après
-  validation du démonstrateur)
+- `src/mirai/menu_actions/` — legacy, encore présent (suppression décidée,
+  voir l'ADR 0001)
 - `oxt/Addons.xcu` — menu « 🤖 MIrAI » : entrée « 🤖 Ouvrir l'assistant »
   (+ Paramètres, Tester le modèle, Documentation, À propos) et bouton de barre ; raccourci
   Ctrl+Alt+Espace (macOS : Ctrl+Opt+Espace) — jamais Ctrl+Shift+Espace
@@ -65,6 +67,10 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 
 ## Key constraints
 
+- **La coquille ne grossit plus** : une PR fonctionnelle qui touche une zone
+  d'`entrypoint.py` en extrait ce qu'elle ajoute ; une PR fait un déplacement ou
+  une correction, jamais les deux. Bornes testées dans `tests/unit/rules/`
+  (`test_shell_budget.py`, `test_test_surface.py`), qui ne font que baisser.
 - **Threading**: le run vit dans un thread worker ; tout accès UNO (document,
   contrôles, undo, tools) repasse par `MainThreadDispatcher` (`core/ui_thread.py`).
   `processEventsToIdle` est **interdit dans `core/` et `ui/`** — règle testée
