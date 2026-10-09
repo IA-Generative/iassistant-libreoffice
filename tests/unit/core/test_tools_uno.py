@@ -96,14 +96,14 @@ def test_calc_write_cells():
 
 def test_calc_set_formula_reports_error_token():
     sheet = FakeCalcSheet()
-    sheet.formula_results["=MAUVAISE()"] = "#NOM?"
+    sheet.formula_results["=VLOOKUP(Z1;A1:B2;2;0)"] = "#N/A"
     doc = FakeCalcDoc(sheet)
     result = _registry().call_tool(
-        "calc_set_formula", {"ref": "C1", "formula": "```\n=MAUVAISE()\n```"},
+        "calc_set_formula", {"ref": "C1", "formula": "```\n=VLOOKUP(Z1;A1:B2;2;0)\n```"},
         _calc_ctx(doc))
     assert not result.ok
-    assert "#NOM?" in result.content
-    assert sheet.formulas[(2, 0)] == "=MAUVAISE()"   # fences nettoyées
+    assert "#N/A" in result.content
+    assert sheet.formulas[(2, 0)] == "=VLOOKUP(Z1;A1:B2;2;0)"   # fences nettoyées
 
 
 def test_calc_fill_formula_down_stops_at_empty_row():

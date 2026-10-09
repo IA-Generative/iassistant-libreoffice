@@ -11,11 +11,10 @@ préserver les tableaux de bord existants.
 """
 
 import dataclasses
-import json
-import os
 import re
 
 from ..i18n import t as _t
+from .calc_functions import catalog
 from .llm_client import LLMClient
 from .orchestrator import error_message
 from .prompts import PIPELINE_TEXT_SYSTEM
@@ -471,28 +470,9 @@ FORMULA_RULES = (
     "plusieurs lignes. Termine par une explication d'une phrase."
 )
 
-_functions_db_cache = None
-
-
-def _load_functions_db():
-    global _functions_db_cache
-    if _functions_db_cache is not None:
-        return _functions_db_cache
-    here = os.path.dirname(__file__)
-    path = os.path.join(here, "..", "..", "..", "config", "calc-functions.json")
-    try:
-        with open(os.path.normpath(path), encoding="utf-8") as fh:
-            data = json.load(fh)
-        _functions_db_cache = {k: v for k, v in data.items()
-                               if not k.startswith("_")}
-    except Exception:
-        _functions_db_cache = {}
-    return _functions_db_cache
-
-
 def relevant_functions(user_text, limit=8):
     """Top fonctions Calc pertinentes par recouvrement de mots (simplifié)."""
-    db = _load_functions_db()
+    db = catalog()
     if not db:
         return ""
     words = set(re.findall(r"[a-zà-ÿ]{3,}", user_text.lower()))

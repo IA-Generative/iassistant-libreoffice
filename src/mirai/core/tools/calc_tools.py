@@ -6,6 +6,7 @@ mutations courtes (écriture de cellules, colonne « Résultat IA » non destruc
 import re
 from collections import Counter
 
+from ..calc_functions import formula_refusal
 from ..text_filters import strip_markdown
 from ..tool_calls import ToolResult, ToolSpec
 
@@ -33,8 +34,21 @@ def range_ref(area):
             f"{col_letter(area.EndColumn)}{area.EndRow + 1}")
 
 
+def text_refusal(text):
+    """Raison du refus d'un texte « =… » qui serait une formule refusée, ou "".
+    Écrit par setString, ce texte reste inerte dans la cellule, mais une
+    ressaisie ou un export CSV en refait une formule active."""
+    stripped = text.lstrip()
+    return formula_refusal(stripped) if stripped.startswith("=") else ""
+
+
 def safe_set_string(cell, text):
-    """setString sans perdre une apostrophe initiale (marqueur texte Calc)."""
+    """setString sans perdre une apostrophe initiale (marqueur texte Calc). Un
+    texte qui serait une formule refusée est remplacé par la raison du refus,
+    que la fonction renvoie ; "" sinon."""
+    refusal = text_refusal(text)
+    if refusal:
+        text = f"#ERREUR: formule refusée, {refusal}"
     if text.startswith("'"):
         try:
             cell_text = cell.getText()
@@ -42,10 +56,11 @@ def safe_set_string(cell, text):
             cursor.gotoStart(False)
             cursor.gotoEnd(True)
             cell_text.insertString(cursor, text, True)
-            return
+            return refusal
         except Exception:
             pass
     cell.setString(text)
+    return refusal
 
 
 def cell_by_ref(sheet, ref):
@@ -257,10 +272,14 @@ def write_cells(ctx, args):
         if not ref:
             continue
         try:
-            safe_set_string(cell_by_ref(sheet, ref), strip_markdown(value))
-            written += 1
+            refusal = safe_set_string(cell_by_ref(sheet, ref), strip_markdown(value))
         except Exception as exc:
             errors.append(f"{ref}: {exc}")
+            continue
+        if refusal:
+            errors.append(f"{ref}: texte refusé, {refusal}")
+        else:
+            written += 1
     content = f"{written} cellule(s) écrite(s)."
     if errors:
         content += " Erreurs : " + " | ".join(errors)
@@ -281,12 +300,13 @@ def write_result_column(ctx, args):
     if needs_header:
         try:
             header_cell = sheet.getCellByPosition(out_col, 0)
-            header_cell.setString(header or next_result_header(sheet))
+            safe_set_string(header_cell, header or next_result_header(sheet))
             apply_dominant_header_style(header_cell, sheet, col_range)
         except Exception:
             pass
 
     written = 0
+    refused = []
     for offset, value in enumerate(values):
         row = area.StartRow + offset
         if row > area.EndRow:
@@ -296,8 +316,11 @@ def write_result_column(ctx, args):
             target.setPropertyValue("IsTextWrapped", True)
         except Exception:
             pass
-        safe_set_string(target, strip_markdown(str(value)))
-        written += 1
+        refusal = safe_set_string(target, strip_markdown(str(value)))
+        if refusal:
+            refused.append(f"ligne {row + 1} : texte refusé, {refusal}")
+        else:
+            written += 1
         try:
             row_obj = sheet.getRows().getByIndex(row)
             row_obj.OptimalHeight = True
@@ -318,15 +341,21 @@ def write_result_column(ctx, args):
         pass
 
     return ToolResult(
-        call_id="", ok=True,
+        call_id="", ok=not refused,
         content=f"{written} résultat(s) écrit(s) en colonne {col_letter(out_col)}.",
         data={"output_column": col_letter(out_col)},
+        error="; ".join(refused),
     )
 
 
 def set_formula(ctx, args):
     sheet = _active_sheet(ctx)
     formula = clean_formula(str(args["formula"]))
+    refusal = formula_refusal(formula)
+    if refusal:
+        return ToolResult(call_id="", ok=False, content="", error=(
+            f"Formule refusée, {refusal}. N'utilise que des fonctions de calcul, "
+            "sans accès réseau, fichier ni référence externe."))
     cell = cell_by_ref(sheet, args["ref"])
     cell.setFormula(formula)
     error_token = get_cell_error(cell)
@@ -353,6 +382,10 @@ def fill_formula_down(ctx, args):
     if not formula.startswith("="):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"{from_ref} ne contient pas de formule.")
+    refusal = formula_refusal(formula)
+    if refusal:
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"Formule de {from_ref} non recopiée, {refusal}.")
     num_cols = sheet.getColumns().Count
     filled = 0
     for row_idx in range(start_row + 1, to_row):
@@ -401,7 +434,8 @@ def register(registry):
     ))
     registry.register(ToolSpec(
         name="calc_write_cells",
-        description="Écrit des valeurs texte dans des cellules précises.",
+        description=("Écrit des valeurs texte dans des cellules précises. Une "
+                     "formule s'applique avec calc_set_formula."),
         parameters={"type": "object", "properties": {
             "cells": {"type": "array", "items": {"type": "object", "properties": {
                 "ref": {"type": "string"},
@@ -423,8 +457,10 @@ def register(registry):
     registry.register(ToolSpec(
         name="calc_set_formula",
         description=("Applique une formule Calc dans une cellule (séparateur ';', "
-                     "plages 'A1:A10'). Retourne l'erreur affichée (#…, Err:…) le "
-                     "cas échéant pour te permettre de corriger."),
+                     "plages 'A1:A10'). Seules les fonctions de calcul sont "
+                     "permises : ni réseau, ni fichier, ni référence externe. "
+                     "Retourne l'erreur affichée (#…, Err:…) le cas échéant pour "
+                     "te permettre de corriger."),
         parameters={"type": "object", "properties": {
             "ref": {"type": "string"},
             "formula": {"type": "string"},
