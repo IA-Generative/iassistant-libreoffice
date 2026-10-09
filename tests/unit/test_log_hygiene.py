@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from unittest.mock import MagicMock, patch
 
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -23,14 +24,6 @@ SECRET = "SECRET-llmToken-0123456789"
 DOCUMENT = "Texte confidentiel du document"
 # Corps d'erreur d'un serveur qui renvoie ce qu'il a reçu.
 ECHO = json.dumps({"detail": f"{SECRET} {DOCUMENT}"})
-
-
-def _response(body):
-    resp = MagicMock()
-    resp.read.return_value = body
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
 
 
 def _http_error(status, body=ECHO):
@@ -56,7 +49,7 @@ def test_dm_response_is_not_logged(tmp_path):
         "llmToken": SECRET, "llm_api_tokens": SECRET, "embdToken": SECRET,
         "telemetryKey": SECRET, "llm_base_urls": "https://dm.example/llm/v1",
     }}).encode("utf-8")
-    job._urlopen = MagicMock(return_value=_response(payload))
+    job._urlopen = MagicMock(return_value=http_response(payload))
     lines = []
     with patch("src.mirai.entrypoint.log_to_file", side_effect=lines.append):
         job._fetch_config(force=True)
@@ -174,7 +167,7 @@ def test_prompt_error_body_reaches_the_cell_but_not_the_log():
 
 
 def test_prompt_unexpected_reply_is_not_logged():
-    reply = _response(json.dumps({"output": DOCUMENT}).encode("utf-8"))
+    reply = http_response(json.dumps({"output": DOCUMENT}).encode("utf-8"))
     with patch("src.mirai.calc_prompt_function._urlopen", return_value=reply), \
             patch("src.mirai.calc_prompt_function._log") as log:
         cell = call_llm("msg", "", "", 10, _base_config(), None)

@@ -15,6 +15,7 @@ from src.mirai.core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSin
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
 from src.mirai.core.ui_thread import DirectDispatcher
 from tests.stubs.fake_shell import FakeShell
+from tests.stubs.thread_guard import ThreadGuard
 
 
 class RecordingDispatcher(DirectDispatcher):
@@ -34,31 +35,22 @@ class RecordingDispatcher(DirectDispatcher):
 
 
 class FakeDoc:
-    """Document minimal qui refuse d'être touché hors thread principal."""
+    """Document minimal : texte écrit et contexte d'annulation."""
 
-    def __init__(self, allowed_thread):
-        self.allowed = allowed_thread
-        self.violations = []
+    def __init__(self):
         self.text = ""
 
-    def _check(self):
-        current = threading.current_thread()
-        if current is not self.allowed:
-            self.violations.append(current.name)
-
     def write(self, chunk):
-        self._check()
         self.text += chunk
 
     def getUndoManager(self):
-        self._check()
         return self
 
     def enterUndoContext(self, _label):
-        self._check()
+        pass
 
     def leaveUndoContext(self):
-        self._check()
+        pass
 
 
 class _StepResult:
@@ -196,7 +188,8 @@ def test_writer_sink_never_touches_the_document_from_a_worker():
     rester vide — c'est exactement la garantie que l'ancien code n'avait pas.
     """
     dispatcher = ThreadPinnedDispatcher()
-    doc = FakeDoc(allowed_thread=dispatcher.thread)
+    fake = FakeDoc()
+    doc = ThreadGuard(fake, owner=dispatcher.thread)
     ctx = _context(FakeShell(), dispatcher, doc=doc)
 
     class DocSink(WriterInsertSink):
@@ -217,7 +210,7 @@ def test_writer_sink_never_touches_the_document_from_a_worker():
     thread.join(timeout=5)
     dispatcher.close()
 
-    assert doc.text == "bonjour"
+    assert fake.text == "bonjour"
     assert doc.violations == [], (
         "le document a été touché depuis un thread de fond : "
         f"{doc.violations}")
@@ -226,7 +219,7 @@ def test_writer_sink_never_touches_the_document_from_a_worker():
 def test_undo_context_is_opened_on_the_main_thread():
     """enterUndoContext depuis un worker = écriture VCL sans SolarMutex."""
     dispatcher = ThreadPinnedDispatcher()
-    doc = FakeDoc(allowed_thread=dispatcher.thread)
+    doc = ThreadGuard(FakeDoc(), owner=dispatcher.thread)
     ctx = _context(FakeShell(), dispatcher, doc=doc)
 
     def worker():

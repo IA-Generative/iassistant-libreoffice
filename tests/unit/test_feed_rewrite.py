@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -22,7 +23,6 @@ from src.mirai import entrypoint, feed_rewrite
 from src.mirai.entrypoint import MainJob
 from tests.unit.test_update_features import (
     _enriched_v2,
-    _json_response,
     _make_update_directive,
 )
 
@@ -226,7 +226,7 @@ def test_fetch_config_rewrites_before_deciding_anything(installed, target):
     job._schedule_update = MagicMock(side_effect=lambda d: seen.append(_hrefs(_read(installed))[0]))
     directive = _make_update_directive()
     directive["target_version"] = target
-    job._urlopen = MagicMock(return_value=_json_response(_enriched_v2(features={}, update=directive)))
+    job._urlopen = MagicMock(return_value=http_response(_enriched_v2(features={}, update=directive)))
     job._fetch_config(force=True)
     assert _hrefs(_read(installed))[0] == BASE_1 + f"?version={target}"
     assert seen == ([] if target == "0.0.1.0.31" else [BASE_1 + "?version=0.0.1.0.32"])

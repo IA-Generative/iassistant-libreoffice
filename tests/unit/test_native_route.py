@@ -137,10 +137,15 @@ def test_load_update_state_returns_empty_when_missing_or_corrupt():
 
 
 def _schedule_and_wait(job, directive, seconds=2):
+    """Vrai si la planification a lancé l'installation ; attend la fin du
+    worker plutôt qu'un délai."""
     done = threading.Event()
     job._perform_update = lambda d: done.set()
+    before = set(threading.enumerate())
     job._schedule_update(directive)
-    return done.wait(seconds)
+    for thread in set(threading.enumerate()) - before:
+        thread.join(seconds)
+    return done.is_set()
 
 
 def test_schedule_update_skips_target_in_cooldown():

@@ -12,6 +12,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.stubs.uno_stubs import install, make_job, make_jwt, seed_user_config
 
 install()
@@ -213,6 +215,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         self.assertTrue(MainJob._enrollment_dismissed_cls)
 
 
+@pytest.mark.usefixtures("fast_clock")
 class TestRunFirstEnrollment(_EnrollmentCase):
     """Test _run_first_enrollment orchestration."""
 
