@@ -30,7 +30,6 @@ TOLERATED_EDGES = {
 # Un import UNO paresseux échoue hors du thread principal : seules ces fonctions,
 # appelées sur le thread principal, y ont droit.
 UNO_IMPORTS_IN_FUNCTIONS = {
-    ("i18n", "_uno_ui_locale"): "locale bientôt injectée par la coquille",
     ("calc_prompt_function", "_user_config_path"): "appelée par LibreOffice sur le thread principal",
 }
 # Accès directs au MainJob depuis le moteur ou la palette, hors de la façade.
