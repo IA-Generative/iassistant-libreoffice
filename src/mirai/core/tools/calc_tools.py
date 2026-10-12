@@ -37,9 +37,12 @@ def range_ref(area):
 def text_refusal(text):
     """Raison du refus d'un texte « =… » qui serait une formule refusée, ou "".
     Écrit par setString, ce texte reste inerte dans la cellule, mais une
-    ressaisie ou un export CSV en refait une formule active."""
+    ressaisie en refait une formule active, y compris après « + » ou « - »,
+    et un tableur qui ouvre l'export CSV aussi, y compris après « @ »."""
     stripped = text.lstrip()
-    return formula_refusal(stripped) if stripped.startswith("=") else ""
+    if stripped.startswith(("=", "+", "-", "@")):
+        return formula_refusal(stripped)
+    return ""
 
 
 def safe_set_string(cell, text):
@@ -297,16 +300,18 @@ def write_result_column(ctx, args):
     row_range = range(area.StartRow, area.EndRow + 1)
 
     out_col, needs_header = find_free_output_column(sheet, col_range, row_range)
+    refused = []
     if needs_header:
         try:
             header_cell = sheet.getCellByPosition(out_col, 0)
-            safe_set_string(header_cell, header or next_result_header(sheet))
+            refusal = safe_set_string(header_cell, header or next_result_header(sheet))
+            if refusal:
+                refused.append(f"en-tête : texte refusé, {refusal}")
             apply_dominant_header_style(header_cell, sheet, col_range)
         except Exception:
             pass
 
     written = 0
-    refused = []
     for offset, value in enumerate(values):
         row = area.StartRow + offset
         if row > area.EndRow:
@@ -340,11 +345,11 @@ def write_result_column(ctx, args):
     except Exception:
         pass
 
+    content = f"{written} résultat(s) écrit(s) en colonne {col_letter(out_col)}."
     return ToolResult(
-        call_id="", ok=not refused,
-        content=f"{written} résultat(s) écrit(s) en colonne {col_letter(out_col)}.",
+        call_id="", ok=not refused, content=content,
         data={"output_column": col_letter(out_col)},
-        error="; ".join(refused),
+        error=(content + " Refusé(s) : " + "; ".join(refused)) if refused else "",
     )
 
 
@@ -353,9 +358,8 @@ def set_formula(ctx, args):
     formula = clean_formula(str(args["formula"]))
     refusal = formula_refusal(formula)
     if refusal:
-        return ToolResult(call_id="", ok=False, content="", error=(
-            f"Formule refusée, {refusal}. N'utilise que des fonctions de calcul, "
-            "sans accès réseau, fichier ni référence externe."))
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"Formule refusée, {refusal}.")
     cell = cell_by_ref(sheet, args["ref"])
     cell.setFormula(formula)
     error_token = get_cell_error(cell)
