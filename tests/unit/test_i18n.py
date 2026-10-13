@@ -418,7 +418,7 @@ def test_addons_xcu_is_valid_xml():
 
 def test_addons_xcu_declares_every_locale():
     content = _read("oxt/Addons.xcu")
-    assert content.count("xml:lang=") == 5 * len(_ADDON_KEYS)
+    assert content.count("xml:lang=") == len(i18n.SUPPORTED) * len(_ADDON_KEYS)
     for code in i18n.SUPPORTED:
         assert f'xml:lang="{code}"' in content
 
