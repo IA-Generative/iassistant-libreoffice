@@ -4098,11 +4098,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             daemon=True
         )
         server_thread.start()
-        if on_listening:
-            on_listening()
 
-        start = time.time()
         try:
+            if on_listening:
+                on_listening()
+            start = time.time()
             while (
                 time.time() - start < timeout_seconds
                 and not done_event.is_set()
