@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -394,8 +395,7 @@ def _routing_job(feed_offers=True, native_result=True):
     job._perform_native_update = MagicMock(return_value=native_result)
     job._wait_before_prompting = MagicMock()
     job.get_ssl_context = MagicMock()
-    job._urlopen = MagicMock()
-    job._urlopen.return_value.__enter__.return_value.read.return_value = b"oxt-bytes"
+    job._urlopen = MagicMock(return_value=http_response(b"oxt-bytes"))
     job._failover_ordered_urls = MagicMock(return_value=["https://dm.example"])
     return job
 

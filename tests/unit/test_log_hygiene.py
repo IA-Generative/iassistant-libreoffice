@@ -167,7 +167,7 @@ def test_prompt_error_body_reaches_the_cell_but_not_the_log():
 
 
 def test_prompt_unexpected_reply_is_not_logged():
-    reply = http_response(json.dumps({"output": DOCUMENT}).encode("utf-8"))
+    reply = http_response({"output": DOCUMENT})
     with patch("src.mirai.calc_prompt_function._urlopen", return_value=reply), \
             patch("src.mirai.calc_prompt_function._log") as log:
         cell = call_llm("msg", "", "", 10, _base_config(), None)

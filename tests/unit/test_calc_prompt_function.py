@@ -259,10 +259,8 @@ class TestCallLlmErrors(unittest.TestCase):
         self.assertIn("Connection refused", result)
 
     def test_invalid_json_returns_error_string(self):
-        resp = MagicMock()
-        resp.read.return_value = b"not json at all"
-        resp.__exit__ = MagicMock(return_value=False)
-        with patch("src.mirai.calc_prompt_function._urlopen", return_value=resp):
+        with patch("src.mirai.calc_prompt_function._urlopen",
+                   return_value=http_response(b"not json at all")):
             result = call_llm("msg", "", "", 10, self.config, self.ssl_ctx)
 
         self.assertTrue(result.startswith("#PROMPT_ERROR:"))

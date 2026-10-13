@@ -5,10 +5,12 @@ from unittest.mock import MagicMock
 
 
 def http_response(body=b"", status=200):
-    """Réponse urllib factice, utilisable en `with`. `read()` rend *body* tel
-    quel s'il s'agit d'octets ou de texte, sinon son encodage JSON."""
+    """Réponse urllib factice, utilisable en `with`. `read()` rend des octets :
+    *body* tel quel, encodé en UTF-8 si c'est du texte, sinon en JSON."""
     if not isinstance(body, (bytes, str)):
-        body = json.dumps(body).encode("utf-8")
+        body = json.dumps(body)
+    if isinstance(body, str):
+        body = body.encode("utf-8")
     resp = MagicMock()
     resp.read.return_value = body
     resp.status = status
