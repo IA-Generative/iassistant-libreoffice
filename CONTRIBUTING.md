@@ -30,8 +30,8 @@ l'interpréteur, par exemple celui d'un venv.
 Les libellés vivent dans `src/mirai/locales/<langue>.json`, un fichier par
 langue (fr, en, es, pt, zh). Une clé ajoutée l'est dans les cinq fichiers, une
 seule fois chacun : `tests/unit/test_i18n.py` vérifie la parité, les doublons,
-les clés appelées par `_t(...)` et les libellés de menu d'`oxt/Addons.xcu`, qui
-restent en XML.
+les clés écrites en toutes lettres dans un appel `_t("…")` et les libellés de
+menu d'`oxt/Addons.xcu`, qui restent en XML.
 
 ## La coquille ne grossit plus
 

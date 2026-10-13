@@ -15,6 +15,7 @@ Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 import json
 import logging
 import os
+import pathlib
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -37,19 +38,10 @@ from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_LOCALE_DEPENDENT_FILES = (
-    "src/mirai/entrypoint.py",
-    "src/mirai/menu_actions/calc.py",
-    "src/mirai/core/presets.py",
-    "src/mirai/core/suggestions.py",
-    "src/mirai/core/selection_info.py",
-    "src/mirai/core/progress.py",
-    "src/mirai/core/orchestrator.py",
-    "src/mirai/core/doc_analysis.py",
-    "src/mirai/core/entry.py",
-    "src/mirai/core/capabilities.py",
-    "src/mirai/core/clickable.py",
-    "src/mirai/ui/palette.py",
+_LOCALE_DEPENDENT_FILES = sorted(
+    path.relative_to(_REPO_ROOT).as_posix()
+    for path in pathlib.Path(_REPO_ROOT, "src", "mirai").rglob("*.py")
+    if "import t as _t" in path.read_text(encoding="utf-8")
 )
 
 _ADDON_KEYS = (
