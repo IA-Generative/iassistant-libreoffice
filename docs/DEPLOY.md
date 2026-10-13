@@ -157,15 +157,16 @@ A utiliser pour :
 
 ## Deploiement manuel (sans script)
 
-### Etape 1 — Mettre a jour la version
+### Etape 1 — Partir du tag de la version
 
-Modifier ces 3 fichiers avec le nouveau numero de version :
+```bash
+git checkout vX.Y.Z
+```
 
-| Fichier | Champ |
-|---------|-------|
-| `oxt/description.xml` | `<version value="X.Y.Z"/>` |
-| `dm-manifest.json` | `changelog[0].version` |
-| `oxt/registration/license.txt` | `version X.Y.Z` |
+Rien a modifier a la main : release-please a porte la version dans
+`oxt/description.xml`, seule source de version. Au build, la licence et le
+`dm-manifest.json` embarque (changelog derive de `CHANGELOG.md`) en sont
+deduits.
 
 ### Etape 2 — Builder le package
 
@@ -194,12 +195,16 @@ L'endpoint gere automatiquement :
 
 ## Rollback
 
+Redeployer une version anterieure depuis son tag : le script construit l'OXT du
+code extrait, dont la version vient de `description.xml`. Ne pas passer
+`--version`, qui ne change que l'etiquette envoyee au DM, pas le code construit.
+
 ```bash
 # Deployer l'ancienne version en urgence
+git checkout vX.Y.Z
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
   --config config/profiles/config.default.production.json \
-  --version 0.0.7.0.0 \
   --strategy immediate
 ```
 
