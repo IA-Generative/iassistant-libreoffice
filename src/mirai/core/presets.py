@@ -16,6 +16,7 @@ import os
 import re
 
 from ..i18n import t as _t
+from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
 from .prompts import PIPELINE_TEXT_SYSTEM
@@ -498,6 +499,8 @@ def relevant_functions(user_text, limit=8):
     words = set(re.findall(r"[a-zà-ÿ]{3,}", user_text.lower()))
     scored = []
     for name, info in db.items():
+        if formula_refusal(str(info.get("ex", ""))):
+            continue
         haystack = (name + " " + str(info.get("desc", ""))
                     + " " + str(info.get("cat", ""))).lower()
         score = sum(1 for w in words if w in haystack)
