@@ -186,6 +186,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .formatting import insert_formatted
 from . import credentials, feed_rewrite, local_config, log_setup
 from .menu_actions.writer import handle_writer_action
@@ -554,6 +555,12 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
         log_to_file(f"Error: {str(e)}")
         log_to_file(f"Type: {type(e).__name__}")
         log_to_file("=== End Telemetry Exception ===")
+
+
+class _CallbackServer(ThreadingHTTPServer):
+    # Sous Windows, SO_REUSEADDR laisse un autre processus écouter sur le même port
+    # et recevoir le callback à notre place : le bind doit échouer.
+    allow_reuse_address = platform.system() != "Windows"
 
 
 def _render_callback_page():
@@ -4049,8 +4056,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         done_event = threading.Event()
         result = {"code": None, "error": None}
 
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
                 return
@@ -4086,7 +4091,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # Boucle locale seulement : le callback porte le code d'autorisation.
         bind_host = "127.0.0.1"
         try:
-            httpd = ThreadingHTTPServer((bind_host, port), Handler)
+            httpd = _CallbackServer((bind_host, port), Handler)
         except Exception as e:
             log_to_file(f"Failed to start local callback server: {str(e)}")
             return None, "callback_server_error"
