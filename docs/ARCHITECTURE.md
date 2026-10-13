@@ -74,7 +74,7 @@
      par messages asynchrones a besoin d'un tel filet.
 2. **Zéro import de la coquille** dans `core/` et `ui/` — la façade
    `shell_facade.MainJobShell` duck-type l'objet MainJob. Règle exécutable :
-   `tests/unit/core/test_no_entrypoint_import.py`.
+   `tests/unit/rules/test_no_entrypoint_import.py`.
 3. **Pas de pip** : stdlib uniquement (validateur JSON-schema = sous-ensemble
    maison documenté dans `core/tool_calls.py`).
 4. **Jamais de contenu documentaire en télémétrie** — uniquement compteurs,

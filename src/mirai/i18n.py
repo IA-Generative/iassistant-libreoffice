@@ -6,7 +6,7 @@ configuration. Le francais est la langue source ; l'extension suit la langue
 de LibreOffice, et l'anglais quand elle ne la propose pas.
 
 Ce module vit sous `src/mirai/` et NON sous `core/` ou `ui/` : la regle
-d'architecture `tests/unit/core/test_no_entrypoint_import.py` interdit la
+d'architecture `tests/unit/rules/test_no_entrypoint_import.py` interdit la
 sous-chaine "entrypoint" dans ces deux paquets, et la facade `core` doit rester
 independante de la coquille UNO.
 

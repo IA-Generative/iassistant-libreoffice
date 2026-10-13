@@ -17,17 +17,17 @@ Extension LibreOffice (OXT) intégrant un assistant IA dans Writer et Calc. Se c
 # Clean install (purge cache + uninstall)
 ./scripts/00-clean-install.sh --uninstall
 
-# Deploy release (canary rollout)
-./scripts/deploy-release.sh \
-  --bootstrap-url https://bootstrap.fake-domain.name \
-  --config config/profiles/config.default.integration.json \
-  --strategy canary
-
-# Deploy release (immediate)
+# Deploy release (immediate: every release until device-management#49 ships)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
   --config config/profiles/config.default.production.json \
   --strategy immediate
+
+# Deploy release (canary rollout, once device-management#49 ships)
+./scripts/deploy-release.sh \
+  --bootstrap-url https://bootstrap.fake-domain.name \
+  --config config/profiles/config.default.integration.json \
+  --strategy canary
 
 # Check campaign progress
 curl -s -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
@@ -79,7 +79,7 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 - **No pip**: Only `urllib.request` — no external Python packages in the plugin
 - **UNO API**: All UI via `com.sun.star.awt.*` dialogs
 - **Config profiles**: `dev`, `int`, `prod` (not `integration` — device-management rejects it)
-- **core/ui n'importent jamais entrypoint** (règle testée : `tests/unit/core/test_no_entrypoint_import.py`)
+- **core/ui n'importent jamais entrypoint** (règle testée : `tests/unit/rules/test_no_entrypoint_import.py`)
 - **macOS dev** : si `unopkg` échoue en SIGKILL « Launch Constraint Violation », re-signer ad hoc les binaires auxiliaires de LibreOffice.app (voir docs/ARCHITECTURE.md §Environnement) — à refaire après chaque mise à jour de LO
 
 ## Device Management (sibling repo)
