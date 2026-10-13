@@ -186,6 +186,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .formatting import insert_formatted
 from . import credentials, feed_rewrite, local_config, log_setup
 from .menu_actions.writer import handle_writer_action
@@ -554,6 +555,12 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
         log_to_file(f"Error: {str(e)}")
         log_to_file(f"Type: {type(e).__name__}")
         log_to_file("=== End Telemetry Exception ===")
+
+
+class _CallbackServer(ThreadingHTTPServer):
+    # Sous Windows, SO_REUSEADDR laisse un autre processus écouter sur le même port
+    # et recevoir le callback à notre place : le bind doit échouer.
+    allow_reuse_address = platform.system() != "Windows"
 
 
 def _render_callback_page():
@@ -4033,7 +4040,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         digest = hashlib.sha256(verifier.encode("utf-8")).digest()
         return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
-    def _wait_for_auth_code(self, redirect_uri, timeout_seconds=120, tick=None, cancel_event=None):
+    def _wait_for_auth_code(self, redirect_uri, expected_state, timeout_seconds=120, tick=None, cancel_event=None, on_listening=None):
         try:
             parsed = urllib.parse.urlparse(redirect_uri)
             if parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1"):
@@ -4049,8 +4056,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         done_event = threading.Event()
         result = {"code": None, "error": None}
 
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
                 return
@@ -4065,6 +4070,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     self.end_headers()
                     return
                 params = urllib.parse.parse_qs(parsed_path.query)
+                # Sans le state de cette autorisation, le callback est forgé (CSRF).
+                if params.get("state", [None])[0] != expected_state:
+                    log_to_file("PKCE callback refused: state mismatch")
+                    self.send_response(400)
+                    self.end_headers()
+                    return
                 code = params.get("code", [None])[0]
                 error = params.get("error", [None])[0]
                 log_to_file(f"PKCE callback parsed: code={'set' if code else 'none'} error={error or 'none'}")
@@ -4077,14 +4088,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.end_headers()
                 self.wfile.write(_render_callback_page().encode("utf-8"))
 
-        # Écoute sur toutes les interfaces ; redirect_uri est déjà garanti local par le contrôle en tête.
-        bind_host = ""
+        # Boucle locale seulement : le callback porte le code d'autorisation.
+        bind_host = "127.0.0.1"
         try:
-            httpd = ThreadingHTTPServer((bind_host, port), Handler)
+            httpd = _CallbackServer((bind_host, port), Handler)
         except Exception as e:
             log_to_file(f"Failed to start local callback server: {str(e)}")
             return None, "callback_server_error"
-        log_to_file(f"Local callback server listening on http://{bind_host or '0.0.0.0'}:{port}{path}")
+        log_to_file(f"Local callback server listening on http://{bind_host}:{port}{path}")
 
         server_thread = threading.Thread(
             target=httpd.serve_forever,
@@ -4093,8 +4104,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         )
         server_thread.start()
 
-        start = time.time()
         try:
+            if on_listening:
+                on_listening()
+            start = time.time()
             while (
                 time.time() - start < timeout_seconds
                 and not done_event.is_set()
@@ -4234,19 +4247,22 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             f"auth_endpoint={auth_endpoint} client_id={client_id} redirect_uri={redirect_uri} "
             f"code_challenge={code_challenge} state={state} url={auth_url}"
         )
-        try:
-            import webbrowser
-            webbrowser.open(auth_url)
-        except Exception:
+        # Ouvert une fois le serveur de callback à l'écoute : avec une session SSO
+        # déjà ouverte, Keycloak redirige aussitôt vers le callback.
+        def _open_browser():
             try:
-                from com.sun.star.system import XSystemShellExecute
-                shell = self.ctx.getServiceManager().createInstanceWithContext(
-                    "com.sun.star.system.SystemShellExecute", self.ctx
-                )
-                if isinstance(shell, XSystemShellExecute):
-                    shell.execute(auth_url, "", 0)
-            except Exception as e:
-                log_to_file(f"Failed to open browser: {str(e)}")
+                import webbrowser
+                webbrowser.open(auth_url)
+            except Exception:
+                try:
+                    from com.sun.star.system import XSystemShellExecute
+                    shell = self.ctx.getServiceManager().createInstanceWithContext(
+                        "com.sun.star.system.SystemShellExecute", self.ctx
+                    )
+                    if isinstance(shell, XSystemShellExecute):
+                        shell.execute(auth_url, "", 0)
+                except Exception as e:
+                    log_to_file(f"Failed to open browser: {str(e)}")
 
         auth_cancel_event = threading.Event()
 
@@ -4363,10 +4379,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             auth_timeout_seconds = 60
 
         code, error = self._wait_for_auth_code(
-            redirect_uri,
+            redirect_uri, state,
             timeout_seconds=auth_timeout_seconds,
             tick=_tick,
-            cancel_event=auth_cancel_event
+            cancel_event=auth_cancel_event, on_listening=_open_browser
         )
 
         if wait_dialog:
@@ -4404,21 +4420,20 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return None
         if not code:
             log_to_file(f"Authorization code flow failed: {error}")
+            err_txt = (
+                _t("enroll.timeout_text")
+                if error == "timeout"
+                else _t("enroll.error_config_text", error=error or _t("enroll.unknown_error"))
+            )
             if wiz_dialog:
-                err_txt = (
-                    _t("enroll.timeout_text")
-                    if error == "timeout"
-                    else _t(
-                        "enroll.error_config_text",
-                        error=error or _t("enroll.unknown_error"),
-                    )
-                )
                 _wiz_show_error_and_wait(_t("enroll.failed_conn_title"), err_txt)
             elif error == "timeout":
                 self._show_message(
                     _t("msg.kc_expired_title"),
                     _t("msg.kc_expired_body", redirect_uri=redirect_uri),
                 )
+            else:
+                self._show_message(_t("enroll.failed_conn_title"), err_txt)
             return None
         log_to_file("Authorization code received, exchanging for token")
 
