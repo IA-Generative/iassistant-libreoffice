@@ -17,15 +17,17 @@ Extension LibreOffice (OXT) intégrant un assistant IA dans Writer et Calc. Se c
 # Clean install (purge cache + uninstall)
 ./scripts/00-clean-install.sh --uninstall
 
-# Deploy release (canary rollout)
+# Deploy release (immediate: every release until device-management#49 ships)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy canary --profile int
+  --config config/profiles/config.default.production.json \
+  --strategy immediate
 
-# Deploy release (immediate)
+# Deploy release (canary rollout, once device-management#49 ships)
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy immediate --profile prod
+  --config config/profiles/config.default.integration.json \
+  --strategy canary
 
 # Check campaign progress
 curl -s -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
@@ -45,11 +47,11 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 
 ## Architecture
 
-> ⚠️ Branche `exp-jetable/demonstrateur-v2` : démonstrateur jetable —
-> le cœur est réécrit en moteur MCP interne + palette universelle DSFR.
-> Voir **docs/ARCHITECTURE.md** (carte des couches, tools, règles, checklist
-> « ajouter un tool »). La coquille (enrollment/SSO/DM/update/télémétrie)
-> reste dans entrypoint.py, inchangée.
+> Le cœur est un moteur MCP interne + une palette universelle DSFR : voir
+> **docs/ARCHITECTURE.md** (carte des couches, tools, règles, checklist
+> « ajouter un tool »). La coquille (enrollment/SSO/DM/update/télémétrie) est
+> extraite progressivement d'entrypoint.py : voir
+> **docs/adr/0001-refacto-strangler.md**.
 
 - `src/mirai/entrypoint.py` — Coquille (MainJob) + dispatch `OpenAssistant`
 - `src/mirai/shell/` — Modules extraits de la coquille ; UNO importé en tête,
@@ -58,8 +60,8 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
   client LLM double-mode (natif/JSON), sinks, presets, conversation, façade
   (`shell_facade.py` — seul pont vers MainJob, duck-typé, jamais d'import)
 - `src/mirai/ui/` — Palette universelle (dsfr.py tokens + palette.py)
-- `src/mirai/menu_actions/` — legacy, encore présent (suppression prévue après
-  validation du démonstrateur)
+- `src/mirai/menu_actions/` — legacy, encore présent (suppression décidée,
+  voir l'ADR 0001)
 - `oxt/Addons.xcu` — menu « 🤖 MIrAI » : entrée « 🤖 Ouvrir l'assistant »
   (+ Paramètres, Tester le modèle, Documentation, À propos) et bouton de barre ; raccourci
   Ctrl+Alt+Espace (macOS : Ctrl+Opt+Espace) — jamais Ctrl+Shift+Espace
@@ -67,15 +69,22 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 
 ## Key constraints
 
+- **La coquille ne grossit plus** : une PR fonctionnelle qui touche une zone
+  d'`entrypoint.py` en extrait ce qu'elle ajoute ; une PR fait un déplacement ou
+  une correction, jamais les deux. Bornes testées dans `tests/unit/rules/`
+  (`test_shell_budget.py`, `test_test_surface.py`), qui ne font que baisser.
 - **Threading**: le run vit dans un thread worker ; tout accès UNO (document,
   contrôles, undo, tools) repasse par `MainThreadDispatcher` (`core/ui_thread.py`).
-  `processEventsToIdle` est **interdit dans `core/` et `ui/`** — règle testée
-  (`test_core_and_ui_never_pump_events`). Dans la coquille legacy, ne jamais
-  l'appeler depuis un thread de fond (crash LibreOffice).
+  `processEventsToIdle` est **interdit hors d'`entrypoint.pump_events`**, qui ne
+  pompe que sur le thread principal (depuis un thread de fond, LibreOffice
+  plante) — règles testées dans `tests/unit/rules/`.
+- **Formules Calc** : tout ce que l'assistant écrit dans une cellule passe par
+  `calc_tools.safe_set_string` ou `calc_functions.formula_refusal` (ni réseau, ni
+  fichier) — voir docs/ARCHITECTURE.md, règle 6.
 - **No pip**: Only `urllib.request` — no external Python packages in the plugin
 - **UNO API**: All UI via `com.sun.star.awt.*` dialogs
 - **Config profiles**: `dev`, `int`, `prod` (not `integration` — device-management rejects it)
-- **core/ui n'importent jamais entrypoint** (règle testée : `tests/unit/core/test_no_entrypoint_import.py`)
+- **core/ui n'importent jamais entrypoint** (règle testée : `tests/unit/rules/test_no_entrypoint_import.py`)
 - **macOS dev** : si `unopkg` échoue en SIGKILL « Launch Constraint Violation », re-signer ad hoc les binaires auxiliaires de LibreOffice.app (voir docs/ARCHITECTURE.md §Environnement) — à refaire après chaque mise à jour de LO
 
 ## Device Management (sibling repo)

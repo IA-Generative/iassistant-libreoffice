@@ -1,14 +1,14 @@
-# Architecture — Démonstrateur « moteur MCP interne + palette universelle »
+# Architecture — moteur MCP interne + palette universelle
 
-> ⚠️ Branche `exp-jetable/demonstrateur-v2` — **expérimentation jetable**,
-> ne pas merger vers master. Ce document est la carte pour qu'un humain **et**
-> un assistant de codage puissent reprendre le code sans archéologie.
+> Ce document est la carte pour qu'un humain **et** un assistant de codage
+> puissent reprendre le code sans archéologie. La refacto de la coquille suit
+> [l'ADR 0001](adr/0001-refacto-strangler.md).
 
 ## Vue en couches
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ COQUILLE (inchangée) — src/mirai/entrypoint.py (MainJob)   │
+│ COQUILLE — src/mirai/entrypoint.py (MainJob) + shell/      │
 │ enrollment · Keycloak/SSO · device management · auto-update│
 │ télémétrie · proxy/_urlopen · SSL · config bootstrap       │
 └────────────┬───────────────────────────────────────────────┘
@@ -28,6 +28,8 @@
 
 ## Règles non négociables
 
+Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
+
 1. **Threading — modèle worker + dispatcher**.
    Le run **entier** vit dans un thread worker ; le thread principal retourne
    immédiatement à la boucle d'événements de LibreOffice, qui reste utilisable
@@ -37,10 +39,16 @@
    - `post(fn)` pour l'affichage (sans attendre) ;
    - `call(fn, timeout)` pour lire ou modifier le document (rend le résultat).
 
-   **Plus aucun `processEventsToIdle` dans `core/` ni `ui/`** — vérifié par
-   `test_core_and_ui_never_pump_events` (analyse AST, pas du texte). La classe
-   de gel (et l'abort `std::terminate` dans `DispatchUserEvents`) devient
-   impossible par construction, au lieu d'être évitée par vigilance.
+   **Plus aucun `processEventsToIdle` hors d'`entrypoint.pump_events`**, qui ne
+   pompe que sur le thread principal : ni `core/`, ni `ui/`, ni les modules
+   communs, ni `shell/`, ni l'add-in — vérifié par analyse AST, pas du texte
+   (`tests/unit/rules/`). La classe de gel (et l'abort `std::terminate` dans
+   `DispatchUserEvents`) devient impossible par construction, au lieu d'être
+   évitée par vigilance.
+
+   Un import UNO paresseux échoue hors du thread principal : les modules de
+   `shell/` importent UNO en tête, et entrypoint les importe à son chargement
+   (testé).
 
    Corollaires :
    - **La reprise d'authentification après 401 fait du réseau bloquant** : elle
@@ -74,13 +82,20 @@
      par messages asynchrones a besoin d'un tel filet.
 2. **Zéro import de la coquille** dans `core/` et `ui/` — la façade
    `shell_facade.MainJobShell` duck-type l'objet MainJob. Règle exécutable :
-   `tests/unit/core/test_no_entrypoint_import.py`.
+   `tests/unit/rules/test_no_entrypoint_import.py`.
 3. **Pas de pip** : stdlib uniquement (validateur JSON-schema = sous-ensemble
    maison documenté dans `core/tool_calls.py`).
 4. **Jamais de contenu documentaire en télémétrie** — uniquement compteurs,
    statuts, durées, noms de tools.
 5. **Marianne jamais embarquée** (licence État) — sonde runtime dans
    `ui/dsfr.py` (Marianne → Arial → Liberation Sans).
+6. **Aucune formule écrite par l'assistant n'atteint le réseau ni un fichier.**
+   Avant tout `setFormula`, `calc_functions.formula_refusal` n'accepte que les
+   fonctions connues de Calc (`calc_function_names.py`) moins `WEBSERVICE`,
+   `FILTERXML`, `INDIRECT`, `HYPERLINK` et `DDE`, et refuse références
+   externes, chemins UNC et URL. Tout texte écrit dans une cellule passe par
+   `calc_tools.safe_set_string`, qui applique la même garde à ce qui commence
+   par `=`, `+`, `-` ou `@`. Tests : `tests/unit/core/test_formula_guard.py`.
 
 ## Les tools (miroir MCP interne)
 
@@ -235,7 +250,8 @@ comme « la demande porte sur le document entier ».
 > seconde ? Répondre « non » à l'une des trois donne un assistant qui commente
 > au lieu d'agir.
 
-1. Handler `def mon_tool(ctx, args) -> ToolResult` dans `core/tools/…`.
+1. Handler `def mon_tool(ctx, args) -> ToolResult` dans `core/tools/…`. Un tool
+   Calc écrit par `safe_set_string` ou après `formula_refusal` (règle 6).
 2. `registry.register(ToolSpec(name="app_mon_tool", description=…, parameters=
    {schema}, handler=…, apps=(…), mutates=bool))` dans `register()`.
 3. Libellé FR dans `ui/palette.py:TOOL_LABELS` (journal d'actions).
@@ -257,7 +273,10 @@ Golden iso-fonctionnels : `test_presets_writer.py` / `test_presets_calc.py`
 rejouent chaque fonction historique via le moteur (FakeShell + SSE scripté +
 faux documents à état réel).
 
-## De démonstrateur à produit (dette nommée, si on poursuit)
+## Dette nommée
+
+La refacto de la coquille et les suppressions décidées sont suivies par
+[l'ADR 0001](adr/0001-refacto-strangler.md) et le ticket #98.
 
 1. Supprimer le cœur legacy d'entrypoint.py + `menu_actions/` (commit de pure
    suppression, une fois la validation utilisateur passée) puis, une release
@@ -265,7 +284,7 @@ faux documents à état réel).
 2. Unifier `=PROMPT()` (`calc_prompt_function.py`) sur la façade (≈150 lignes
    dupliquées de la coquille, sans Keycloak ni relais).
 3. `ui_ask_user` (questions de clarification interactives dans la palette).
-4. i18n ; multi-conversations + recherche ; sidebar historique ;
+4. Multi-conversations + recherche ; sidebar historique ;
    permissions par tool ; rafraîchir les chips quand l'app change sous une
    palette ouverte.
 
