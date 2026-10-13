@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter
 from unittest.mock import MagicMock
 
 import pytest
@@ -159,6 +160,14 @@ def test_catalog_has_no_obvious_placeholder_typo():
         reference = set(re.findall(r"\{(\w+)\}", entry[i18n.DEFAULT_LOCALE]))
         for code, value in entry.items():
             assert set(re.findall(r"\{(\w+)\}", value)) == reference, (key, code)
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_locale_file_declares_each_key_once(code):
+    # json.load garde la derniere valeur d'une cle repetee, sans erreur.
+    pairs = json.loads(_read(f"src/mirai/locales/{code}.json"), object_pairs_hook=list)
+    counts = Counter(key for key, _text in pairs)
+    assert sorted(key for key, count in counts.items() if count > 1) == []
 
 
 # ---------------------------------------------------------------------------
