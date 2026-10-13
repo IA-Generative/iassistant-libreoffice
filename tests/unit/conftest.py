@@ -15,6 +15,12 @@ import time
 
 import pytest
 
+from tests.stubs.uno_stubs import install
+
+# Avant toute collecte : un test lancé seul importe la coquille ou la palette
+# sans qu'un autre module ait posé les stubs UNO.
+install()
+
 # Racine du repo (deux niveaux au-dessus de tests/unit/).
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
