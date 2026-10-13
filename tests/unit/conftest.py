@@ -83,14 +83,17 @@ def _pin_locale():
 
 class _FastClock:
     """Module `time` vu par la coquille : `sleep` rend la main tout de suite et
-    note la durée demandée."""
+    avance d'autant `time()`, pour que les boucles à échéance se terminent."""
 
     def __init__(self):
-        self.waits = []
+        self._elapsed = 0.0
 
     def sleep(self, seconds):
-        self.waits.append(seconds)
+        self._elapsed += seconds
         time.sleep(0)
+
+    def time(self):
+        return time.time() + self._elapsed
 
     def __getattr__(self, name):
         return getattr(time, name)

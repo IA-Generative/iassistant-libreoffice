@@ -6,7 +6,7 @@ Run with:
     pytest tests/unit/test_update_features.py -v --tb=short
 """
 import hashlib
-import time
+import threading
 from unittest.mock import MagicMock
 
 # ── Stubs must be installed before importing entrypoint ──────────────
@@ -121,9 +121,11 @@ def test_lo08_update_not_retriggered_if_in_progress():
         called.append(directive)
 
     job._perform_update = fake_perform
+    before = set(threading.enumerate())
     job._schedule_update(_make_update_directive())
+    for thread in set(threading.enumerate()) - before:
+        thread.join(5)
 
-    time.sleep(0.1)
     assert called == [], "perform_update should not be called when already in progress"
 
 

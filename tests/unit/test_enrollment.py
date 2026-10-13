@@ -40,10 +40,18 @@ def _enrolled(**extra):
 _REAL_TIMER = threading.Timer
 
 
-def _fast_timer(delay, fn):
-    t = _REAL_TIMER(0.01, fn)
-    t.daemon = True
-    return t
+def _schedule_and_join(job):
+    """Planifie la vérification d'enrôlement et attend son Timer, sans délai."""
+    timers = []
+
+    def immediate_timer(_delay, fn):
+        timers.append(_REAL_TIMER(0, fn))
+        return timers[-1]
+
+    with patch('threading.Timer', side_effect=immediate_timer):
+        job._schedule_enrollment_check()
+    for timer in timers:
+        timer.join(5)
 
 
 class _EnrollmentCase(unittest.TestCase):
@@ -171,12 +179,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
 
         with patch.object(self.job, '_run_first_enrollment', return_value=True) as mock_enroll:
-            # Use a very short timer for testing
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            # Wait for the timer to fire
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
             mock_enroll.assert_called_once()
 
     def test_timer_skips_when_already_enrolled(self):
@@ -184,10 +187,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         seed_user_config(self.config_dir, _enrolled())
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
             mock_enroll.assert_not_called()
 
     def test_timer_skips_when_dismissed(self):
@@ -196,10 +196,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         MainJob._enrollment_dismissed_cls = True
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
             mock_enroll.assert_not_called()
 
     def test_timer_sets_dismissed_on_cancel(self):
@@ -207,10 +204,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
 
         with patch.object(self.job, '_run_first_enrollment', return_value=False):
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
 
         self.assertTrue(MainJob._enrollment_dismissed_cls)
 
