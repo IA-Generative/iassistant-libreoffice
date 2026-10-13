@@ -1,7 +1,8 @@
 """Le catalogue de traduction est complet, coherent et effectivement branche.
 
 L'extension parle cinq langues (fr source, en, es, pt, zh) sans dependance
-externe : `src/mirai/i18n.py` porte le catalogue et la resolution de langue.
+externe : le catalogue vit dans `src/mirai/locales/<langue>.json`, la
+resolution de langue dans `src/mirai/i18n.py`.
 Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 
 1. aucune cle n'est partiellement traduite (parite des cinq locales) ;
