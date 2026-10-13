@@ -588,8 +588,10 @@ def _render_callback_page():
 
 
 class MainJob(unohelper.Base, XJobExecutor, XJob):
-    # Tâches de fond que __init__ lance à chaque instanciation, dans cet ordre.
+    # Méthodes par lesquelles __init__ lance un thread ou un timer ; la relance
+    # de /config part d'un getter (_ensure_extension_uuid → get_config).
     STARTUP_TASKS = (
+        "_schedule_config_refresh",
         "_warmup_secure_flow_async",
         "_send_telemetry",
         "_ensure_device_management_state_async",

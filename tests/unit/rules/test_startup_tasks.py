@@ -1,13 +1,24 @@
-"""Tâches de démarrage déclarées : celles que `MainJob.__init__` lance en fond
-sont exactement `MainJob.STARTUP_TASKS`, dans cet ordre.
+"""Tâches de démarrage déclarées : `MainJob.STARTUP_TASKS` nomme les méthodes
+par lesquelles `MainJob.__init__` lance un thread ou un timer.
 
 `make_job` désarme les tâches par cette liste : une tâche lancée par
-`__init__` sans y figurer tournerait en fond pendant les tests.
+`__init__` sans y figurer tournerait en fond pendant les tests. La lecture du
+source ne suit que deux niveaux d'appel ; la construction par `make_job`,
+Device Management actif, couvre les chemins plus profonds.
 """
 
 import ast
 import functools
 import os
+import threading
+
+import pytest
+
+from tests.stubs.uno_stubs import install, make_job, seed_user_config
+
+install()
+
+from src.mirai.entrypoint import MainJob
 
 _ENTRYPOINT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "src", "mirai", "entrypoint.py"))
@@ -66,13 +77,24 @@ def _launched_by_init():
     return launched
 
 
-def _declared():
-    for node in _mainjob().body:
-        if (isinstance(node, ast.Assign)
-                and any(getattr(target, "id", None) == "STARTUP_TASKS" for target in node.targets)):
-            return list(ast.literal_eval(node.value))
-    raise AssertionError("MainJob.STARTUP_TASKS absent")
+def _started_by_make_job(monkeypatch, tmp_path, disarmed):
+    seed_user_config(str(tmp_path), {"enabled": True, "bootstrap_url": "https://dm.invalid"})
+    monkeypatch.setattr(MainJob, "STARTUP_TASKS", disarmed)
+    started = []
+    monkeypatch.setattr(threading.Thread, "start", lambda thread: started.append(thread))
+    make_job(config_dir=str(tmp_path))
+    return started
 
 
-def test_init_launches_exactly_the_declared_startup_tasks():
-    assert _launched_by_init() == _declared()
+def test_every_launcher_read_in_the_source_is_declared():
+    assert set(_launched_by_init()) <= set(MainJob.STARTUP_TASKS)
+
+
+def test_make_job_starts_nothing(monkeypatch, tmp_path):
+    assert _started_by_make_job(monkeypatch, tmp_path, MainJob.STARTUP_TASKS) == []
+
+
+@pytest.mark.parametrize("task", MainJob.STARTUP_TASKS)
+def test_each_declared_task_starts_something(monkeypatch, tmp_path, task):
+    disarmed = tuple(name for name in MainJob.STARTUP_TASKS if name != task)
+    assert _started_by_make_job(monkeypatch, tmp_path, disarmed) != []

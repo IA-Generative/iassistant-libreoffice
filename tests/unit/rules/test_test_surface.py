@@ -50,12 +50,13 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_update_features.py": 15,
 }
 
-MAKE_JOB_FILES_BUDGET = 30
-# make_job est interdit dans ces dossiers, sauf pour ces fichiers : la façade
-# et le routage ne se testent qu'avec un MainJob.
+MAKE_JOB_FILES_BUDGET = 31
+# make_job est interdit dans ces dossiers, sauf pour ces fichiers : la façade,
+# le routage et le démarrage inerte ne se testent qu'avec un MainJob.
 MAKE_JOB_FORBIDDEN_IN = ("tests/unit/core/", "tests/unit/rules/")
 MAKE_JOB_ALLOWED = {"tests/unit/core/test_shell_facade.py",
-                    "tests/unit/rules/test_dispatch_routes.py"}
+                    "tests/unit/rules/test_dispatch_routes.py",
+                    "tests/unit/rules/test_startup_tasks.py"}
 
 
 @functools.cache

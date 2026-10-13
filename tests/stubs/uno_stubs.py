@@ -140,14 +140,12 @@ def make_job(config_dir=None, ui_locale="fr"):
     # neutraliser après coup laisse la course ouverte : selon la
     # charge, l'un d'eux écrase la valeur que le test vient d'écrire, et l'échec
     # se déplace d'un test à l'autre. Elles sont donc masquées sur l'instance le
-    # temps de la construction, avec la relance de config qu'un getter
-    # déclenche pendant `__init__`.
-    inert = MainJob.STARTUP_TASKS + ("_schedule_config_refresh",)
+    # temps de la construction.
     job = MainJob.__new__(MainJob)
-    for name in inert:
+    for name in MainJob.STARTUP_TASKS:
         setattr(job, name, lambda *a, **k: None)
     job.__init__(ctx)
-    for name in inert:
+    for name in MainJob.STARTUP_TASKS:
         delattr(job, name)
 
     deadline = time.time() + 2.0
