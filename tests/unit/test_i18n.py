@@ -1,7 +1,8 @@
 """Le catalogue de traduction est complet, coherent et effectivement branche.
 
 L'extension parle cinq langues (fr source, en, es, pt, zh) sans dependance
-externe : `src/mirai/i18n.py` porte le catalogue et la resolution de langue.
+externe : le catalogue vit dans `src/mirai/locales/<langue>.json`, la
+resolution de langue dans `src/mirai/i18n.py`.
 Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 
 1. aucune cle n'est partiellement traduite (parite des cinq locales) ;
@@ -15,8 +16,10 @@ Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 import json
 import logging
 import os
+import pathlib
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,19 +39,10 @@ from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_LOCALE_DEPENDENT_FILES = (
-    "src/mirai/entrypoint.py",
-    "src/mirai/menu_actions/calc.py",
-    "src/mirai/core/presets.py",
-    "src/mirai/core/suggestions.py",
-    "src/mirai/core/selection_info.py",
-    "src/mirai/core/progress.py",
-    "src/mirai/core/orchestrator.py",
-    "src/mirai/core/doc_analysis.py",
-    "src/mirai/core/entry.py",
-    "src/mirai/core/capabilities.py",
-    "src/mirai/core/clickable.py",
-    "src/mirai/ui/palette.py",
+_LOCALE_DEPENDENT_FILES = sorted(
+    path.relative_to(_REPO_ROOT).as_posix()
+    for path in pathlib.Path(_REPO_ROOT, "src", "mirai").rglob("*.py")
+    if "import t as _t" in path.read_text(encoding="utf-8")
 )
 
 _ADDON_KEYS = (
@@ -159,6 +153,14 @@ def test_catalog_has_no_obvious_placeholder_typo():
         reference = set(re.findall(r"\{(\w+)\}", entry[i18n.DEFAULT_LOCALE]))
         for code, value in entry.items():
             assert set(re.findall(r"\{(\w+)\}", value)) == reference, (key, code)
+
+
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_locale_file_declares_each_key_once(code):
+    # json.load garde la derniere valeur d'une cle repetee, sans erreur.
+    pairs = json.loads(_read(f"src/mirai/locales/{code}.json"), object_pairs_hook=list)
+    counts = Counter(key for key, _text in pairs)
+    assert sorted(key for key, count in counts.items() if count > 1) == []
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +419,7 @@ def test_addons_xcu_is_valid_xml():
 
 def test_addons_xcu_declares_every_locale():
     content = _read("oxt/Addons.xcu")
-    assert content.count("xml:lang=") == 5 * len(_ADDON_KEYS)
+    assert content.count("xml:lang=") == len(i18n.SUPPORTED) * len(_ADDON_KEYS)
     for code in i18n.SUPPORTED:
         assert f'xml:lang="{code}"' in content
 

@@ -21,6 +21,8 @@ import zipfile
 
 import pytest
 
+from src.mirai.i18n import SUPPORTED
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BUILD_SCRIPT = os.path.join(ROOT, "scripts", "02-build-oxt.sh")
 
@@ -35,7 +37,7 @@ REQUIRED_MEMBERS = [
     "dm-manifest.json",           # métadonnées Device Management
     "dm-config.json",             # template config DM
     "assets/logo.png",            # logo catalogue DM
-]
+] + [f"src/mirai/locales/{lang}.json" for lang in SUPPORTED]
 
 FORBIDDEN_SUFFIXES = (".pyc", ".DS_Store")
 # Clés autorisées dans la config embarquée d'un profil ONLINE (cf. 02-build-oxt.sh).

@@ -254,7 +254,8 @@ comme « la demande porte sur le document entier ».
    Calc écrit par `safe_set_string` ou après `formula_refusal` (règle 6).
 2. `registry.register(ToolSpec(name="app_mon_tool", description=…, parameters=
    {schema}, handler=…, apps=(…), mutates=bool))` dans `register()`.
-3. Libellé FR dans `ui/palette.py:TOOL_LABELS` (journal d'actions).
+3. Libellé du journal d'actions : une clé `tool.<nom>` dans
+   `ui/palette.py:TOOL_LABELS`, son texte dans les cinq `src/mirai/locales/*.json`.
 4. Test dans `tests/unit/core/test_tools_uno.py` (fakes `tests/stubs/fake_docs.py`).
 5. Si le tool sert un preset : câbler dans `core/presets.py` + test golden.
 
