@@ -8,7 +8,7 @@
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ COQUILLE — src/mirai/entrypoint.py (MainJob)               │
+│ COQUILLE — src/mirai/entrypoint.py (MainJob) + shell/      │
 │ enrollment · Keycloak/SSO · device management · auto-update│
 │ télémétrie · proxy/_urlopen · SSL · config bootstrap       │
 └────────────┬───────────────────────────────────────────────┘
@@ -28,6 +28,8 @@
 
 ## Règles non négociables
 
+Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
+
 1. **Threading — modèle worker + dispatcher**.
    Le run **entier** vit dans un thread worker ; le thread principal retourne
    immédiatement à la boucle d'événements de LibreOffice, qui reste utilisable
@@ -37,10 +39,16 @@
    - `post(fn)` pour l'affichage (sans attendre) ;
    - `call(fn, timeout)` pour lire ou modifier le document (rend le résultat).
 
-   **Plus aucun `processEventsToIdle` dans `core/` ni `ui/`** — vérifié par
-   `test_core_and_ui_never_pump_events` (analyse AST, pas du texte). La classe
-   de gel (et l'abort `std::terminate` dans `DispatchUserEvents`) devient
-   impossible par construction, au lieu d'être évitée par vigilance.
+   **Plus aucun `processEventsToIdle` hors d'`entrypoint.pump_events`**, qui ne
+   pompe que sur le thread principal : ni `core/`, ni `ui/`, ni les modules
+   communs, ni `shell/`, ni l'add-in — vérifié par analyse AST, pas du texte
+   (`tests/unit/rules/`). La classe de gel (et l'abort `std::terminate` dans
+   `DispatchUserEvents`) devient impossible par construction, au lieu d'être
+   évitée par vigilance.
+
+   Un import UNO paresseux échoue hors du thread principal : les modules de
+   `shell/` importent UNO en tête, et entrypoint les importe à son chargement
+   (testé).
 
    Corollaires :
    - **La reprise d'authentification après 401 fait du réseau bloquant** : elle
@@ -81,6 +89,13 @@
    statuts, durées, noms de tools.
 5. **Marianne jamais embarquée** (licence État) — sonde runtime dans
    `ui/dsfr.py` (Marianne → Arial → Liberation Sans).
+6. **Aucune formule écrite par l'assistant n'atteint le réseau ni un fichier.**
+   Avant tout `setFormula`, `calc_functions.formula_refusal` n'accepte que les
+   fonctions connues de Calc (`calc_function_names.py`) moins `WEBSERVICE`,
+   `FILTERXML`, `INDIRECT`, `HYPERLINK` et `DDE`, et refuse références
+   externes, chemins UNC et URL. Tout texte écrit dans une cellule passe par
+   `calc_tools.safe_set_string`, qui applique la même garde à ce qui commence
+   par `=`, `+`, `-` ou `@`. Tests : `tests/unit/core/test_formula_guard.py`.
 
 ## Les tools (miroir MCP interne)
 
@@ -235,7 +250,8 @@ comme « la demande porte sur le document entier ».
 > seconde ? Répondre « non » à l'une des trois donne un assistant qui commente
 > au lieu d'agir.
 
-1. Handler `def mon_tool(ctx, args) -> ToolResult` dans `core/tools/…`.
+1. Handler `def mon_tool(ctx, args) -> ToolResult` dans `core/tools/…`. Un tool
+   Calc écrit par `safe_set_string` ou après `formula_refusal` (règle 6).
 2. `registry.register(ToolSpec(name="app_mon_tool", description=…, parameters=
    {schema}, handler=…, apps=(…), mutates=bool))` dans `register()`.
 3. Libellé FR dans `ui/palette.py:TOOL_LABELS` (journal d'actions).

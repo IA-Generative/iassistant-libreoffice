@@ -73,9 +73,12 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
   (`test_shell_budget.py`, `test_test_surface.py`), qui ne font que baisser.
 - **Threading**: le run vit dans un thread worker ; tout accès UNO (document,
   contrôles, undo, tools) repasse par `MainThreadDispatcher` (`core/ui_thread.py`).
-  `processEventsToIdle` est **interdit dans `core/` et `ui/`** — règle testée
-  (`test_core_and_ui_never_pump_events`). Dans la coquille legacy, ne jamais
-  l'appeler depuis un thread de fond (crash LibreOffice).
+  `processEventsToIdle` est **interdit hors d'`entrypoint.pump_events`**, qui ne
+  pompe que sur le thread principal (depuis un thread de fond, LibreOffice
+  plante) — règles testées dans `tests/unit/rules/`.
+- **Formules Calc** : tout ce que l'assistant écrit dans une cellule passe par
+  `calc_tools.safe_set_string` ou `calc_functions.formula_refusal` (ni réseau, ni
+  fichier) — voir docs/ARCHITECTURE.md, règle 6.
 - **No pip**: Only `urllib.request` — no external Python packages in the plugin
 - **UNO API**: All UI via `com.sun.star.awt.*` dialogs
 - **Config profiles**: `dev`, `int`, `prod` (not `integration` — device-management rejects it)
