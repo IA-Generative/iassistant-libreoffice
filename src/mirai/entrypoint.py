@@ -4415,21 +4415,20 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return None
         if not code:
             log_to_file(f"Authorization code flow failed: {error}")
+            err_txt = (
+                _t("enroll.timeout_text")
+                if error == "timeout"
+                else _t("enroll.error_config_text", error=error or _t("enroll.unknown_error"))
+            )
             if wiz_dialog:
-                err_txt = (
-                    _t("enroll.timeout_text")
-                    if error == "timeout"
-                    else _t(
-                        "enroll.error_config_text",
-                        error=error or _t("enroll.unknown_error"),
-                    )
-                )
                 _wiz_show_error_and_wait(_t("enroll.failed_conn_title"), err_txt)
             elif error == "timeout":
                 self._show_message(
                     _t("msg.kc_expired_title"),
                     _t("msg.kc_expired_body", redirect_uri=redirect_uri),
                 )
+            else:
+                self._show_message(_t("enroll.failed_conn_title"), err_txt)
             return None
         log_to_file("Authorization code received, exchanging for token")
 

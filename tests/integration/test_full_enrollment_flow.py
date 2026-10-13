@@ -51,10 +51,11 @@ def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
 _STATE_OF_THE_URL = object()
 
 
-def _send_callback(auth_url, code="FAKE_AUTH_CODE", state=_STATE_OF_THE_URL):
-    """Envoie tout de suite le callback au serveur local et rend le statut HTTP."""
+def _send_callback(auth_url, state=_STATE_OF_THE_URL, **query):
+    """Envoie tout de suite le callback (par défaut le bon code) au serveur local
+    et rend le statut HTTP."""
     params = urllib.parse.parse_qs(urllib.parse.urlparse(auth_url).query)
-    query = {"code": code}
+    query = query or {"code": "FAKE_AUTH_CODE"}
     if state is _STATE_OF_THE_URL:
         state = params["state"][0]
     if state is not None:
@@ -291,9 +292,10 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         with self._patch_urlopen(), \
              self._patch_confirm(True), \
              self._patch_enrollment_wizard(True), \
-             self._patch_show_message(), \
+             self._patch_show_message() as shown, \
              patch("webbrowser.open", side_effect=browser):
             self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+        return shown
 
     def _exchanged_codes(self):
         return [urllib.parse.parse_qs(call["data"].decode())["code"][0]
@@ -335,6 +337,14 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
         self._run_pkce_flow(browser)
         self.assertEqual(reached, [False])
+
+    def test_02e_relogin_failure_is_shown(self):
+        """Poste déjà enrôlé : la reconnexion passe sans wizard, son échec
+        s'affiche quand même."""
+        self.job.set_config("enrolled", True)
+        shown = self._run_pkce_flow(lambda url: _send_callback(url, error="access_denied"))
+        shown.assert_called_once()
+        self.assertIn("access_denied", shown.call_args.args[1])
 
     # Steps 5 + 6: Device Management enrollment
 
