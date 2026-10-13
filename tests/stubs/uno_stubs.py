@@ -104,18 +104,6 @@ def install():
     })
 
 
-_STARTUP_LAUNCHERS = (
-    "_schedule_config_refresh",
-    "_warmup_secure_flow_async",
-    "_send_telemetry",
-    "_ensure_device_management_state_async",
-    "_schedule_update_reconciliation",
-    "_schedule_native_feed_check",
-    "_schedule_feed_rewrite",
-    "_schedule_enrollment_check",
-)
-
-
 def make_job(config_dir=None, ui_locale="fr"):
     """
     Instantiate MainJob with a fully mocked UNO context.
@@ -151,16 +139,16 @@ def make_job(config_dir=None, ui_locale="fr"):
     # mirai/settings.json (et l'instantané DM mirai/dm_snapshot.json). Les
     # neutraliser après coup laisse la course ouverte : selon la
     # charge, l'un d'eux écrase la valeur que le test vient d'écrire, et l'échec
-    # se déplace d'un test à l'autre. On patche donc la CLASSE le temps de
-    # l'instanciation, puis on la restaure pour ne rien laisser fuir.
-    originals = {name: getattr(MainJob, name) for name in _STARTUP_LAUNCHERS}
-    for name in originals:
-        setattr(MainJob, name, lambda self, *a, **k: None)
-    try:
-        job = MainJob(ctx)
-    finally:
-        for name, method in originals.items():
-            setattr(MainJob, name, method)
+    # se déplace d'un test à l'autre. Elles sont donc masquées sur l'instance le
+    # temps de la construction, avec la relance de config qu'un getter
+    # déclenche pendant `__init__`.
+    inert = MainJob.STARTUP_TASKS + ("_schedule_config_refresh",)
+    job = MainJob.__new__(MainJob)
+    for name in inert:
+        setattr(job, name, lambda *a, **k: None)
+    job.__init__(ctx)
+    for name in inert:
+        delattr(job, name)
 
     deadline = time.time() + 2.0
     while getattr(job, "_fetching_config", False) and time.time() < deadline:

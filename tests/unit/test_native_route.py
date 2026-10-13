@@ -20,6 +20,7 @@ install()
 
 from src.mirai import entrypoint
 from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 TARGET = "0.0.1.0.32"
 CURRENT = "0.0.1.0.31"
@@ -718,7 +719,7 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     """addExtension encore en vol sur le thread principal : ni rapport failed, ni
     bannissement de la cible, ni boîte « mise à jour bloquée » — l'étape
     installed_inprocess laisse la réconciliation trancher au redémarrage."""
-    MainJob._update_launch_blocked_cls.discard(TARGET)
+    shell_runtime.get().update_launch_blocked.discard(TARGET)
     job = _accepting_job()
     job._notify_update_blocked = MagicMock()
 
@@ -732,7 +733,7 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     assert _state(job)["stage"] == "installed_inprocess"
     job._notify_update_blocked.assert_not_called()
     assert not [c for c in job._report_update_status.call_args_list if c.args[1] == "failed"]
-    assert TARGET not in MainJob._update_launch_blocked_cls
+    assert TARGET not in shell_runtime.get().update_launch_blocked
     assert "UpdateInstallFailed" not in _events(job)
 
 
@@ -816,16 +817,16 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
     monkeypatch.setattr(entrypoint, "_PROMPT_WIZARD_WAIT_SECONDS", 5)
     monkeypatch.setattr(entrypoint, "_PROMPT_POLL_SECONDS", 0.02)
     job = _job()
-    previous = MainJob._enrollment_wizard_active_cls
-    MainJob._enrollment_wizard_active_cls = False
+    previous = shell_runtime.get().enrollment_wizard_active
+    shell_runtime.get().enrollment_wizard_active = False
 
     def _open_then_close():
         time.sleep(0.05)
-        with MainJob._enrollment_wizard_lock_cls:
-            MainJob._enrollment_wizard_active_cls = True
+        with shell_runtime.get().enrollment_wizard_lock:
+            shell_runtime.get().enrollment_wizard_active = True
         time.sleep(0.25)
-        with MainJob._enrollment_wizard_lock_cls:
-            MainJob._enrollment_wizard_active_cls = False
+        with shell_runtime.get().enrollment_wizard_lock:
+            shell_runtime.get().enrollment_wizard_active = False
 
     wizard = threading.Thread(target=_open_then_close, daemon=True)
     wizard.start()
@@ -833,10 +834,10 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
         t0 = time.time()
         job._wait_before_prompting()
         assert time.time() - t0 >= 0.25, "doit attendre la fermeture de l'assistant ouvert pendant la grâce"
-        assert MainJob._enrollment_wizard_active_cls is False
+        assert shell_runtime.get().enrollment_wizard_active is False
     finally:
         wizard.join(2)
-        MainJob._enrollment_wizard_active_cls = previous
+        shell_runtime.get().enrollment_wizard_active = previous
 
 
 def _fake_cache(versions):

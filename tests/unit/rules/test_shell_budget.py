@@ -16,9 +16,9 @@ _ENTRYPOINT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "src", "mirai", "entrypoint.py"))
 
 BUDGET = {
-    "lines": 10425,
+    "lines": 10402,
     "mainjob_methods": 166,
-    "class_state_attributes": 18,
+    "class_state_attributes": 0,
     "threads_and_timers": 22,
     "functions_over_100_lines": 23,
     "except_pass": 240,

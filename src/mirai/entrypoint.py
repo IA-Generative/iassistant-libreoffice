@@ -196,6 +196,7 @@ from .i18n import (
     get_locale as _i18n_get_locale,
     set_locale as _i18n_set_locale,
 )
+from .shell import runtime as _shell_runtime
 from .shell.ui_locale import extension_locale as _extension_locale
 from .security_flow import (
     SecureBootstrapFlow,
@@ -587,9 +588,17 @@ def _render_callback_page():
 
 
 class MainJob(unohelper.Base, XJobExecutor, XJob):
-    _uninstall_listener_cls = None
-    _self_update_in_flight_cls = False
-    _wiped_cls = False
+    # Tâches de fond que __init__ lance à chaque instanciation, dans cet ordre.
+    STARTUP_TASKS = (
+        "_warmup_secure_flow_async",
+        "_send_telemetry",
+        "_ensure_device_management_state_async",
+        "_schedule_update_reconciliation",
+        "_schedule_native_feed_check",
+        "_schedule_feed_rewrite",
+        "_schedule_enrollment_check",
+    )
+    runtime = property(lambda self: _shell_runtime.get())
     _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
     _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
     _EXTENSION_MANAGER = "/singletons/com.sun.star.deployment.ExtensionManager"
@@ -601,33 +610,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
                                "relay_key_expires_at", "refresh_token",
                                "access_token", "access_token_expires_at")
-    # Class-level flags shared across all instances to prevent duplicate wizards/updates
-    _enrollment_dismissed_cls = False
-    _enrollment_wizard_active_cls = False
-    _enrollment_wizard_lock_cls = threading.Lock()
-    _update_in_progress_cls = False
-    # Target versions whose install-script launch was blocked by the workstation
-    # policy (e.g. WinError 5 from AppLocker / Defender ASR). Recorded so we stop
-    # re-downloading / re-prompting the same update in a loop.
-    _update_launch_blocked_cls = set()
-    _update_lock_cls = threading.Lock()
-    # Réconciliation post-redémarrage de la MAJ précédente : une seule fois par
-    # process (voir _schedule_update_reconciliation / _reconcile_update_state).
-    _update_reconcile_started_cls = False
-    # Diagnostic passif du feed natif : une seule fois par process
-    # (voir _schedule_native_feed_check / _check_native_feed).
-    _feed_check_started_cls = False
-    # Réécriture de l'adresse du feed dans description.xml : planifiée une fois
-    # par process au démarrage ; verrou partagé avec les réécritures déclenchées
-    # par /config.
-    _feed_rewrite_started_cls = False
-    _feed_rewrite_lock_cls = threading.Lock()
-    # Préparation du stockage local (journal, migration, empreinte) : une fois
-    # par processus.
-    _storage_ready_cls = False
-    _storage_lock_cls = threading.Lock()
-    _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
-    _feed_rewrite_last_result_cls = None    # (résultat, version) du dernier appel
 
     def __init__(self, ctx):
         log_to_file("=== MainJob.__init__ called ===")
@@ -789,11 +771,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "ActionUnhandled": "dispatch.unhandled",
     }
 
-    # Une action non gérée signalée une fois par nom et par session : un
-    # utilisateur qui reclique sur une entrée de menu morte ne doit pas
-    # produire une rafale de traces.
-    _unhandled_reported_cls = set()
-
     # Spans émis AVANT que le poste ne soit lié à un utilisateur. Les autres
     # sont jetés tant que l'identité télémétrie n'est pas "user" — ceux-ci
     # décrivent le poste, pas la personne, et sont justement ceux dont on a
@@ -916,9 +893,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _report_unhandled_action(self, action, model):
         """Émet ActionUnhandled une fois par nom d'action et par session."""
         try:
-            if action in MainJob._unhandled_reported_cls:
+            if action in self.runtime.unhandled_reported:
                 return
-            MainJob._unhandled_reported_cls.add(action)
+            self.runtime.unhandled_reported.add(action)
             self._send_telemetry("ActionUnhandled", {
                 "action": str(action),
                 "document": type(model).__name__,
@@ -961,10 +938,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Une fois par processus : journal, migration du dossier legacy,
         secrets hors de settings.json, empreinte d'installation, écoute de
         désinstallation."""
-        with MainJob._storage_lock_cls:
-            if MainJob._storage_ready_cls:
+        with self.runtime.storage_lock:
+            if self.runtime.storage_ready:
                 return
-            MainJob._storage_ready_cls = True
+            self.runtime.storage_ready = True
         data_dir = self._data_dir()
         if data_dir:
             log_setup.install(data_dir)
@@ -979,7 +956,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 log_to_file(f"[désinstallation] écoute impossible : {exc}")
 
     def _register_uninstall_listener(self):
-        if MainJob._uninstall_listener_cls is not None:
+        if self.runtime.uninstall_listener is not None:
             return
         if MirAIUninstallListener is None:
             log_to_file("[désinstallation] écoute non branchée : XModifyListener indisponible")
@@ -991,7 +968,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return
         listener = MirAIUninstallListener(self._schedule_uninstall_check)
         manager.addModifyListener(listener)
-        MainJob._uninstall_listener_cls = listener
+        self.runtime.uninstall_listener = listener
 
     def _schedule_uninstall_check(self):
         # Différé : la base des extensions doit être stabilisée (remplacement en
@@ -1020,7 +997,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _check_uninstalled(self):
         try:
-            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
+            if self.runtime.self_update_in_flight or self.runtime.wiped:
                 return
             if self._extension_still_deployed():
                 return
@@ -1035,7 +1012,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _confirm_uninstalled(self):
         try:
-            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
+            if self.runtime.self_update_in_flight or self.runtime.wiped:
                 return
             if self._extension_still_deployed():
                 return
@@ -1044,7 +1021,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"[désinstallation] effacement impossible : {exc}")
 
     def _wipe_all_data(self, reason):
-        MainJob._wiped_cls = True
+        self.runtime.wiped = True
         log_to_file(f"[désinstallation] {reason} : effacement des données de l'extension")
         credentials.freeze()
         local_config.freeze()
@@ -1638,7 +1615,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         target_version = str(directive.get("target_version") or "").strip()
 
-        if target_version and target_version in MainJob._update_launch_blocked_cls:
+        if target_version and target_version in self.runtime.update_launch_blocked:
             log_to_file(
                 f"Update skipped: install of {target_version} was blocked by the "
                 "workstation policy earlier — manual install required, not re-prompting"
@@ -1660,11 +1637,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 )
                 return
 
-        with MainJob._update_lock_cls:
-            if MainJob._update_in_progress_cls:
+        with self.runtime.update_lock:
+            if self.runtime.update_in_progress:
                 log_to_file("Update already in progress, skipping duplicate schedule")
                 return
-            MainJob._update_in_progress_cls = True
+            self.runtime.update_in_progress = True
 
         if urgency == "deferred":
             log_to_file(f"Deferred update scheduled: target={directive.get('target_version')} — download only, install on next restart")
@@ -1695,8 +1672,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         return
                 self._perform_update(directive)
             finally:
-                with MainJob._update_lock_cls:
-                    MainJob._update_in_progress_cls = False
+                with self.runtime.update_lock:
+                    self.runtime.update_in_progress = False
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
@@ -2043,7 +2020,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 # L'install auto n'a pas abouti : anti-boucle (ne pas re-prompter
                 # ce target), rapport DM, puis message manuel (voie validée).
                 if target_version:
-                    MainJob._update_launch_blocked_cls.add(target_version)
+                    self.runtime.update_launch_blocked.add(target_version)
                 try:
                     self._report_update_status(
                         campaign_id, "failed", version_before, target_version,
@@ -2308,7 +2285,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         back to the manual-install message (ou au script si explicitement
         réactivé). UNO usage is lazy so the module imports under test stubs.
         """
-        MainJob._self_update_in_flight_cls = True
+        self.runtime.self_update_in_flight = True
         try:
             if not oxt_path or not os.path.isfile(oxt_path):
                 return False
@@ -2341,7 +2318,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
             return False
         finally:
-            MainJob._self_update_in_flight_cls = False
+            self.runtime.self_update_in_flight = False
 
     def _has_modified_documents(self):
         """Vrai si au moins un document ouvert porte des modifications non
@@ -2632,7 +2609,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         - version active == target → rapport « installed » au DM + télémétrie,
           purge de pending_update (OXT stagé, scripts, état), retrait du target
-          de l'anti-boucle _update_launch_blocked_cls ;
+          de l'anti-boucle runtime.update_launch_blocked ;
         - `at_startup` et étape installed_* dont la cible n'est pas active,
           confirmé par deux lectures espacées du registre → l'installation a
           été annulée (rollback de LibreOffice) : rapport
@@ -2682,7 +2659,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 })
             except Exception:
                 pass
-            MainJob._update_launch_blocked_cls.discard(target)
+            self.runtime.update_launch_blocked.discard(target)
             self._purge_pending_update_dir()
         elif at_startup and pending_restart and target and current:
             log_to_file(
@@ -2712,9 +2689,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _schedule_update_reconciliation(self):
         """Lance la réconciliation en fond, une fois par process (réseau possible)."""
-        if MainJob._update_reconcile_started_cls:
+        if self.runtime.update_reconcile_started:
             return
-        MainJob._update_reconcile_started_cls = True
+        self.runtime.update_reconcile_started = True
 
         def _safe_reconcile():
             try:
@@ -2810,8 +2787,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _wait_wizard_closed(self, deadline):
         while time.time() < deadline:
-            with MainJob._enrollment_wizard_lock_cls:
-                if not MainJob._enrollment_wizard_active_cls:
+            with self.runtime.enrollment_wizard_lock:
+                if not self.runtime.enrollment_wizard_active:
                     return
             time.sleep(_PROMPT_POLL_SECONDS)
 
@@ -3000,7 +2977,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         ]
         # Seulement si la réécriture a réussi : sinon (offline, installation non
         # inscriptible) LibreOffice lit l'adresse nue, le diagnostic aussi.
-        version = str(MainJob._feed_rewrite_last_cls or "").strip()
+        version = str(self.runtime.feed_rewrite_last or "").strip()
         return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
 
     # Réécriture de l'adresse du feed natif : le DM ne sert sur l'adresse nue que
@@ -3050,16 +3027,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file("_rewrite_feed_url: description.xml introuvable")
             return feed_rewrite.ERROR
         path = os.path.join(root, "description.xml")
-        with MainJob._feed_rewrite_lock_cls:
-            if unless_already_set and MainJob._feed_rewrite_last_result_cls is not None:
+        with self.runtime.feed_rewrite_lock:
+            if unless_already_set and self.runtime.feed_rewrite_last_result is not None:
                 return None
             result, detail = feed_rewrite.rewrite_description_file(path, version)
             # Journal et télémétrie une fois par changement d'état, pas à chaque
             # lecture de /config.
-            changed = (result, version) != MainJob._feed_rewrite_last_result_cls
-            MainJob._feed_rewrite_last_result_cls = (result, version)
+            changed = (result, version) != self.runtime.feed_rewrite_last_result
+            self.runtime.feed_rewrite_last_result = (result, version)
             if result in (feed_rewrite.WRITTEN, feed_rewrite.UNCHANGED):
-                MainJob._feed_rewrite_last_cls = version
+                self.runtime.feed_rewrite_last = version
         if changed and result != feed_rewrite.UNCHANGED:
             log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
             self._send_telemetry("FeedRewrite", {
@@ -3072,9 +3049,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _schedule_feed_rewrite(self):
         """Réécriture au démarrage, une fois par process, avant le diagnostic
         du feed (45 s) et avant toute directive : cible = version installée."""
-        if MainJob._feed_rewrite_started_cls:
+        if self.runtime.feed_rewrite_started:
             return
-        MainJob._feed_rewrite_started_cls = True
+        self.runtime.feed_rewrite_started = True
 
         def _safe_rewrite():
             try:
@@ -3154,9 +3131,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _schedule_native_feed_check(self):
         """Lance le diagnostic du feed en fond, une fois par process, après que
         l'enrollment/config a eu le temps de se poser (réseau via la pile de LO)."""
-        if MainJob._feed_check_started_cls:
+        if self.runtime.feed_check_started:
             return
-        MainJob._feed_check_started_cls = True
+        self.runtime.feed_check_started = True
 
         def _safe_check():
             try:
@@ -5188,25 +5165,25 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Deferred enrollment check — fires ~3s after init to let UI start."""
         def _deferred_enrollment():
             try:
-                if MainJob._enrollment_dismissed_cls:
+                if self.runtime.enrollment_dismissed:
                     return
                 if not self._needs_first_enrollment():
                     log_to_file("[ENROLL] Auto-check: already enrolled, skipping wizard")
                     return
-                with MainJob._enrollment_wizard_lock_cls:
-                    if MainJob._enrollment_wizard_active_cls:
+                with self.runtime.enrollment_wizard_lock:
+                    if self.runtime.enrollment_wizard_active:
                         log_to_file("[ENROLL] Auto-check: wizard already running, skipping")
                         return
-                    MainJob._enrollment_wizard_active_cls = True
+                    self.runtime.enrollment_wizard_active = True
                 try:
                     log_to_file("[ENROLL] Auto-check: first enrollment needed, launching wizard")
                     if not self._run_first_enrollment():
-                        MainJob._enrollment_dismissed_cls = True
+                        self.runtime.enrollment_dismissed = True
                         log_to_file("[ENROLL] Auto-check: wizard cancelled by user")
                     else:
                         log_to_file("[ENROLL] Auto-check: enrollment succeeded")
                 finally:
-                    MainJob._enrollment_wizard_active_cls = False
+                    self.runtime.enrollment_wizard_active = False
             except Exception as e:
                 log_to_file(f"[ENROLL] Auto-check failed: {str(e)}")
 
@@ -7193,9 +7170,9 @@ EDITED VERSION:
                                 # Wait for update to finish (max 60s)
                                 for _ in range(120):
                                     time.sleep(0.5)
-                                    if not MainJob._update_in_progress_cls:
+                                    if not about_self.runtime.update_in_progress:
                                         break
-                                if MainJob._update_in_progress_cls:
+                                if about_self.runtime.update_in_progress:
                                     update_status.getModel().Label = _t("about.downloading", target=target)
                                     update_status.getModel().TextColor = _UI["info"]
                                 else:
@@ -10369,18 +10346,18 @@ EDITED VERSION:
         # First-time enrollment: intercept before any action
         # Informational/navigation actions bypass enrollment check
         _enrollment_bypass = {"Documentation", "OpenmiraiWebsite", "settings", "proxy_settings", "AboutDialog"}
-        if action not in _enrollment_bypass and not MainJob._enrollment_dismissed_cls and self._needs_first_enrollment():
-            with MainJob._enrollment_wizard_lock_cls:
-                if MainJob._enrollment_wizard_active_cls:
+        if action not in _enrollment_bypass and not self.runtime.enrollment_dismissed and self._needs_first_enrollment():
+            with self.runtime.enrollment_wizard_lock:
+                if self.runtime.enrollment_wizard_active:
                     log_to_file("[ENROLL] Trigger: wizard already running, skipping")
                     return
-                MainJob._enrollment_wizard_active_cls = True
+                self.runtime.enrollment_wizard_active = True
             try:
                 if not self._run_first_enrollment():
-                    MainJob._enrollment_dismissed_cls = True
+                    self.runtime.enrollment_dismissed = True
                     return
             finally:
-                MainJob._enrollment_wizard_active_cls = False
+                self.runtime.enrollment_wizard_active = False
 
         desktop = self.ctx.ServiceManager.createInstanceWithContext(
             "com.sun.star.frame.Desktop", self.ctx)

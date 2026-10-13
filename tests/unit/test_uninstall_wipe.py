@@ -10,8 +10,8 @@ from tests.stubs.uno_stubs import install, make_job, seed_user_config
 install()
 
 from src.mirai.core.conversation import ConversationStore
-from src.mirai.entrypoint import MainJob
 from src.mirai.security_flow import FileJsonStore
+from src.mirai.shell import runtime as shell_runtime
 
 
 def _populated(tmp_path):
@@ -58,7 +58,7 @@ def test_still_deployed_means_no_wipe(tmp_path):
 def test_own_update_in_flight_means_no_wipe(tmp_path):
     job = _populated(tmp_path)
     job._extension_still_deployed = lambda: False
-    MainJob._self_update_in_flight_cls = True
+    shell_runtime.get().self_update_in_flight = True
     job._check_uninstalled()
     job._confirm_uninstalled()
     assert (tmp_path / "mirai" / "settings.json").exists()
@@ -88,14 +88,14 @@ def test_install_and_restart_marks_the_update_in_flight(tmp_path):
     seen = {}
 
     def _install(*_args):
-        seen["flag"] = MainJob._self_update_in_flight_cls
+        seen["flag"] = shell_runtime.get().self_update_in_flight
         return False
 
     job._run_install_on_main_thread = _install
     job._make_silent_command_env = MagicMock(return_value=None)
     job._install_and_restart_in_process(str(oxt))
     assert seen["flag"] is True
-    assert MainJob._self_update_in_flight_cls is False
+    assert shell_runtime.get().self_update_in_flight is False
 
 
 def _wiped_job(tmp_path):
@@ -137,7 +137,7 @@ def test_absence_must_be_confirmed_before_the_wipe(tmp_path):
     job._check_uninstalled()
     job._confirm_uninstalled()
     assert (tmp_path / "mirai" / "settings.json").exists()
-    assert MainJob._wiped_cls is False
+    assert shell_runtime.get().wiped is False
 
 
 def test_absence_on_both_checks_wipes(tmp_path):
@@ -158,7 +158,7 @@ def test_skipped_listener_registration_is_logged(tmp_path, monkeypatch):
     job.ctx.getValueByName = MagicMock(return_value=None)
     job._register_uninstall_listener()
     assert len([line for line in logged if line.startswith("[désinstallation]")]) == 2
-    assert MainJob._uninstall_listener_cls is None
+    assert shell_runtime.get().uninstall_listener is None
 
 
 def test_failure_in_the_check_is_logged_not_raised(tmp_path, monkeypatch):

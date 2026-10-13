@@ -73,6 +73,9 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
   d'`entrypoint.py` en extrait ce qu'elle ajoute ; une PR fait un déplacement ou
   une correction, jamais les deux. Bornes testées dans `tests/unit/rules/`
   (`test_shell_budget.py`, `test_test_surface.py`), qui ne font que baisser.
+  L'état partagé entre actions vit dans `shell/runtime.py` (`self.runtime`),
+  jamais en attribut de classe ; les tâches de fond de `__init__` sont
+  `MainJob.STARTUP_TASKS` (règle testée).
 - **Threading**: le run vit dans un thread worker ; tout accès UNO (document,
   contrôles, undo, tools) repasse par `MainThreadDispatcher` (`core/ui_thread.py`).
   `processEventsToIdle` est **interdit hors d'`entrypoint.pump_events`**, qui ne

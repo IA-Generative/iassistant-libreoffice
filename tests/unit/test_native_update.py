@@ -14,7 +14,7 @@ from tests.stubs.uno_stubs import install, make_job
 install()
 
 from src.mirai import entrypoint
-from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -194,7 +194,7 @@ def _job_with_state(tmp_path, state, current_version="0.0.1.0.31"):
 def test_reconcile_reports_installed_and_purges_on_version_match(tmp_path):
     """Version active == target → « installed » (véridique) rapporté au DM,
     pending_update purgé, anti-boucle levée."""
-    MainJob._update_launch_blocked_cls.add("0.0.1.0.31")
+    shell_runtime.get().update_launch_blocked.add("0.0.1.0.31")
     job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.31",
         "version_before": "0.0.1.0.30", "stage": "user_accepted",
@@ -205,7 +205,7 @@ def test_reconcile_reports_installed_and_purges_on_version_match(tmp_path):
     job._report_update_status.assert_called_once_with(
         7, "installed", "0.0.1.0.30", "0.0.1.0.31")
     assert not os.path.isdir(pend), "pending_update doit être purgé"
-    assert "0.0.1.0.31" not in MainJob._update_launch_blocked_cls
+    assert "0.0.1.0.31" not in shell_runtime.get().update_launch_blocked
 
 
 def test_reconcile_keeps_fresh_pending_state(tmp_path):

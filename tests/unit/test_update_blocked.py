@@ -13,19 +13,19 @@ from tests.stubs.uno_stubs import install, make_job
 install()
 
 from src.mirai import i18n
-from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 
 def test_schedule_update_skips_blocked_target():
     """Un target déjà marqué « bloqué » ne relance ni download ni prompt."""
     job = make_job()
     job._perform_update = MagicMock()
-    MainJob._update_launch_blocked_cls.add("0.0.1.0.14")
+    shell_runtime.get().update_launch_blocked.add("0.0.1.0.14")
 
     job._schedule_update({"action": "update", "target_version": "0.0.1.0.14"})
 
     job._perform_update.assert_not_called()
-    assert MainJob._update_in_progress_cls is False
+    assert shell_runtime.get().update_in_progress is False
 
 
 def test_schedule_update_runs_for_unblocked_target():
