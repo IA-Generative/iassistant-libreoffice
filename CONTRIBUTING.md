@@ -25,6 +25,13 @@ affichées par le Device Management ; `docs`, `refactor`, `test`, `build`, `ci`,
 Le plugin n'a aucune dépendance pip : pytest et ruff suffisent. `PYTHON` choisit
 l'interpréteur, par exemple celui d'un venv.
 
+## Traductions
+
+Les libellés vivent dans `src/mirai/locales/<langue>.json`, un fichier par
+langue (fr, en, es, pt, zh). Une clé ajoutée l'est dans les cinq fichiers :
+`tests/unit/test_i18n.py` vérifie la parité, les clés appelées par `_t(...)` et
+les libellés de menu d'`oxt/Addons.xcu`, qui restent en XML.
+
 ## La coquille ne grossit plus
 
 La refacto de `src/mirai/entrypoint.py` suit

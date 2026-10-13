@@ -35,7 +35,7 @@ REQUIRED_MEMBERS = [
     "dm-manifest.json",           # métadonnées Device Management
     "dm-config.json",             # template config DM
     "assets/logo.png",            # logo catalogue DM
-]
+] + [f"src/mirai/locales/{lang}.json" for lang in ("fr", "en", "es", "pt", "zh")]
 
 FORBIDDEN_SUFFIXES = (".pyc", ".DS_Store")
 # Clés autorisées dans la config embarquée d'un profil ONLINE (cf. 02-build-oxt.sh).
