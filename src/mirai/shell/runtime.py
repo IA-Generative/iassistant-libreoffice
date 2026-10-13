@@ -18,9 +18,8 @@ class ShellRuntime:
 
         self.update_in_progress = False
         self.update_lock = threading.Lock()
-        # Target versions whose install-script launch was blocked by the workstation
-        # policy (e.g. WinError 5 from AppLocker / Defender ASR). Recorded so we stop
-        # re-downloading / re-prompting the same update in a loop.
+        # Versions cibles dont l'installation automatique n'a pas abouti : on ne
+        # les retélécharge ni ne les repropose en boucle.
         self.update_launch_blocked = set()
         # Réconciliation de la mise à jour précédente après redémarrage : une
         # seule fois par processus.

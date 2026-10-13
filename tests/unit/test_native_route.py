@@ -719,7 +719,6 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     """addExtension encore en vol sur le thread principal : ni rapport failed, ni
     bannissement de la cible, ni boîte « mise à jour bloquée » — l'étape
     installed_inprocess laisse la réconciliation trancher au redémarrage."""
-    shell_runtime.get().update_launch_blocked.discard(TARGET)
     job = _accepting_job()
     job._notify_update_blocked = MagicMock()
 
@@ -817,8 +816,6 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
     monkeypatch.setattr(entrypoint, "_PROMPT_WIZARD_WAIT_SECONDS", 5)
     monkeypatch.setattr(entrypoint, "_PROMPT_POLL_SECONDS", 0.02)
     job = _job()
-    previous = shell_runtime.get().enrollment_wizard_active
-    shell_runtime.get().enrollment_wizard_active = False
 
     def _open_then_close():
         time.sleep(0.05)
@@ -837,7 +834,6 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
         assert shell_runtime.get().enrollment_wizard_active is False
     finally:
         wizard.join(2)
-        shell_runtime.get().enrollment_wizard_active = previous
 
 
 def _fake_cache(versions):

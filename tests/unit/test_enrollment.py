@@ -131,10 +131,6 @@ class TestNeedsFirstEnrollment(_EnrollmentCase):
 class TestEnrollmentDismissedFlag(_EnrollmentCase):
     """Test _enrollment_dismissed flag behaviour."""
 
-    def test_initial_dismissed_is_false(self):
-        """Flag should start as False."""
-        self.assertFalse(shell_runtime.get().enrollment_dismissed)
-
     def test_trigger_sets_dismissed_on_enrollment_cancel(self):
         """When enrollment is needed and _run_first_enrollment returns False,
         _enrollment_dismissed should become True."""

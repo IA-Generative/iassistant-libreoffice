@@ -245,7 +245,7 @@ def test_lo11_perform_update_releases_flag_on_exception(fast_clock):
     job._urlopen = MagicMock(side_effect=urllib.error.URLError("connection refused"))
 
     directive = _make_update_directive()
-    # _perform_update must not raise and must not leave _update_in_progress True
+    # _perform_update must not raise and must not leave update_in_progress True
     job._perform_update(directive)
     # _schedule_update sets/clears the flag; here we test perform directly
     assert shell_runtime.get().update_in_progress is False  # perform_update doesn't touch the flag itself
