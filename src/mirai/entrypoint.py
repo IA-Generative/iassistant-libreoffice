@@ -4064,7 +4064,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 parsed_path = urllib.parse.urlparse(self.path)
                 request_path = parsed_path.path or "/"
                 expected_path = path or "/"
-                log_to_file(f"PKCE callback received: path={request_path} query={parsed_path.query}")
+                log_to_file(f"PKCE callback received: path={request_path}")
                 if request_path.rstrip("/") != expected_path.rstrip("/"):
                     self.send_response(404)
                     self.end_headers()
@@ -4244,8 +4244,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         auth_url = f"{auth_endpoint}?{query}"
         log_to_file(
             "Keycloak auth URL built: "
-            f"auth_endpoint={auth_endpoint} client_id={client_id} redirect_uri={redirect_uri} "
-            f"code_challenge={code_challenge} state={state} url={auth_url}"
+            f"auth_endpoint={auth_endpoint} client_id={client_id} redirect_uri={redirect_uri}"
         )
         # Ouvert une fois le serveur de callback à l'écoute : avec une session SSO
         # déjà ouverte, Keycloak redirige aussitôt vers le callback.
@@ -4688,7 +4687,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "plugin_uuid": plugin_uuid,
             "email": email
         }
-        log_to_file(f"Device management enroll payload: device_name={device_name} plugin_uuid={plugin_uuid} email={email} has_token={bool(access_token)} endpoint={enroll_endpoint}")
+        log_to_file(f"Device management enroll payload: device_name={device_name} plugin_uuid={plugin_uuid} has_email={bool(email)} has_token={bool(access_token)} endpoint={enroll_endpoint}")
         try:
             json_data = json.dumps(enroll_payload).encode("utf-8")
             headers = {"Content-Type": "application/json"}

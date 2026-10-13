@@ -319,6 +319,22 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertEqual(statuses, [400, 400])
         self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
 
+    def test_02e_log_keeps_no_authorization_parameter(self):
+        lines = []
+        urls = []
+
+        def browser(url):
+            urls.append(url)
+            _send_callback(url)
+
+        with patch("src.mirai.entrypoint.log_to_file",
+                   side_effect=lambda line: lines.append(str(line))):
+            self._run_pkce_flow(browser)
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
+        secrets = ["FAKE_AUTH_CODE", params["state"][0], params["code_challenge"][0]]
+        self.assertTrue(any("PKCE callback received" in line for line in lines))
+        self.assertEqual([line for line in lines if any(s in line for s in secrets)], [])
+
     def test_02d_callback_server_is_not_reachable_from_the_network(self):
         address = _non_loopback_address()
         if address is None:
