@@ -37,22 +37,13 @@ install()
 # Helpers
 
 def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
-    """
-    Extract redirect_uri + state from auth_url, then send the auth callback
-    to the plugin's local HTTP server in a background thread.
-    """
-    parsed = urllib.parse.urlparse(auth_url)
-    params = urllib.parse.parse_qs(parsed.query)
-    redirect_uri = params.get("redirect_uri", ["http://localhost:19876/callback"])[0]
-    state = params.get("state", ["test-state"])[0]
-    callback_url = f"{redirect_uri}?code=FAKE_AUTH_CODE&state={urllib.parse.quote(state)}"
-
+    """Envoie le bon callback depuis un thread, une fois le flux en attente."""
     def _send():
         time.sleep(delay)
         try:
-            urllib.request.urlopen(callback_url, timeout=5)
-        except Exception:
-            pass  # plugin returns 200 OK; urllib may still raise due to response body
+            _send_callback(auth_url)
+        except OSError:
+            pass  # serveur déjà fermé : le flux a retenu un autre callback
 
     threading.Thread(target=_send, daemon=True).start()
 
@@ -86,6 +77,12 @@ def _non_loopback_address():
         except OSError:
             return None
     return None if address.startswith("127.") else address
+
+
+def _free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 # Constants
@@ -158,6 +155,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         and keycloak_allowed_redirect_uri directly from the local config file
         (via _get_config_from_file), so they must live here — not in DM config.
         """
+        redirect_uri = f"http://localhost:{_free_port()}/callback"
         config = {
             "configVersion": 1,
             "enabled": True,
@@ -172,8 +170,10 @@ class TestFullEnrollmentFlow(unittest.TestCase):
             # reste surchargeable par le DM (appel programmatique, relayable).
             "keycloakIssuerUrl": "http://keycloak.test",
             "keycloakRealm": "mirai",
-            "keycloak_redirect_uri": "http://localhost:19876/callback",
-            "keycloak_allowed_redirect_uri": ["http://localhost:19876/callback"],
+            "keycloak_redirect_uri": redirect_uri,
+            "keycloak_allowed_redirect_uri": [redirect_uri],
+            # Plancher du code : un callback manqué échoue en 60 s, pas 180 s.
+            "keycloak_auth_timeout_seconds": 60,
         }
         seed_user_config(self.tmpdir, config)
 
@@ -311,10 +311,10 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         def browser(url):
             statuses.append(_send_callback(url, code="FORGED", state="forged-state"))
             statuses.append(_send_callback(url, code="FORGED", state=None))
-            statuses.append(_send_callback(url))
+            _pkce_auto_callback(url)
 
         self._run_pkce_flow(browser)
-        self.assertEqual(statuses, [400, 400, 200])
+        self.assertEqual(statuses, [400, 400])
         self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
 
     def test_02d_callback_server_is_not_reachable_from_the_network(self):
