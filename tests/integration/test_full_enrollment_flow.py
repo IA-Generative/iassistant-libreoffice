@@ -18,10 +18,12 @@ All external HTTP calls are intercepted via MockHttpRouter.
 The PKCE callback server IS real (localhost socket started by _wait_for_auth_code).
 webbrowser.open is patched to auto-send the auth code to that server.
 """
+import socket
 import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 from unittest.mock import patch
@@ -53,6 +55,37 @@ def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
             pass  # plugin returns 200 OK; urllib may still raise due to response body
 
     threading.Thread(target=_send, daemon=True).start()
+
+
+_STATE_OF_THE_URL = object()
+
+
+def _send_callback(auth_url, code="FAKE_AUTH_CODE", state=_STATE_OF_THE_URL):
+    """Envoie tout de suite le callback au serveur local et rend le statut HTTP."""
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(auth_url).query)
+    query = {"code": code}
+    if state is _STATE_OF_THE_URL:
+        state = params["state"][0]
+    if state is not None:
+        query["state"] = state
+    url = f"{params['redirect_uri'][0]}?{urllib.parse.urlencode(query)}"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def _non_loopback_address():
+    """Adresse IPv4 de la machine hors boucle locale, ou None. Le connect UDP
+    n'envoie aucun paquet."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))
+            address = probe.getsockname()[0]
+        except OSError:
+            return None
+    return None if address.startswith("127.") else address
 
 
 # Constants
@@ -251,6 +284,57 @@ class TestFullEnrollmentFlow(unittest.TestCase):
                         "access_token must be stored")
         self.assertTrue(self.job._get_config_from_file("refresh_token", ""),
                         "refresh_token must be stored")
+
+    def _run_pkce_flow(self, browser):
+        self.job.config_cache = DM_PUBLIC_CONFIG
+        self.job.config_loaded_at = time.time()
+        with self._patch_urlopen(), \
+             self._patch_confirm(True), \
+             self._patch_enrollment_wizard(True), \
+             self._patch_show_message(), \
+             patch("webbrowser.open", side_effect=browser):
+            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+
+    def _exchanged_codes(self):
+        return [urllib.parse.parse_qs(call["data"].decode())["code"][0]
+                for call in self.router.calls_for("POST", "/protocol/openid-connect/token")]
+
+    def test_02b_callback_sent_as_the_browser_opens_is_received(self):
+        """Avec une session SSO ouverte, Keycloak redirige aussitôt : le serveur
+        de callback écoute déjà quand le navigateur s'ouvre."""
+        self._run_pkce_flow(_send_callback)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02c_callback_without_the_state_of_the_request_is_refused(self):
+        statuses = []
+
+        def browser(url):
+            statuses.append(_send_callback(url, code="FORGED", state="forged-state"))
+            statuses.append(_send_callback(url, code="FORGED", state=None))
+            statuses.append(_send_callback(url))
+
+        self._run_pkce_flow(browser)
+        self.assertEqual(statuses, [400, 400, 200])
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02d_callback_server_is_not_reachable_from_the_network(self):
+        address = _non_loopback_address()
+        if address is None:
+            self.skipTest("aucune interface réseau hors boucle locale")
+        reached = []
+
+        def browser(url):
+            redirect = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["redirect_uri"][0]
+            try:
+                socket.create_connection((address, urllib.parse.urlparse(redirect).port),
+                                         timeout=2).close()
+                reached.append(True)
+            except OSError:
+                reached.append(False)
+            _send_callback(url)
+
+        self._run_pkce_flow(browser)
+        self.assertEqual(reached, [False])
 
     # Steps 5 + 6: Device Management enrollment
 
