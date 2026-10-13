@@ -37,17 +37,17 @@ approve pull requests ».
 Depuis le tag de la version (`git checkout vX.Y.Z`) :
 
 ```bash
-# Canary (rollout progressif — recommande)
-./scripts/deploy-release.sh \
-  --bootstrap-url https://bootstrap.fake-domain.name \
-  --config config/profiles/config.default.integration.json \
-  --strategy canary
-
-# Ou immediat (100% direct)
+# Immediat (100% direct) : toute release tant que device-management#49 n'est pas livre
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
   --config config/profiles/config.default.production.json \
   --strategy immediate
+
+# Canary (rollout progressif), une fois device-management#49 livre
+./scripts/deploy-release.sh \
+  --bootstrap-url https://bootstrap.fake-domain.name \
+  --config config/profiles/config.default.integration.json \
+  --strategy canary
 ```
 
 L'environnement cible est defini par `--bootstrap-url` + `--config` (sans
@@ -62,7 +62,7 @@ fait tout en une seule requete :
 curl -X POST https://bootstrap.fake-domain.name/api/plugins/mirai-libreoffice/deploy \
   -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
   -F "binary=@dist/mirai.oxt" \
-  -F "strategy=canary"
+  -F "strategy=immediate"
 ```
 
 Reponse :
@@ -76,7 +76,7 @@ Reponse :
   "artifact_id": 9,
   "campaign_id": 10,
   "checksum": "sha256:cb16c2b9...",
-  "strategy": "canary"
+  "strategy": "immediate"
 }
 ```
 
@@ -106,7 +106,10 @@ curl -s -X PATCH -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
 
 ## Strategies de rollout
 
-### `canary` (defaut)
+Tant que device-management#49 (version minimale du plugin) n'est pas livre,
+toute release part en `immediate` pour tout le parc : c'est le defaut du script.
+
+### `canary`
 
 Deploiement progressif en 3 paliers automatiques :
 
@@ -126,7 +129,7 @@ Timeline typique :
 - **T+24h** : 25% des devices
 - **T+72h** : 100% des devices
 
-### `immediate`
+### `immediate` (defaut)
 
 Deploiement a 100% immediatement, sans palier. Tous les devices recoivent
 la mise a jour au prochain appel config.
@@ -142,7 +145,7 @@ A utiliser pour :
 # Cibler un cohort specifique
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy canary \
+  --strategy immediate \
   --cohort-id 3
 
 # Urgence critique (affichage different cote plugin)
@@ -154,15 +157,16 @@ A utiliser pour :
 
 ## Deploiement manuel (sans script)
 
-### Etape 1 — Mettre a jour la version
+### Etape 1 — Partir du tag de la version
 
-Modifier ces 3 fichiers avec le nouveau numero de version :
+```bash
+git checkout vX.Y.Z
+```
 
-| Fichier | Champ |
-|---------|-------|
-| `oxt/description.xml` | `<version value="X.Y.Z"/>` |
-| `dm-manifest.json` | `changelog[0].version` |
-| `oxt/registration/license.txt` | `version X.Y.Z` |
+Rien a modifier a la main : release-please a porte la version dans
+`oxt/description.xml`, seule source de version. Au build, la licence et le
+`dm-manifest.json` embarque (changelog derive de `CHANGELOG.md`) en sont
+deduits.
 
 ### Etape 2 — Builder le package
 
@@ -179,7 +183,7 @@ curl -X POST \
   https://bootstrap.fake-domain.name/api/plugins/mirai-libreoffice/deploy \
   -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
   -F "binary=@dist/mirai.oxt" \
-  -F "strategy=canary" \
+  -F "strategy=immediate" \
   -F "urgency=normal"
 ```
 
@@ -191,12 +195,16 @@ L'endpoint gere automatiquement :
 
 ## Rollback
 
+Redeployer une version anterieure depuis son tag : le script construit l'OXT du
+code extrait, dont la version vient de `description.xml`. Ne pas passer
+`--version`, qui ne change que l'etiquette envoyee au DM, pas le code construit.
+
 ```bash
 # Deployer l'ancienne version en urgence
+git checkout vX.Y.Z
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
   --config config/profiles/config.default.production.json \
-  --version 0.0.7.0.0 \
   --strategy immediate
 ```
 
