@@ -131,7 +131,7 @@ git checkout vX.Y.Z
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
   --config config/profiles/config.default.production.json \
-  --strategy canary
+  --strategy immediate
 ```
 
 L'endpoint unifié `POST /api/plugins/{slug}/deploy` gère automatiquement :
@@ -142,7 +142,10 @@ L'endpoint unifié `POST /api/plugins/{slug}/deploy` gère automatiquement :
 
 ### Stratégies de rollout
 
-**`canary`** (défaut) — déploiement progressif automatique :
+Tant que device-management#49 (version minimale du plugin) n'est pas livré,
+toute release part en `immediate` pour tout le parc : c'est le défaut du script.
+
+**`canary`** — déploiement progressif automatique :
 
 | Palier | Pourcentage | Durée | Description |
 |--------|-------------|-------|-------------|
@@ -152,7 +155,7 @@ L'endpoint unifié `POST /api/plugins/{slug}/deploy` gère automatiquement :
 
 Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe (le même device est toujours dans le même palier). Les paliers avancent automatiquement en fonction du temps écoulé depuis la création de la campagne.
 
-**`immediate`** — déploiement à 100% immédiatement. Tous les devices reçoivent la mise à jour au prochain appel config.
+**`immediate`** (défaut) — déploiement à 100% immédiatement. Tous les devices reçoivent la mise à jour au prochain appel config.
 
 ### Mise à jour automatique côté plugin
 
@@ -277,7 +280,7 @@ python3 -m pytest tests/unit/ -v
 # Déployer en intégration
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy canary
+  --strategy immediate
 ```
 
 ---
