@@ -52,6 +52,8 @@ cd ../device-management && ./scripts/k8s/deploy.sh scaleway
 > reste dans entrypoint.py, inchangée.
 
 - `src/mirai/entrypoint.py` — Coquille (MainJob) + dispatch `OpenAssistant`
+- `src/mirai/shell/` — Modules extraits de la coquille ; UNO importé en tête,
+  chargés par entrypoint sur le thread principal (règle testée)
 - `src/mirai/core/` — Moteur : registry de tools UNO, orchestrateur agentique,
   client LLM double-mode (natif/JSON), sinks, presets, conversation, façade
   (`shell_facade.py` — seul pont vers MainJob, duck-typé, jamais d'import)

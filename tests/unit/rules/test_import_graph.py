@@ -30,7 +30,6 @@ TOLERATED_EDGES = {
 # Un import UNO paresseux échoue hors du thread principal : seules ces fonctions,
 # appelées sur le thread principal, y ont droit.
 UNO_IMPORTS_IN_FUNCTIONS = {
-    ("i18n", "_uno_ui_locale"): "locale bientôt injectée par la coquille",
     ("calc_prompt_function", "_user_config_path"): "appelée par LibreOffice sur le thread principal",
 }
 # Accès directs au MainJob depuis le moteur ou la palette, hors de la façade.
@@ -179,6 +178,21 @@ def test_addin_uses_only_common_modules():
     assert offenders == []
 
 
+def test_shell_modules_load_with_entrypoint():
+    """Un module de shell/ importe UNO en tête et n'est jamais importé dans une
+    fonction : il se charge avec entrypoint, sur le thread principal."""
+    offenders = []
+    for module, target, function in _edges():
+        if not function:
+            continue
+        if target.split(".")[0] == "shell":
+            offenders.append(f"{module} importe {target} dans {function}")
+        elif (target == "<uno>" and _layer(module) == "shell" and module != "entrypoint"
+              and (module, function) not in UNO_IMPORTS_IN_FUNCTIONS):
+            offenders.append(f"{module} importe UNO dans {function}")
+    assert offenders == []
+
+
 def test_legacy_shell_and_addin_are_never_imported_by_the_new_layers():
     offenders = [f"{module} -> {target}" for module, target, _ in _edges()
                  if target != "<uno>"
@@ -195,10 +209,11 @@ def test_tolerated_exceptions_are_still_needed():
     assert stale == [], f"écarts disparus, à retirer de la liste : {stale}"
 
 
-def test_common_modules_and_addin_never_pump_events():
+def test_common_shell_and_addin_modules_never_pump_events():
     offenders = []
     for module, path in _modules():
-        if _layer(module) not in ("common", "addin"):
+        # entrypoint.pump_events ne pompe que sur le thread principal.
+        if _layer(module) not in ("common", "shell", "addin") or module == "entrypoint":
             continue
         tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
         offenders += [f"{module}:{node.lineno}" for node in ast.walk(tree)

@@ -10,9 +10,9 @@ d'architecture `tests/unit/core/test_no_entrypoint_import.py` interdit la
 sous-chaine "entrypoint" dans ces deux paquets, et la facade `core` doit rester
 independante de la coquille UNO.
 
-Usage:
+Usage (la coquille lit la langue de LibreOffice, voir shell/ui_locale.py) :
     from .i18n import t, set_locale, resolve_locale
-    set_locale(resolve_locale(ctx))
+    set_locale(resolve_locale("fr-FR"))
     label = t("proxy.section")
 """
 
@@ -3380,38 +3380,9 @@ def get_locale():
     return _current_locale
 
 
-def _uno_ui_locale(ctx=None):
-    """Lit la langue de l'interface LibreOffice via /org.openoffice.Setup/L10N.
-
-    Toute erreur est avalee : les tests tournent avec des doublures UNO et
-    l'extension doit rester utilisable hors LibreOffice.
-    """
-    try:
-        import uno
-        from com.sun.star.beans import PropertyValue as _PV
-    except Exception:
-        return None
-    try:
-        context = ctx if ctx is not None else uno.getComponentContext()
-        if context is None:
-            return None
-        provider = context.getServiceManager().createInstanceWithContext(
-            "com.sun.star.configuration.ConfigurationProvider", context
-        )
-        node = _PV()
-        node.Name = "nodepath"
-        node.Value = "/org.openoffice.Setup/L10N"
-        access = provider.createInstanceWithArguments(
-            "com.sun.star.configuration.ConfigurationAccess", (node,)
-        )
-        return normalize_locale(getattr(access, "ooLocale", None))
-    except Exception:
-        return None
-
-
-def resolve_locale(ctx=None):
-    """Langue de LibreOffice si l'extension la propose, sinon anglais."""
-    return _uno_ui_locale(ctx) or FALLBACK_LOCALE
+def resolve_locale(ui_locale):
+    """Langue de LibreOffice *ui_locale* si l'extension la propose, sinon anglais."""
+    return normalize_locale(ui_locale) or FALLBACK_LOCALE
 
 
 def t(key, **kwargs):

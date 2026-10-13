@@ -13,6 +13,7 @@ Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 """
 
 import json
+import logging
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -29,6 +30,7 @@ from src.mirai import entrypoint
 from src.mirai.core import doc_analysis, presets, prompts
 from src.mirai.core.context import ToolContext
 from src.mirai.menu_actions import calc
+from src.mirai.shell.ui_locale import extension_locale
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
@@ -280,9 +282,12 @@ def test_extension_speaks_english_when_it_does_not_offer_the_language(libreoffic
     assert i18n.get_locale() == "en"
 
 
-def test_extension_speaks_english_when_libreoffice_cannot_tell_its_language():
-    # Hors LibreOffice, les doublures UNO ne rendent aucune langue lisible.
-    assert i18n.resolve_locale(None) == "en"
+def test_extension_speaks_english_when_libreoffice_cannot_tell_its_language(caplog):
+    ctx = MagicMock()
+    ctx.getServiceManager.side_effect = RuntimeError("configuration unavailable")
+    with caplog.at_level(logging.INFO):
+        assert extension_locale(ctx) == "en"
+    assert "configuration unavailable" in caplog.text
 
 
 # ---------------------------------------------------------------------------
