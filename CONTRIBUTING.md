@@ -34,6 +34,9 @@ La refacto de `src/mirai/entrypoint.py` suit
   qu'elle ajoute.
 - Les règles de `tests/unit/rules/` bornent la coquille et les membres privés de
   `MainJob` cités par les tests. Ces bornes ne font que baisser.
+- L'état qui survit d'une action à l'autre vit dans `src/mirai/shell/runtime.py`,
+  jamais en attribut de classe de `MainJob`. Une tâche de fond lancée par
+  `MainJob.__init__` figure dans `MainJob.STARTUP_TASKS`.
 - `core/` et `ui/` n'importent jamais `entrypoint` : ils passent par la façade
   `core/shell_facade.py`.
 - Tout accès UNO se fait sur le thread principal (`core/ui_thread.py`).

@@ -15,7 +15,7 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ def test_lo07_fetch_legacy_does_not_touch_features_cache():
 
 def test_lo08_update_not_retriggered_if_in_progress():
     job = make_job()
-    MainJob._update_in_progress_cls = True
+    shell_runtime.get().update_in_progress = True
 
     called = []
 
@@ -161,7 +161,7 @@ def test_lo09_perform_update_checksum_ok_stages(fast_clock):
     assert "deferred" in statuses                  # stagé, install à suivre
     assert "installed" not in statuses             # véridique : pas encore actif
     job._install_and_restart_in_process.assert_not_called()  # pas d'install au staging
-    assert MainJob._update_in_progress_cls is False
+    assert shell_runtime.get().update_in_progress is False
 
 
 # ── TC-LO-09b : download failover multi-bootstrap ───────────────────
@@ -198,7 +198,7 @@ def test_lo09b_download_fails_over_to_next_bootstrap(fast_clock):
     assert any("onyxia" in u for u in tried), "doit d'abord tenter la 1re base"
     assert "https://scaleway.ok/catalog/mirai-libreoffice/download" in tried, \
         "doit basculer (failover) sur la base suivante"
-    assert MainJob._update_in_progress_cls is False
+    assert shell_runtime.get().update_in_progress is False
 
 
 def test_active_bootstrap_url_prefers_persisted_last_good():
@@ -245,10 +245,10 @@ def test_lo11_perform_update_releases_flag_on_exception(fast_clock):
     job._urlopen = MagicMock(side_effect=urllib.error.URLError("connection refused"))
 
     directive = _make_update_directive()
-    # _perform_update must not raise and must not leave _update_in_progress True
+    # _perform_update must not raise and must not leave update_in_progress True
     job._perform_update(directive)
     # _schedule_update sets/clears the flag; here we test perform directly
-    assert MainJob._update_in_progress_cls is False  # perform_update doesn't touch the flag itself
+    assert shell_runtime.get().update_in_progress is False  # perform_update doesn't touch the flag itself
 
 
 # ── TC-LO-12 : _get_extension_version retourne une version ───────────

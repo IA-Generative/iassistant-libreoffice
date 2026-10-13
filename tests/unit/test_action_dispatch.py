@@ -152,10 +152,8 @@ def _telemetry_recorder(job):
 def test_unhandled_action_is_telemetered_once_per_action():
     """Le clic sans effet laissait un log local ; le parc, lui, ne voyait
     rien. Une émission par nom d'action et par session — pas une par clic."""
-    from src.mirai.entrypoint import MainJob
 
     job = make_job()
-    MainJob._unhandled_reported_cls = set()
     seen = _telemetry_recorder(job)
 
     job._report_unhandled_action("ActionFantome", object())

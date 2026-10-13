@@ -1,12 +1,12 @@
 """Fixtures partagées pour les tests unitaires.
 
-`MainJob` porte des drapeaux de CLASSE (`*_cls`) volontairement partagés entre
-instances. Sans réinitialisation, l'état fuit d'un test à l'autre et provoque
+L'état du processus (`shell/runtime.py`) est partagé par toutes les instances
+de `MainJob`. Sans réinitialisation, il fuit d'un test à l'autre et provoque
 des échecs dépendants de l'ordre.
 
-Ce conftest réinitialise ces drapeaux avant ET après chaque test, et nettoie
-en filet de sécurité d'éventuels dossiers-fantômes laissés par des chemins de
-config mockés.
+Ce conftest le réinitialise avant ET après chaque test, et nettoie en filet de
+sécurité d'éventuels dossiers-fantômes laissés par des chemins de config
+mockés.
 """
 import glob
 import os
@@ -15,32 +15,19 @@ import time
 
 import pytest
 
+from tests.stubs.uno_stubs import install
+
+# Avant toute collecte : un test lancé seul importe la coquille ou la palette
+# sans qu'un autre module ait posé les stubs UNO.
+install()
+
 # Racine du repo (deux niveaux au-dessus de tests/unit/).
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
-def _reset_mainjob_flags():
-    try:
-        from tests.stubs.uno_stubs import install
-        install()
-        from src.mirai import log_setup
-        from src.mirai.entrypoint import MainJob
-    except Exception:
-        return
-    log_setup.uninstall()
-    MainJob._update_in_progress_cls = False
-    MainJob._storage_ready_cls = False
-    MainJob._enrollment_dismissed_cls = False
-    MainJob._update_launch_blocked_cls = set()
-    MainJob._feed_rewrite_last_cls = None
-    MainJob._feed_rewrite_last_result_cls = None
-    MainJob._uninstall_listener_cls = None
-    MainJob._self_update_in_flight_cls = False
-    MainJob._wiped_cls = False
-    from src.mirai import credentials, local_config
-    local_config.unfreeze_for_tests()
-    credentials.unfreeze_for_tests()
-    log_setup.unfreeze_for_tests()
+def _reset_process_state():
+    from src.mirai.shell import runtime
+    runtime.reset_for_tests()
 
 
 def _cleanup_phantom_dirs():
@@ -124,13 +111,13 @@ def thread_guard():
 
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state():
-    _reset_mainjob_flags()
+    _reset_process_state()
     _reset_credentials()
     _pin_locale()
     _cleanup_shared_config_dir()
     yield
     _pin_locale()
-    _reset_mainjob_flags()
+    _reset_process_state()
     _reset_credentials()
     _cleanup_phantom_dirs()
     _cleanup_shared_config_dir()

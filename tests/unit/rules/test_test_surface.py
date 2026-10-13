@@ -15,30 +15,29 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 
 PRIVATE_MEMBERS_BUDGET = {
     "tests/integration/test_full_enrollment_flow.py": 9,
-    "tests/stubs/uno_stubs.py": 9,
-    "tests/unit/conftest.py": 9,
+    "tests/stubs/uno_stubs.py": 2,
     "tests/unit/core/test_shell_facade.py": 2,
     # Le routage vit encore dans des privés de MainJob ; ce test suivra son
     # extraction dans un module de dispatch.
     "tests/unit/rules/test_dispatch_routes.py": 9,
     "tests/unit/rules/test_import_graph.py": 1,
-    "tests/unit/test_action_dispatch.py": 11,
+    "tests/unit/test_action_dispatch.py": 10,
     "tests/unit/test_bootstrap_insecure_ssl.py": 3,
     "tests/unit/test_calc_menu_actions.py": 5,
     "tests/unit/test_config_cache_secrets.py": 3,
     "tests/unit/test_config_fetch_perf.py": 12,
     "tests/unit/test_credentials.py": 1,
     "tests/unit/test_data_paths.py": 8,
-    "tests/unit/test_enrollment.py": 8,
-    "tests/unit/test_feed_rewrite.py": 19,
+    "tests/unit/test_enrollment.py": 7,
+    "tests/unit/test_feed_rewrite.py": 17,
     "tests/unit/test_i18n.py": 1,
     "tests/unit/test_install_changes.py": 4,
     "tests/unit/test_llm_relay_error.py": 10,
     "tests/unit/test_llm_token_auth.py": 19,
     "tests/unit/test_log_hygiene.py": 18,
     "tests/unit/test_models_fetch.py": 4,
-    "tests/unit/test_native_route.py": 34,
-    "tests/unit/test_native_update.py": 16,
+    "tests/unit/test_native_route.py": 31,
+    "tests/unit/test_native_update.py": 15,
     "tests/unit/test_prompts_calc_path.py": 4,
     "tests/unit/test_reload_config.py": 3,
     "tests/unit/test_secret_routing.py": 6,
@@ -46,17 +45,18 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_storage_wiring.py": 10,
     "tests/unit/test_telemetry_defaults.py": 2,
     "tests/unit/test_token_logic.py": 4,
-    "tests/unit/test_uninstall_wipe.py": 16,
-    "tests/unit/test_update_blocked.py": 16,
-    "tests/unit/test_update_features.py": 16,
+    "tests/unit/test_uninstall_wipe.py": 13,
+    "tests/unit/test_update_blocked.py": 14,
+    "tests/unit/test_update_features.py": 15,
 }
 
-MAKE_JOB_FILES_BUDGET = 30
-# make_job est interdit dans ces dossiers, sauf pour ces fichiers : la façade
-# et le routage ne se testent qu'avec un MainJob.
+MAKE_JOB_FILES_BUDGET = 31
+# make_job est interdit dans ces dossiers, sauf pour ces fichiers : la façade,
+# le routage et le démarrage inerte ne se testent qu'avec un MainJob.
 MAKE_JOB_FORBIDDEN_IN = ("tests/unit/core/", "tests/unit/rules/")
 MAKE_JOB_ALLOWED = {"tests/unit/core/test_shell_facade.py",
-                    "tests/unit/rules/test_dispatch_routes.py"}
+                    "tests/unit/rules/test_dispatch_routes.py",
+                    "tests/unit/rules/test_startup_tasks.py"}
 
 
 @functools.cache

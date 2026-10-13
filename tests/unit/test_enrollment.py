@@ -18,7 +18,7 @@ from tests.stubs.uno_stubs import install, make_job, make_jwt, seed_user_config
 
 install()
 
-from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 
 def _enrolled(**extra):
@@ -131,10 +131,6 @@ class TestNeedsFirstEnrollment(_EnrollmentCase):
 class TestEnrollmentDismissedFlag(_EnrollmentCase):
     """Test _enrollment_dismissed flag behaviour."""
 
-    def test_initial_dismissed_is_false(self):
-        """Flag should start as False."""
-        self.assertFalse(MainJob._enrollment_dismissed_cls)
-
     def test_trigger_sets_dismissed_on_enrollment_cancel(self):
         """When enrollment is needed and _run_first_enrollment returns False,
         _enrollment_dismissed should become True."""
@@ -146,12 +142,12 @@ class TestEnrollmentDismissedFlag(_EnrollmentCase):
             with patch.object(self.job, '_schedule_config_refresh'):
                 self.job.trigger("test_action")
 
-        self.assertTrue(MainJob._enrollment_dismissed_cls)
+        self.assertTrue(shell_runtime.get().enrollment_dismissed)
 
     def test_trigger_skips_enrollment_when_dismissed(self):
         """Once dismissed, trigger should NOT call _run_first_enrollment again."""
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
-        MainJob._enrollment_dismissed_cls = True
+        shell_runtime.get().enrollment_dismissed = True
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
             with patch.object(self.job, '_schedule_config_refresh'):
@@ -193,7 +189,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
     def test_timer_skips_when_dismissed(self):
         """Timer should NOT call _run_first_enrollment when dismissed."""
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
-        MainJob._enrollment_dismissed_cls = True
+        shell_runtime.get().enrollment_dismissed = True
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
             _schedule_and_join(self.job)
@@ -206,7 +202,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         with patch.object(self.job, '_run_first_enrollment', return_value=False):
             _schedule_and_join(self.job)
 
-        self.assertTrue(MainJob._enrollment_dismissed_cls)
+        self.assertTrue(shell_runtime.get().enrollment_dismissed)
 
 
 @pytest.mark.usefixtures("fast_clock")
