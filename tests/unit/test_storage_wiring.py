@@ -6,22 +6,15 @@ import os
 from unittest.mock import MagicMock
 
 from src.mirai import credentials, local_config
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
 
 install()
 
 
-def _response(config):
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(config).encode("utf-8")
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
-
-
 def _fetch(job, config):
     job._failover_ordered_urls = lambda: ["https://dm.example"]
-    job._urlopen = MagicMock(return_value=_response(config))
+    job._urlopen = MagicMock(return_value=http_response(config))
     return job._fetch_config(force=True)
 
 

@@ -3,12 +3,12 @@ timeout configurable, et cache-first (persist/hydrate hors réseau).
 
 Run:  pytest tests/unit/test_config_fetch_perf.py -v
 """
-import json
 import os
 import time
 from unittest.mock import MagicMock
 
 from src.mirai import local_config
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -91,14 +91,6 @@ def test_config_cache_hydrate_noop_when_already_cached(tmp_path):
 
 # ── timeout de fetch configurable ────────────────────────────
 
-def _mini_response(obj):
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(obj).encode()
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
-
-
 def test_config_fetch_uses_configurable_timeout():
     job = make_job()
     _cfg(job, {
@@ -115,7 +107,7 @@ def test_config_fetch_uses_configurable_timeout():
     job._persist_bootstrap_config = MagicMock()
     job._persist_config_cache = MagicMock()
     job.set_config = MagicMock()
-    job._urlopen = MagicMock(return_value=_mini_response({"config": {}}))
+    job._urlopen = MagicMock(return_value=http_response({"config": {}}))
 
     job._fetch_config(force=True)
 
@@ -138,7 +130,7 @@ def test_config_fetch_timeout_defaults_to_4():
     job._persist_bootstrap_config = MagicMock()
     job._persist_config_cache = MagicMock()
     job.set_config = MagicMock()
-    job._urlopen = MagicMock(return_value=_mini_response({"config": {}}))
+    job._urlopen = MagicMock(return_value=http_response({"config": {}}))
 
     job._fetch_config(force=True)
 

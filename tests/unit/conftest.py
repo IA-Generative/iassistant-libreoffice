@@ -11,6 +11,7 @@ config mockés.
 import glob
 import os
 import shutil
+import time
 
 import pytest
 
@@ -78,6 +79,47 @@ def _pin_locale():
     except Exception:
         return
     i18n.set_locale(i18n.DEFAULT_LOCALE)
+
+
+class _FastClock:
+    """Module `time` vu par la coquille : `sleep` rend la main tout de suite et
+    avance d'autant `time()`, pour que les boucles à échéance se terminent."""
+
+    def __init__(self):
+        self._elapsed = 0.0
+
+    def sleep(self, seconds):
+        self._elapsed += seconds
+        time.sleep(0)
+
+    def time(self):
+        return time.time() + self._elapsed
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@pytest.fixture
+def fast_clock(monkeypatch):
+    """Les attentes de la coquille ne coûtent plus de temps réel."""
+    from src.mirai import entrypoint
+    clock = _FastClock()
+    monkeypatch.setattr(entrypoint, "time", clock)
+    return clock
+
+
+@pytest.fixture
+def thread_guard():
+    """Enveloppe des faux objets UNO dans un ThreadGuard partagé ; le test
+    échoue si l'un d'eux a été touché hors du thread propriétaire."""
+    from tests.stubs.thread_guard import ThreadGuard
+    violations = []
+
+    def guard(target, owner, path="doc"):
+        return ThreadGuard(target, owner, violations, path)
+
+    yield guard
+    assert violations == [], f"UNO touché hors du thread principal : {violations}"
 
 
 @pytest.fixture(autouse=True)

@@ -5,6 +5,8 @@ import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from tests.stubs.thread_guard import UnoStruct
+
 
 class FakeUndoManager:
     def __init__(self):
@@ -229,8 +231,8 @@ def _parse_ref(ref):
         end_col, end_row = col_index(match.group(3)), int(match.group(4)) - 1
     else:
         end_col, end_row = start_col, start_row
-    return SimpleNamespace(StartColumn=start_col, StartRow=start_row,
-                           EndColumn=end_col, EndRow=end_row)
+    return UnoStruct(StartColumn=start_col, StartRow=start_row,
+                     EndColumn=end_col, EndRow=end_row)
 
 
 class _FakeRange:
@@ -265,8 +267,8 @@ class FakeCalcSheet:
         return _FakeRange(self, _parse_ref(ref))
 
     def getCellRangeByPosition(self, start_col, start_row, end_col, end_row):
-        area = SimpleNamespace(StartColumn=start_col, StartRow=start_row,
-                               EndColumn=end_col, EndRow=end_row)
+        area = UnoStruct(StartColumn=start_col, StartRow=start_row,
+                         EndColumn=end_col, EndRow=end_row)
         return _FakeRange(self, area)
 
     def getColumns(self):

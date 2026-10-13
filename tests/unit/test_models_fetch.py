@@ -2,24 +2,13 @@
 Tests for _fetch_models / _build_auth_headers in MainJob.
 HTTP calls are intercepted via unittest.mock.patch.
 """
-import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
-
-
-def _fake_response(data, status=200):
-    """Return a context-manager mock that mimics urllib response."""
-    body = json.dumps(data).encode()
-    resp = MagicMock()
-    resp.status = status
-    resp.read.return_value = body
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
 
 
 class TestBuildAuthHeaders(unittest.TestCase):
@@ -64,19 +53,19 @@ class TestFetchModels(unittest.TestCase):
 
     def test_openai_data_format(self):
         payload = {"data": [{"id": "gpt-4"}, {"id": "gpt-3.5-turbo"}]}
-        with self._patch_urlopen(_fake_response(payload)):
+        with self._patch_urlopen(http_response(payload)):
             models = self.job._fetch_models("https://api.example.com", "key", False)
         self.assertEqual(models, ["gpt-4", "gpt-3.5-turbo"])
 
     def test_ollama_models_format(self):
         payload = {"models": [{"name": "llama3"}, {"name": "mistral"}]}
-        with self._patch_urlopen(_fake_response(payload)):
+        with self._patch_urlopen(http_response(payload)):
             models = self.job._fetch_models("https://api.example.com", "key", False)
         self.assertEqual(models, ["llama3", "mistral"])
 
     def test_plain_list_format(self):
         payload = ["model-a", "model-b"]
-        with self._patch_urlopen(_fake_response(payload)):
+        with self._patch_urlopen(http_response(payload)):
             models = self.job._fetch_models("https://api.example.com", "key", False)
         self.assertEqual(models, ["model-a", "model-b"])
 
@@ -91,7 +80,7 @@ class TestFetchModels(unittest.TestCase):
             {"id": "gpt-4", "description": "Most capable model"},
             {"id": "gpt-3.5-turbo"},
         ]}
-        with self._patch_urlopen(_fake_response(payload)):
+        with self._patch_urlopen(http_response(payload)):
             models, descriptions = self.job._fetch_models(
                 "https://api.example.com", "key", False, include_info=True
             )
@@ -103,7 +92,7 @@ class TestFetchModels(unittest.TestCase):
         payload = {"data": [
             {"id": "llama3", "info": {"meta": {"description": "Fast LLM"}}},
         ]}
-        with self._patch_urlopen(_fake_response(payload)):
+        with self._patch_urlopen(http_response(payload)):
             models, descriptions = self.job._fetch_models(
                 "https://api.example.com/api", "key", True, include_info=True
             )

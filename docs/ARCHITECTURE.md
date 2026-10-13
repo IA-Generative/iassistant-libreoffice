@@ -245,6 +245,14 @@ comme « la demande porte sur le document entier ».
 ## Tests
 
 `python3 -m pytest tests/unit/ tests/integration/ -q` (ou `./scripts/03-test-local.sh`) : coquille + moteur.
+
+Outils partagés des tests (`tests/stubs/`, `tests/unit/conftest.py`) :
+- `fast_clock` : les `sleep` de la coquille rendent la main tout de suite et
+  `time()` avance d'autant, si bien que les boucles à échéance se terminent.
+- `helpers.http_response` : réponse `urllib` factice.
+- `thread_guard` : enveloppe un faux document ou ServiceManager dans un
+  `ThreadGuard` ; tout accès hors du thread propriétaire fait échouer le test.
+
 Golden iso-fonctionnels : `test_presets_writer.py` / `test_presets_calc.py`
 rejouent chaque fonction historique via le moteur (FakeShell + SSE scripté +
 faux documents à état réel).
