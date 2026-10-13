@@ -6,6 +6,8 @@
   release (voir [docs/DEPLOY.md](docs/DEPLOY.md)).
 - Une PR fait un déplacement ou une correction, jamais les deux.
 - Les PR sont fusionnées par un merge commit.
+- `master` étant la branche par défaut, un « Closes #N » dans une PR vers
+  `develop` ne ferme pas le ticket : le fermer à la main après la fusion.
 
 ## Commits
 
