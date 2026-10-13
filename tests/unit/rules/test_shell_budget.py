@@ -26,6 +26,30 @@ BUDGET = {
 }
 
 
+_MUTATORS = {"add", "append", "clear", "discard", "extend", "insert", "pop", "remove",
+             "setdefault", "update"}
+_STATEFUL = {"set", "dict", "list", "threading.Lock", "threading.RLock", "threading.Event"}
+
+
+def _class_state(tree, mainjob):
+    """Écritures sur la classe (`MainJob.x = …`, `MainJob.x.add(…)`, aussi via
+    `type(self)`) et conteneurs ou verrous créés dans le corps de `MainJob`."""
+    def on_class(node):
+        return (isinstance(node, ast.Attribute)
+                and ast.unparse(node.value) in ("MainJob", "type(self)", "self.__class__"))
+
+    count = sum(isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and ast.unparse(node.value.func) in _STATEFUL for node in mainjob.body)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            count += any(on_class(target) for target in node.targets)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            count += on_class(node.target)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            count += node.func.attr in _MUTATORS and on_class(node.func.value)
+    return count
+
+
 @functools.cache
 def _measure():
     with open(_ENTRYPOINT, encoding="utf-8") as fh:
@@ -51,10 +75,7 @@ def _measure():
         "lines": source.count("\n"),
         "mainjob_methods": sum(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                                for node in mainjob.body),
-        "class_state_attributes": sum(
-            isinstance(target, ast.Name) and target.id.endswith("_cls")
-            for node in mainjob.body if isinstance(node, ast.Assign)
-            for target in node.targets),
+        "class_state_attributes": _class_state(tree, mainjob),
         "threads_and_timers": sum(
             isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr in ("Thread", "Timer")
