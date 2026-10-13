@@ -105,6 +105,20 @@ def fast_clock(monkeypatch):
     return clock
 
 
+@pytest.fixture
+def thread_guard():
+    """Enveloppe des faux objets UNO dans un ThreadGuard partagé ; le test
+    échoue si l'un d'eux a été touché hors du thread propriétaire."""
+    from tests.stubs.thread_guard import ThreadGuard
+    violations = []
+
+    def guard(target, owner, path="doc"):
+        return ThreadGuard(target, owner, violations, path)
+
+    yield guard
+    assert violations == [], f"UNO touché hors du thread principal : {violations}"
+
+
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state():
     _reset_mainjob_flags()
