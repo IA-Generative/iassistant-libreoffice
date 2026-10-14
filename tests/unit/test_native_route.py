@@ -595,9 +595,9 @@ def test_close_after_inprocess_update_treats_veto_with_modified_document_as_refu
     job._terminate_on_main_thread.assert_not_called()
 
 
-def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch):
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
+def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch, fast_clock):
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 1)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 30)
     job, desktop = _close_job([False] * 50)
     assert job._close_after_inprocess_update() is False
     assert desktop.terminate.call_count >= 2
@@ -649,15 +649,17 @@ def test_run_on_main_thread_exposes_action_duration():
     assert job._last_main_thread_action_s >= 0.04
 
 
-def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch):
+def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch, fast_clock):
     """Callback jamais démarré (thread principal occupé) → on réessaie, JAMAIS de SIGTERM."""
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 1)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 30)
     job, _dialog, async_cb = _job_with_services(run_callback=False)
     job._terminate_on_main_thread = MagicMock()
     job._run_on_main_thread = MagicMock(return_value=(False, "timeout"))
     assert job._close_after_inprocess_update() is False
-    assert job._run_on_main_thread.call_count >= 2
+    attempts = [c for c in job._run_on_main_thread.call_args_list
+                if c.args[2] == "_close_after_inprocess_update"]
+    assert len(attempts) >= 2
     job._terminate_on_main_thread.assert_not_called()
 
 

@@ -49,6 +49,16 @@ def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
     threading.Thread(target=_send, daemon=True).start()
 
 
+def _joining_new_threads(action):
+    """Lance `action`, puis attend les threads qu'elle a démarrés. Sans wizard,
+    le flux SSO enrôle le poste dans un thread de fond : il ne doit déborder ni
+    sur la suite du test ni sur le test suivant."""
+    before = set(threading.enumerate())
+    action()
+    for thread in set(threading.enumerate()) - before:
+        thread.join(5)
+
+
 _STATE_OF_THE_URL = object()
 
 
@@ -264,7 +274,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
              self._patch_enrollment_wizard(True), \
              self._patch_show_message(), \
              patch("webbrowser.open", side_effect=fake_browser_open):
-            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+            _joining_new_threads(lambda: self.job._authorization_code_flow(DM_PUBLIC_CONFIG))
 
         self.assertIn("auth_url", captured, "webbrowser.open must have been called")
 
@@ -295,7 +305,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
              self._patch_enrollment_wizard(True), \
              self._patch_show_message() as shown, \
              patch("webbrowser.open", side_effect=browser):
-            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+            _joining_new_threads(lambda: self.job._authorization_code_flow(DM_PUBLIC_CONFIG))
         return shown
 
     def _exchanged_codes(self):
@@ -559,22 +569,15 @@ class TestFullEnrollmentFlow(unittest.TestCase):
              self._patch_enrollment_wizard(True), \
              self._patch_show_message(), \
              patch("webbrowser.open", side_effect=fake_browser):
-            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+            _joining_new_threads(lambda: self.job._authorization_code_flow(DM_PUBLIC_CONFIG))
 
         self.assertIn("url", captured_browser, "Steps 3-4: browser must open for PKCE")
         self.assertTrue(self.router.called("POST", "/protocol/openid-connect/token"),
                         "Steps 3-4: Keycloak /token must be called")
         self.assertTrue(self.job._get_config_from_file("access_token", ""),
                         "Step 4: access_token must be stored")
-        self.router.calls.clear()
 
-        # Steps 5-6: Enrollment
-        self.job.config_cache = DM_PUBLIC_CONFIG
-        self.job.config_loaded_at = time.time()
-
-        with self._patch_urlopen(), self._patch_show_message():
-            self.job._ensure_device_management_state()
-
+        # Steps 5-6: Enrollment, run by the SSO flow in a background thread
         self.assertTrue(self.router.called("POST", "/enroll"),
                         "Step 5: POST /enroll must be called")
         self.assertEqual(self.job._get_config_from_file("relay_client_id", ""), RELAY_CLIENT_ID,

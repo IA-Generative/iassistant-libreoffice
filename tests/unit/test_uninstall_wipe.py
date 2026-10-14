@@ -2,7 +2,10 @@
 désactivation et mises à jour : rien n'est effacé."""
 
 import json
+import threading
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.mirai import credentials, local_config
 from tests.stubs.uno_stubs import install, make_job, seed_user_config
@@ -12,6 +15,23 @@ install()
 from src.mirai.core.conversation import ConversationStore
 from src.mirai.security_flow import FileJsonStore
 from src.mirai.shell import runtime as shell_runtime
+
+
+@pytest.fixture(autouse=True)
+def _deferred_checks(monkeypatch):
+    """Les tests appellent eux-mêmes _confirm_uninstalled : le Timer réel de
+    _check_uninstalled effacerait les données trois secondes plus tard, en
+    plein milieu d'un autre test."""
+    class _Timer:
+        daemon = False
+
+        def __init__(self, interval, function):
+            self.function = function
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(threading, "Timer", _Timer)
 
 
 def _populated(tmp_path):
