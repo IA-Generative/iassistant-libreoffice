@@ -139,8 +139,7 @@ class TestEnrollmentDismissedFlag(_EnrollmentCase):
 
         # Mock _run_first_enrollment to simulate cancel
         with patch.object(self.job, '_run_first_enrollment', return_value=False):
-            with patch.object(self.job, '_schedule_config_refresh'):
-                self.job.trigger("test_action")
+            self.job.trigger("test_action")
 
         self.assertTrue(shell_runtime.get().enrollment_dismissed)
 
@@ -150,8 +149,7 @@ class TestEnrollmentDismissedFlag(_EnrollmentCase):
         shell_runtime.get().enrollment_dismissed = True
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch.object(self.job, '_schedule_config_refresh'):
-                self.job.trigger("test_action")
+            self.job.trigger("test_action")
 
         mock_enroll.assert_not_called()
 
@@ -160,8 +158,7 @@ class TestEnrollmentDismissedFlag(_EnrollmentCase):
         seed_user_config(self.config_dir, _enrolled())
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch.object(self.job, '_schedule_config_refresh'):
-                self.job.trigger("test_action")
+            self.job.trigger("test_action")
 
         mock_enroll.assert_not_called()
 
@@ -211,9 +208,8 @@ class TestRunFirstEnrollment(_EnrollmentCase):
 
     def test_returns_false_when_config_fetch_fails(self):
         """If config fetch returns None, enrollment should fail."""
-        with patch.object(self.job, '_schedule_config_refresh'):
-            with patch.object(self.job, '_fetch_config', return_value=None):
-                result = self.job._run_first_enrollment()
+        with patch.object(self.job, '_fetch_config', return_value=None):
+            result = self.job._run_first_enrollment()
         self.assertFalse(result)
 
     def test_returns_true_when_auth_succeeds(self):
@@ -221,21 +217,42 @@ class TestRunFirstEnrollment(_EnrollmentCase):
         fake_config = {"config": {"keycloakIssuerUrl": "http://test"}}
         fake_token = make_jwt({"exp": int(time.time()) + 3600})
 
-        with patch.object(self.job, '_schedule_config_refresh'):
-            with patch.object(self.job, '_fetch_config', return_value=fake_config):
-                with patch.object(self.job, '_ensure_access_token', return_value=fake_token):
-                    result = self.job._run_first_enrollment()
+        with patch.object(self.job, '_fetch_config', return_value=fake_config):
+            with patch.object(self.job, '_ensure_access_token', return_value=fake_token):
+                result = self.job._run_first_enrollment()
         self.assertTrue(result)
 
     def test_returns_false_when_auth_fails(self):
         """Config fetch OK but auth returns None → enrollment fails."""
         fake_config = {"config": {"keycloakIssuerUrl": "http://test"}}
 
-        with patch.object(self.job, '_schedule_config_refresh'):
-            with patch.object(self.job, '_fetch_config', return_value=fake_config):
-                with patch.object(self.job, '_ensure_access_token', return_value=None):
-                    result = self.job._run_first_enrollment()
+        with patch.object(self.job, '_fetch_config', return_value=fake_config):
+            with patch.object(self.job, '_ensure_access_token', return_value=None):
+                result = self.job._run_first_enrollment()
         self.assertFalse(result)
+
+    def test_waits_for_the_fetch_in_flight_instead_of_giving_up(self):
+        """DM lent : le fetch lancé avant le wizard dure 2 s. Le fetch forcé du
+        wizard l'attend au lieu d'être refusé par le garde de récursion."""
+        from src.mirai import entrypoint
+        clock = entrypoint.time
+        start = clock.time()
+        real_sleep = clock.sleep
+
+        def sleep(seconds):
+            real_sleep(seconds)
+            if clock.time() - start >= 2:
+                self.job._fetching_config = False
+
+        def fetch_config(force=False):
+            # Comme _fetch_config : refusé tant qu'un fetch est en vol.
+            return None if self.job._fetching_config else {"config": {}}
+
+        self.job._fetching_config = True
+        with patch.object(clock, "sleep", side_effect=sleep), \
+                patch.object(self.job, "_fetch_config", side_effect=fetch_config), \
+                patch.object(self.job, "_ensure_access_token", return_value="token"):
+            self.assertTrue(self.job._run_first_enrollment())
 
 
 if __name__ == "__main__":

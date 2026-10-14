@@ -21,7 +21,7 @@ BUDGET = {
     "class_state_attributes": 0,
     "threads_and_timers": 22,
     "functions_over_100_lines": 23,
-    "except_pass": 240,
+    "except_pass": 239,
     "uno_imports_in_functions": 26,
 }
 

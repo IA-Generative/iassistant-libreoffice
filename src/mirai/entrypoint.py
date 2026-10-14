@@ -10268,11 +10268,11 @@ EDITED VERSION:
     def _run_first_enrollment(self):
         """Run the first-time enrollment: wizard → fetch config → auth flow."""
         log_to_file("First enrollment detected, starting wizard flow")
-        try:
-            self._schedule_config_refresh(force=True, reason="first_enrollment")
-            time.sleep(1)
-        except Exception:
-            pass
+        # Un fetch déjà en vol ferait refuser le fetch forcé (garde de récursion)
+        # et abandonner le wizard pour la session : on attend sa fin.
+        deadline = time.time() + 15
+        while self._fetching_config and time.time() < deadline:
+            time.sleep(0.1)
         config_data = self._fetch_config(force=True)
         if not config_data:
             log_to_file("First enrollment: config fetch failed")
