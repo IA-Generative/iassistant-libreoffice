@@ -4464,9 +4464,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     def _enroll_worker():
                         try:
                             self._ensure_device_management_state()
-                            enroll_result["success"] = self._as_bool(
-                                self._get_config_from_file("enrolled", False)
-                            )
+                            enroll_result["success"] = self._relay_credentials_valid()
                             if not enroll_result["success"]:
                                 enroll_result["error"] = _t("enroll.not_confirmed")
                         except Exception as exc:
@@ -4658,13 +4656,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not enroll_endpoint:
             return
 
-        # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`.
-        # `enrolled=True` ne prouve que « /enroll a répondu 200 » : un poste
-        # marqué enrôlé mais sans creds relay est dans un état absorbant — le DM
+        # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`, que
+        # les versions précédentes posaient sans creds relay : un poste marqué
+        # enrôlé mais sans creds relay est dans un état absorbant — le DM
         # ne minte alors jamais de llmToken et tout /llm/v1 tombe en 401, sans
         # aucun chemin de sortie. On re-tente donc l'enrôlement (POST /enroll est
         # idempotent côté DM : il ré-émet une paire).
         if self._relay_credentials_valid() and not force_enroll:
+            if not self._as_bool(self._get_config_from_file("enrolled", False)):
+                self.set_config("enrolled", True)
             return
         if self._as_bool(self._get_config_from_file("enrolled", False)):
             log_to_file(
@@ -4725,6 +4725,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.set_config("relay_client_key", relay_client_key)
                 if relay_expires_at > 0:
                     self.set_config("relay_key_expires_at", relay_expires_at)
+                self.set_config("enrolled", True)
                 log_to_file("Device management enroll succeeded with relay credentials")
                 # Immediately fetch config with new relay creds to sync LLM token
                 try:
@@ -4743,7 +4744,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "le DM ne pourra minter aucun llmToken (relais désactivé côté "
                     "serveur ?) ; l'enrôlement sera re-tenté"
                 )
-            self.set_config("enrolled", True)
         except Exception as e:
             error_body = ""
             if hasattr(e, "read"):
@@ -4819,7 +4819,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """True si le poste a des credentials relay exploitables.
 
         C'est LA source de vérité de l'enrôlement effectif : le drapeau
-        `enrolled` ne dit que « un POST /enroll a répondu 200 ». Sans ces creds,
+        `enrolled` n'est posé qu'avec eux. Sans ces creds,
         /config repart sans X-Relay-*, le DM ne mint aucun llmToken, et tous les
         appels /llm/v1 finissent en 401.
         """
