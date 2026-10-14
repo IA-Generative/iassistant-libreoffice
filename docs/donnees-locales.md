@@ -70,4 +70,4 @@ Les anciennes versions écrivaient aussi dans `user/config/` (`config_cache.json
 
 ## Journal
 
-`mirai/mirai.log`, avec `mirai.log.1` pour la rotation : 1 Mo maximum chacun. Le journal ne contient ni jeton, ni réponse `/config` brute du DM, ni corps de requête envoyé au modèle, ni texte du document : les lignes du journal d'actions de l'assistant n'y laissent que leur taille, l'extrait lui-même n'apparaît que dans l'onglet « Actions ».
+`mirai/mirai.log`, avec `mirai.log.1` pour la rotation : 1 Mo maximum chacun. Le journal ne contient ni jeton, ni code d'autorisation ou `state` du SSO, ni email, ni réponse `/config` brute du DM, ni corps de requête envoyé au modèle, ni texte du document : les lignes du journal d'actions de l'assistant n'y laissent que leur taille, l'extrait lui-même n'apparaît que dans l'onglet « Actions ».

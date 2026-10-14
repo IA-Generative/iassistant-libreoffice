@@ -108,21 +108,32 @@ def test_dm_error_body_is_not_logged(tmp_path):
     assert _leaks(lines) == []
 
 
-def test_enroll_error_body_is_not_logged(tmp_path):
+def _enrolling_job(tmp_path, email="a@b.c"):
     job = make_job(config_dir=str(tmp_path))
     job._device_management_enabled = lambda: True
     job._fetch_config = MagicMock(return_value={"config": {"enroll": "https://dm.example/enroll"}})
     job._sync_keycloak_from_config = MagicMock()
     job._ensure_access_token = MagicMock(return_value="tok")
-    job._token_email = MagicMock(return_value="a@b.c")
+    job._token_email = MagicMock(return_value=email)
     job._keycloak_config = MagicMock(return_value={})
     job._keycloak_endpoint = MagicMock(return_value="")
     job._ensure_extension_uuid = MagicMock(return_value="uuid")
     job._relay_credentials_valid = lambda: False
     job._urlopen = MagicMock(side_effect=_http_error(409))
-    lines = _entrypoint_log(job._ensure_device_management_state)
+    return job
+
+
+def test_enroll_error_body_is_not_logged(tmp_path):
+    lines = _entrypoint_log(_enrolling_job(tmp_path)._ensure_device_management_state)
     assert any("enroll failed" in line for line in lines)
     assert _leaks(lines) == []
+
+
+def test_enroll_payload_does_not_log_the_user_email(tmp_path):
+    job = _enrolling_job(tmp_path, email="jeanne.martin@exemple.gouv.fr")
+    lines = _entrypoint_log(job._ensure_device_management_state)
+    assert any("enroll payload" in line for line in lines)
+    assert [line for line in lines if "jeanne.martin" in line] == []
 
 
 def test_llm_error_body_is_not_logged(tmp_path):
