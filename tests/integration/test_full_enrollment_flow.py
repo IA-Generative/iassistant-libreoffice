@@ -26,13 +26,14 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.integration.mock_http import MockHttpRouter
 from tests.stubs.uno_stubs import install, make_job, make_jwt, read_user_config, seed_user_config
 
 install()
 
+from src.mirai.i18n import t
 
 # Helpers
 
@@ -396,6 +397,73 @@ class TestFullEnrollmentFlow(unittest.TestCase):
                          RELAY_CLIENT_KEY, "relayClientKey must be persisted")
         saved = read_user_config(self.tmpdir)
         self.assertTrue(saved.get("enrolled"), "enrolled flag must be True")
+
+    def _enroll_answers(self, body):
+        self.router = MockHttpRouter()
+        self.router.add("POST", "/enroll", body=body)
+        self._register_routes()
+
+    def _seed_valid_relay_credentials(self):
+        self.job.set_config("relay_client_id", RELAY_CLIENT_ID)
+        self.job.set_config("relay_client_key", RELAY_CLIENT_KEY)
+        self.job.set_config("relay_key_expires_at", int(time.time()) + 3600)
+
+    def _enroll(self):
+        self.job.set_config("access_token", FAKE_ACCESS_TOKEN)
+        self.job.config_cache = DM_PUBLIC_CONFIG
+        self.job.config_loaded_at = time.time()
+        with self._patch_urlopen(), self._patch_show_message():
+            self.job._ensure_device_management_state()
+
+    def test_03b_enroll_without_relay_pair_leaves_the_device_unenrolled(self):
+        self._enroll_answers({})
+        self._enroll()
+        self.assertTrue(self.router.called("POST", "/enroll"))
+        self.assertFalse(read_user_config(self.tmpdir).get("enrolled"))
+
+    def test_03c_valid_relay_credentials_mark_the_device_enrolled(self):
+        self._seed_valid_relay_credentials()
+        self._enroll()
+        self.assertFalse(self.router.called("POST", "/enroll"))
+        self.assertTrue(read_user_config(self.tmpdir).get("enrolled"))
+
+    def _wizard_outcome(self):
+        """Titre final du wizard d'enrôlement, après connexion SSO."""
+        state = {"step": 4, "cancelled": False}
+        titles = []
+
+        def update(title, text, label, step, **kwargs):
+            titles.append(title)
+            if "btn_next" in kwargs:
+                state["step"] += 1
+
+        wizard = (True, MagicMock(), MagicMock(), update, state)
+        self.job.config_cache = DM_PUBLIC_CONFIG
+        self.job.config_loaded_at = time.time()
+        with self._patch_urlopen(), \
+             self._patch_show_message(), \
+             patch.object(self.job, "_show_enrollment_wizard", return_value=wizard), \
+             patch("webbrowser.open", side_effect=_send_callback):
+            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+        return titles[-1]
+
+    def test_03d_wizard_reports_success_with_a_relay_pair(self):
+        self.assertEqual(self._wizard_outcome(), t("enroll.done_title"))
+
+    def test_03e_wizard_reports_failure_without_a_relay_pair(self):
+        self._enroll_answers({})
+        self.assertEqual(self._wizard_outcome(), t("enroll.failed_title"))
+
+    def test_03f_wizard_reports_success_when_relay_credentials_are_still_valid(self):
+        self._seed_valid_relay_credentials()
+        self.assertEqual(self._wizard_outcome(), t("enroll.done_title"))
+        self.assertFalse(self.router.called("POST", "/enroll"))
+
+    def test_03g_wizard_reports_failure_when_the_relay_pair_is_already_expired(self):
+        self._enroll_answers({"relayClientId": RELAY_CLIENT_ID,
+                              "relayClientKey": RELAY_CLIENT_KEY,
+                              "relayKeyExpiresAt": int(time.time()) - 60})
+        self.assertEqual(self._wizard_outcome(), t("enroll.failed_title"))
 
     # Steps 7 + 8: Re-fetch config with relay headers → secrets returned
 
