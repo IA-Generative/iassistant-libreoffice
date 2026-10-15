@@ -139,17 +139,19 @@ def test_simplify_question_in_replace_mode_keeps_the_selection():
     doc = FakeWriterDoc(selection_text="Texte complexe.")
     shell = FakeShell(responses=[FakeSSEResponse(
         text_chunks("Voulez-vous une version simplifiée ?"))])
-    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
     assert doc.replaced is None
     assert doc.inserted == ""
+    assert message == presets._t("preset.question_asked")
 
 
 def test_summarize_replace_mode_stops_at_the_stop_phrase():
     doc = FakeWriterDoc(selection_text="Un long texte administratif.")
     shell = FakeShell(responses=[FakeSSEResponse(
         text_chunks("Résumé concis.", " [END] ceci ne doit pas apparaître"))])
-    presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
     assert doc.replaced == "Résumé concis."
+    assert message == "Résumé inséré à la place de la sélection."
 
 
 def test_replace_mode_filters_a_reply_received_in_one_block():
@@ -165,6 +167,22 @@ def test_a_sink_without_deltas_writes_the_final_reply_in_replace_mode():
     sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "")
     sink.finish("Texte modifié.", True)
     assert doc.replaced == "Texte modifié."
+
+
+def test_simplify_replace_mode_says_the_selection_was_replaced():
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Texte simple."
+    assert message == "Reformulation insérée à la place de la sélection."
+
+
+def test_simplify_question_in_append_mode_reports_the_question():
+    doc = FakeWriterDoc(selection_text="Texte complexe.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Voulez-vous une version simplifiée ?"))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None)
+    assert message == presets._t("preset.question_asked")
 
 
 def test_simplify_normal_flow():

@@ -204,7 +204,9 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        return _t("preset.done_summarize")
+        if sink.question_detected:
+            return _t("preset.question_asked")
+        return _t("preset.done_summarize") if append_mode else _t("preset.done_summarize_replaced")
     finally:
         ctx.undo_end()
 
@@ -259,7 +261,9 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        return _t("preset.done_simplify")
+        if sink.question_detected:
+            return _t("preset.question_asked")
+        return _t("preset.done_simplify") if append_mode else _t("preset.done_simplify_replaced")
     finally:
         ctx.undo_end()
 
