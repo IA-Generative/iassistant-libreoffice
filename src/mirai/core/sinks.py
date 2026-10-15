@@ -39,16 +39,14 @@ class PaletteSink:
             self._on_finish(self.text or text)
 
 
-class WriterInsertSink:
-    """Insertion streamée après la sélection : marqueurs d'en-tête/pied,
-    stop phrases et détection de question."""
+class _FilteredWriterSink:
+    """Filtre commun des sinks Writer : arrêt sur une question du modèle,
+    coupure aux stop phrases, rejeu d'une réponse arrivée d'un bloc. Les
+    sous-classes décident où va le texte retenu (`_emit`)."""
 
-    def __init__(self, ctx, header_marker, footer_marker,
-                 question_patterns=None, on_question=None,
+    def __init__(self, ctx, question_patterns=None, on_question=None,
                  stop_phrases=None, tee=None):
         self.ctx = ctx
-        self.header_marker = header_marker
-        self.footer_marker = footer_marker
         self.question_patterns = question_patterns or []
         self.on_question = on_question
         self.stop_phrases = stop_phrases
@@ -56,6 +54,54 @@ class WriterInsertSink:
         self.accumulated = ""
         self.done = False
         self.question_detected = False
+
+    def _before_delta(self):
+        pass
+
+    def _emit(self, text):
+        raise NotImplementedError
+
+    def stream_delta(self, chunk):
+        if self.done:
+            return
+        self._before_delta()
+        self.accumulated += chunk
+        if self.question_patterns and contains_pattern(
+                self.accumulated, self.question_patterns):
+            self.done = True
+            self.question_detected = True
+            if self.on_question:
+                self.on_question(self)
+            return
+        if self.stop_phrases is not None:
+            to_insert, stopped = check_stop_phrase(
+                self.accumulated, chunk, self.stop_phrases)
+            if stopped:
+                self.accumulated = self.accumulated[
+                    :len(self.accumulated) - len(chunk) + len(to_insert)].rstrip()
+                self.done = True
+            self._emit(to_insert)
+            return
+        self._emit(chunk)
+
+    def _replay(self, text, streamed):
+        if not streamed and text and not self.accumulated and not self.done:
+            # Texte arrivé d'un bloc (mode JSON retenu) : rejoue le filtrage.
+            self.stream_delta(text)
+
+
+class WriterInsertSink(_FilteredWriterSink):
+    """Insertion streamée après la sélection : marqueurs d'en-tête/pied,
+    stop phrases et détection de question."""
+
+    def __init__(self, ctx, header_marker, footer_marker,
+                 question_patterns=None, on_question=None,
+                 stop_phrases=None, tee=None):
+        super().__init__(ctx, question_patterns=question_patterns,
+                         on_question=on_question, stop_phrases=stop_phrases,
+                         tee=tee)
+        self.header_marker = header_marker
+        self.footer_marker = footer_marker
         self._cursor = None
         self._text_obj = None
         self._started = False
@@ -91,28 +137,11 @@ class WriterInsertSink:
         except Exception:
             pass
 
-    def stream_delta(self, chunk):
-        if self.done:
-            return
+    def _before_delta(self):
         self._ensure_started()
-        self.accumulated += chunk
-        if self.question_patterns and contains_pattern(
-                self.accumulated, self.question_patterns):
-            self.done = True
-            self.question_detected = True
-            if self.on_question:
-                self.on_question(self)
-            return
-        if self.stop_phrases is not None:
-            to_insert, stopped = check_stop_phrase(
-                self.accumulated, chunk, self.stop_phrases)
-            if stopped:
-                self.accumulated = self.accumulated[
-                    :len(self.accumulated) - len(chunk) + len(to_insert)].rstrip()
-                self.done = True
-            self._insert(to_insert)
-            return
-        self._insert(chunk)
+
+    def _emit(self, text):
+        self._insert(text)
 
     def insert_message(self, message):
         """Insère un message de repli (ex. échec après retry)."""
@@ -121,9 +150,7 @@ class WriterInsertSink:
 
     def finish(self, text, streamed):
         self._ensure_started()
-        if not streamed and text and not self.accumulated and not self.done:
-            # Texte arrivé d'un bloc (mode JSON retenu) : rejoue le filtrage.
-            self.stream_delta(text)
+        self._replay(text, streamed)
         if self.footer_marker:
             self.ctx.on_main(lambda: self._text_obj.insertString(
                 self._cursor, self.footer_marker, False))
