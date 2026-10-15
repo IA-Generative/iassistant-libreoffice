@@ -244,7 +244,7 @@
   "preset.done_summarize_replaced": "Summary inserted in place of the selection.",
   "preset.done_simplify": "Rephrasing inserted after the selection.",
   "preset.done_simplify_replaced": "Rephrasing inserted in place of the selection.",
-  "preset.question_asked": "The model asked a question instead of answering: the text was not changed. Try again.",
+  "preset.question_asked": "The model asked a question instead of answering. Try again.",
   "preset.done_transform": "{count} row(s) transformed into column {col}.",
   "preset.done_analyze": "Analysis written below the selection.",
   "sel.writer_selection": "Selection: \"{excerpt}\"",

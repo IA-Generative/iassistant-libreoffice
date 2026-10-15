@@ -244,7 +244,7 @@
   "preset.done_summarize_replaced": "Résumé inséré à la place de la sélection.",
   "preset.done_simplify": "Reformulation insérée après la sélection.",
   "preset.done_simplify_replaced": "Reformulation insérée à la place de la sélection.",
-  "preset.question_asked": "Le modèle a posé une question au lieu de répondre : le texte n'a pas été modifié. Réessayez.",
+  "preset.question_asked": "Le modèle a posé une question au lieu de répondre. Réessayez.",
   "preset.done_transform": "{count} ligne(s) transformée(s) en colonne {col}.",
   "preset.done_analyze": "Analyse écrite sous la sélection.",
   "sel.writer_selection": "Sélection : « {excerpt} »",

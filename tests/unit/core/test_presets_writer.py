@@ -151,7 +151,7 @@ def test_summarize_replace_mode_stops_at_the_stop_phrase():
         text_chunks("Résumé concis.", " [END] ceci ne doit pas apparaître"))])
     message = presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
     assert doc.replaced == "Résumé concis."
-    assert message == "Résumé inséré à la place de la sélection."
+    assert message == presets._t("preset.done_summarize_replaced")
 
 
 def test_replace_mode_filters_a_reply_received_in_one_block():
@@ -174,7 +174,7 @@ def test_simplify_replace_mode_says_the_selection_was_replaced():
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])
     message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
     assert doc.replaced == "Texte simple."
-    assert message == "Reformulation insérée à la place de la sélection."
+    assert message == presets._t("preset.done_simplify_replaced")
 
 
 def test_simplify_question_in_append_mode_reports_the_question():
@@ -217,6 +217,14 @@ def test_a_stop_phrase_split_across_deltas_is_cut_in_replace_mode():
         "Résumé concis.", " [", "END", "]", " reste"))])
     presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
     assert doc.replaced == "Résumé concis."
+
+
+def test_a_reply_without_text_is_not_reported_as_written():
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("[END]"))])
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced is None
+    assert message == presets._t("run.err_empty")
 
 
 def test_summarize_question_in_append_mode_is_reported():

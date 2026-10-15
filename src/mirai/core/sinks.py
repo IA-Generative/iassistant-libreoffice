@@ -1,8 +1,8 @@
 """Sinks de streaming : où va le texte généré par le LLM.
 
 Contrat : stream_delta(chunk) reçoit les deltas au fil de l'eau (si le client
-streame en direct) ; finish(text, streamed) clôt le run — si streamed est
-False, le sink écrit le texte complet à ce moment-là. Jamais de perte.
+streame en direct) ; finish(text, streamed) clôt le run — un sink qui n'a reçu
+aucun delta écrit alors le texte complet. Jamais de perte.
 
 Les sinks sont appelés depuis le thread worker du run (stream_delta à chaque
 delta, puis finish). Les sinks Writer reportent chaque accès UNO sur le thread
@@ -168,8 +168,7 @@ class WriterReplaceSink(_FilteredWriterSink):
             self.tee(text)
 
     def insert_message(self, message):
-        """Message de repli : en remplacement, il va à la palette, jamais dans
-        le document."""
+        """Message de repli : en remplacement, jamais dans le document."""
         if self.tee:
             self.tee(message)
 

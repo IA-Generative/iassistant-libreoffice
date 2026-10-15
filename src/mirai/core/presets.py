@@ -103,10 +103,19 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
 
 
 def report_question(sink):
-    """Le modèle a posé une question au lieu de produire le texte : la sélection
-    reste intacte, le message va à la suite de la sélection ou à la palette
-    selon la destination."""
+    """Le modèle a posé une question au lieu de produire le texte. En mode
+    ajout, le message s'insère après la sélection ; en remplacement, la
+    sélection reste intacte et le message de fin du runner informe."""
     sink.insert_message("[Le modèle a posé une question. Veuillez réessayer.]")
+
+
+def _outcome(sink, done_message):
+    """Message de fin d'un runner Writer, selon ce que le sink a retenu."""
+    if sink.question_detected:
+        return _t("preset.question_asked")
+    if not sink.accumulated.strip():
+        return error_message("empty_response")
+    return done_message
 
 
 def _system(specific):
@@ -215,9 +224,8 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        if sink.question_detected:
-            return _t("preset.question_asked")
-        return _t("preset.done_summarize") if append_mode else _t("preset.done_summarize_replaced")
+        return _outcome(sink, _t("preset.done_summarize") if append_mode
+                        else _t("preset.done_summarize_replaced"))
     finally:
         ctx.undo_end()
 
@@ -268,9 +276,8 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        if sink.question_detected:
-            return _t("preset.question_asked")
-        return _t("preset.done_simplify") if append_mode else _t("preset.done_simplify_replaced")
+        return _outcome(sink, _t("preset.done_simplify") if append_mode
+                        else _t("preset.done_simplify_replaced"))
     finally:
         ctx.undo_end()
 
@@ -313,9 +320,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        if sink.question_detected:
-            return _t("preset.question_asked")
-        return _t("preset.resized", target=target)
+        return _outcome(sink, _t("preset.resized", target=target))
     finally:
         ctx.undo_end()
 
