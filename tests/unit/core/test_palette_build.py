@@ -635,6 +635,33 @@ def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
         assert i18n.t("llm.answer_language") not in system
 
 
+def test_a_free_prompt_question_keeps_the_selection(palette_module, monkeypatch):
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeWriterDoc
+
+    reply = "Pouvez-vous préciser le ton souhaité ?"
+
+    class _Client:
+        def __init__(self, _shell, max_tokens=None):
+            pass
+
+        def step(self, messages, on_text_delta=None, **_kwargs):
+            on_text_delta(reply)
+            return SimpleNamespace(error=None, text=reply, streamed=True)
+
+    monkeypatch.setattr(palette_module, "LLMClient", _Client)
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    palette.append_mode = False
+    doc = FakeWriterDoc(selection_text="Un paragraphe.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+
+    summary = palette._run_selection_rewrite(ctx, "reformule", "Un paragraphe.")
+
+    assert doc.replaced is None
+    assert summary == {"ok": False, "reason": "model_question"}
+
+
 # Refus de lancement
 
 def test_an_empty_prompt_refusal_is_counted(palette_module):

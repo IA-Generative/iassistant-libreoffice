@@ -126,6 +126,117 @@ def test_simplify_question_shows_legacy_message():
         "[Le modèle a posé une question. Veuillez réessayer.]", "")
 
 
+def test_a_sink_without_deltas_writes_the_final_reply_in_append_mode():
+    """Une demande libre sur une sélection streame vers la palette, puis ne
+    passe au sink que le texte final (streamed=True)."""
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), True, "<début>", "<fin>")
+    sink.finish("Texte modifié.", True)
+    assert doc.inserted == "<début>Texte modifié.<fin>"
+
+
+def test_simplify_question_in_replace_mode_keeps_the_selection():
+    doc = FakeWriterDoc(selection_text="Texte complexe.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Voulez-vous une version simplifiée ?"))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced is None
+    assert doc.inserted == ""
+    assert message == presets._t("preset.question_asked")
+
+
+def test_summarize_replace_mode_stops_at_the_stop_phrase():
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Résumé concis.", " [END] ceci ne doit pas apparaître"))])
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Résumé concis."
+    assert message == presets._t("preset.done_summarize_replaced")
+
+
+def test_replace_mode_filters_a_reply_received_in_one_block():
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "",
+                             stop_phrases=["[END]"])
+    sink.finish("Résumé. [END] reste", streamed=False)
+    assert doc.replaced == "Résumé."
+
+
+def test_a_sink_without_deltas_writes_the_final_reply_in_replace_mode():
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "")
+    sink.finish("Texte modifié.", True)
+    assert doc.replaced == "Texte modifié."
+
+
+def test_simplify_replace_mode_says_the_selection_was_replaced():
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Texte simple."
+    assert message == presets._t("preset.done_simplify_replaced")
+
+
+def test_simplify_question_in_append_mode_reports_the_question():
+    doc = FakeWriterDoc(selection_text="Texte complexe.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Voulez-vous une version simplifiée ?"))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None)
+    assert message == presets._t("preset.question_asked")
+
+
+def test_shorten_question_keeps_the_selection():
+    doc = FakeWriterDoc(selection_text=" ".join(f"mot{i}" for i in range(20)))
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Voulez-vous que je raccourcisse davantage ?"))])
+    message = presets.run_shorten(_ctx(doc, shell), shell, "", None)
+    assert doc.replaced is None
+    assert message == presets._t("preset.question_asked")
+
+
+def test_shorten_keeps_a_question_quoted_from_the_text():
+    doc = FakeWriterDoc(selection_text=(
+        "Comment puis-je obtenir mon attestation ? Il faut se rendre sur le site."))
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Comment puis-je obtenir mon attestation ? Allez sur le site."))])
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+    assert doc.replaced == "Comment puis-je obtenir mon attestation ? Allez sur le site."
+
+
+def test_simplify_question_patterns_match_whole_words():
+    doc = FakeWriterDoc(selection_text="Les demandeurs doivent fournir des pièces.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Applicants send documents. They should include an ID."))])
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Applicants send documents. They should include an ID."
+
+
+def test_a_stop_phrase_split_across_deltas_is_cut_in_replace_mode():
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Résumé concis.", " [", "END", "]", " reste"))])
+    presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Résumé concis."
+
+
+def test_a_reply_without_text_is_not_reported_as_written():
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("[END]"))])
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced is None
+    assert message == presets._t("run.err_empty")
+
+
+def test_summarize_question_in_append_mode_is_reported():
+    doc = FakeWriterDoc(selection_text="Un texte.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Pouvez-vous préciser le contexte ?"))])
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None)
+    assert "[Le modèle a posé une question. Veuillez réessayer.]" in doc.inserted
+    assert "préciser" not in doc.inserted
+    assert message == presets._t("preset.question_asked")
+
+
 def test_simplify_normal_flow():
     doc = FakeWriterDoc(selection_text="Texte alambiqué.")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])

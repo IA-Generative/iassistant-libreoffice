@@ -1,8 +1,5 @@
-"""Filtres texte partagés — portés depuis menu_actions/ (comportement identique).
-
-Ces fonctions sont la spécification de compatibilité : les tests golden des
-presets vérifient exactement les mêmes cas que les fonctions historiques.
-"""
+"""Filtres texte partagés : blocs <think>, markdown, stop phrases et motifs de
+question des presets."""
 
 import re
 
@@ -49,26 +46,27 @@ def strip_markdown(text):
     return text.strip()
 
 
-def check_stop_phrase(accumulated, chunk, stop_phrases=None):
-    """Retourne (texte_à_insérer, stop_détecté) pour le chunk courant.
+def stop_phrase_position(text, phrases):
+    """Position de la première stop phrase dans `text`, ou -1."""
+    lowered = text.lower()
+    found = [pos for pos in (lowered.find(p.lower()) for p in phrases) if pos != -1]
+    return min(found, default=-1)
 
-    Quand une stop phrase apparaît dans `accumulated`, retourne la portion de
-    `chunk` qui la précède (éventuellement vide) et True. Sinon le chunk
-    inchangé et False.
-    """
-    phrases = STOP_PHRASES if stop_phrases is None else stop_phrases
-    acc_lower = accumulated.lower()
-    for phrase in phrases:
-        pos = acc_lower.find(phrase.lower())
-        if pos == -1:
-            continue
-        already_inserted = len(accumulated) - len(chunk)
-        partial = chunk[:max(0, pos - already_inserted)] if pos > already_inserted else ""
-        return partial, True
-    return chunk, False
+
+def _pattern_regex(pattern):
+    head = r"(?<!\w)" if pattern[:1].isalnum() else ""
+    tail = r"(?!\w)" if pattern[-1:].isalnum() else ""
+    return head + re.escape(pattern) + tail
 
 
 def contains_pattern(text, patterns):
-    """True si `text` (minuscule) contient l'un des motifs."""
+    """True si `text` (minuscule) contient l'un des motifs, en mots entiers :
+    « should i » ne trouve pas « should include »."""
     lowered = text.lower()
-    return any(pattern in lowered for pattern in patterns)
+    return any(re.search(_pattern_regex(p), lowered) for p in patterns)
+
+
+def patterns_absent_from(source, patterns):
+    """Motifs absents du texte source : une question citée de la sélection
+    n'est pas une question du modèle."""
+    return [p for p in patterns if not contains_pattern(source, [p])]
