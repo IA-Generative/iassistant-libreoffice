@@ -126,6 +126,15 @@ def test_simplify_question_shows_legacy_message():
         "[Le modèle a posé une question. Veuillez réessayer.]", "")
 
 
+def test_a_sink_without_deltas_writes_the_final_reply_in_append_mode():
+    """Une demande libre sur une sélection streame vers la palette, puis ne
+    passe au sink que le texte final (streamed=True)."""
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), True, "<début>", "<fin>")
+    sink.finish("Texte modifié.", True)
+    assert doc.inserted == "<début>Texte modifié.<fin>"
+
+
 def test_simplify_normal_flow():
     doc = FakeWriterDoc(selection_text="Texte alambiqué.")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])

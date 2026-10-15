@@ -84,9 +84,11 @@ class _FilteredWriterSink:
             return
         self._emit(chunk)
 
-    def _replay(self, text, streamed):
-        if not streamed and text and not self.accumulated and not self.done:
-            # Texte arrivé d'un bloc (mode JSON retenu) : rejoue le filtrage.
+    def _replay(self, text):
+        # Aucun delta reçu : réponse arrivée d'un bloc (mode JSON), ou deltas
+        # envoyés ailleurs (la palette streame une demande libre vers sa zone
+        # de réponse). Le texte final passe alors par le même filtrage.
+        if text and not self.accumulated and not self.done:
             self.stream_delta(text)
 
 
@@ -150,7 +152,7 @@ class WriterInsertSink(_FilteredWriterSink):
 
     def finish(self, text, streamed):
         self._ensure_started()
-        self._replay(text, streamed)
+        self._replay(text)
         if self.footer_marker:
             self.ctx.on_main(lambda: self._text_obj.insertString(
                 self._cursor, self.footer_marker, False))
