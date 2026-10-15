@@ -185,6 +185,32 @@ def test_simplify_question_in_append_mode_reports_the_question():
     assert message == presets._t("preset.question_asked")
 
 
+def test_shorten_question_keeps_the_selection():
+    doc = FakeWriterDoc(selection_text=" ".join(f"mot{i}" for i in range(20)))
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Voulez-vous que je raccourcisse davantage ?"))])
+    message = presets.run_shorten(_ctx(doc, shell), shell, "", None)
+    assert doc.replaced is None
+    assert message == presets._t("preset.question_asked")
+
+
+def test_shorten_keeps_a_question_quoted_from_the_text():
+    doc = FakeWriterDoc(selection_text="Il hésite longuement. Dois-je partir ?")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Dois-je partir ?"))])
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+    assert doc.replaced == "Dois-je partir ?"
+
+
+def test_summarize_question_in_append_mode_is_reported():
+    doc = FakeWriterDoc(selection_text="Un texte.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Pouvez-vous préciser le contexte ?"))])
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None)
+    assert "[Le modèle a posé une question. Veuillez réessayer.]" in doc.inserted
+    assert "préciser" not in doc.inserted
+    assert message == presets._t("preset.question_asked")
+
+
 def test_simplify_normal_flow():
     doc = FakeWriterDoc(selection_text="Texte alambiqué.")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])

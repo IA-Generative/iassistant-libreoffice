@@ -101,6 +101,13 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
     return WriterReplaceSink(ctx, tee=tee, **kwargs)
 
 
+def _report_question(sink):
+    """Le modèle a posé une question au lieu de produire le texte : la sélection
+    reste intacte, le message va à la suite de la sélection ou à la palette
+    selon la destination."""
+    sink.insert_message("[Le modèle a posé une question. Veuillez réessayer.]")
+
+
 def _system(specific):
     """Système par défaut + consigne spécifique."""
     return PIPELINE_TEXT_SYSTEM + " " + specific if specific else PIPELINE_TEXT_SYSTEM
@@ -193,7 +200,9 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
 
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-résumé---\n", "\n---fin-du-résumé---\n",
-                     tee=tee, stop_phrases=STOP_PHRASES)
+                     tee=tee, stop_phrases=STOP_PHRASES,
+                     question_patterns=EXTEND_QUESTION_PATTERNS,
+                     on_question=_report_question)
 
     ctx.undo_begin(_t("preset.undo_summarize"))
     try:
@@ -241,16 +250,11 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     max_tokens = len(original) + int(shell.get_config("simplify_selection_max_tokens", 15000))
     llm = _text_client(shell, max_tokens)
 
-    def _on_question(active_sink):
-        # Signaler l'échec sans toucher au texte déjà inséré.
-        active_sink.insert_message(
-            "[Le modèle a posé une question. Veuillez réessayer.]")
-
     sink = text_sink(ctx, append_mode,
                      "\n\n---reformulation-du-texte---\n",
                      "\n---fin-de-reformulation---\n", tee=tee,
                      question_patterns=SIMPLIFY_QUESTION_PATTERNS,
-                     on_question=_on_question, stop_phrases=STOP_PHRASES)
+                     on_question=_report_question, stop_phrases=STOP_PHRASES)
 
     ctx.undo_begin(_t("preset.undo_simplify"))
     try:
@@ -293,7 +297,9 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
 
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-texte-ajusté---\n",
-                     "\n---fin-du-texte-ajusté---\n", tee=tee)
+                     "\n---fin-du-texte-ajusté---\n", tee=tee,
+                     question_patterns=EXTEND_QUESTION_PATTERNS,
+                     on_question=_report_question)
     ctx.undo_begin(undo_label)
     try:
         step = llm.step([{"role": "system", "content": system_prompt},
@@ -303,6 +309,8 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
         if step.error:
             return error_message(step.error)
         sink.finish(step.text, step.streamed)
+        if sink.question_detected:
+            return _t("preset.question_asked")
         return _t("preset.resized", target=target)
     finally:
         ctx.undo_end()
