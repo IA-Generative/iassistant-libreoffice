@@ -25,6 +25,7 @@ from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
     SIMPLIFY_QUESTION_PATTERNS,
     STOP_PHRASES,
+    patterns_absent_from,
 )
 from .tools import calc_tools
 
@@ -201,7 +202,8 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-résumé---\n", "\n---fin-du-résumé---\n",
                      tee=tee, stop_phrases=STOP_PHRASES,
-                     question_patterns=EXTEND_QUESTION_PATTERNS,
+                     question_patterns=patterns_absent_from(
+                         original, EXTEND_QUESTION_PATTERNS),
                      on_question=_report_question)
 
     ctx.undo_begin(_t("preset.undo_summarize"))
@@ -253,7 +255,8 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---reformulation-du-texte---\n",
                      "\n---fin-de-reformulation---\n", tee=tee,
-                     question_patterns=SIMPLIFY_QUESTION_PATTERNS,
+                     question_patterns=patterns_absent_from(
+                         original, SIMPLIFY_QUESTION_PATTERNS),
                      on_question=_report_question, stop_phrases=STOP_PHRASES)
 
     ctx.undo_begin(_t("preset.undo_simplify"))
@@ -298,7 +301,8 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-texte-ajusté---\n",
                      "\n---fin-du-texte-ajusté---\n", tee=tee,
-                     question_patterns=EXTEND_QUESTION_PATTERNS,
+                     question_patterns=patterns_absent_from(
+                         original, EXTEND_QUESTION_PATTERNS),
                      on_question=_report_question)
     ctx.undo_begin(undo_label)
     try:

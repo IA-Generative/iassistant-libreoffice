@@ -1,8 +1,5 @@
-"""Filtres texte partagés — portés depuis menu_actions/ (comportement identique).
-
-Ces fonctions sont la spécification de compatibilité : les tests golden des
-presets vérifient exactement les mêmes cas que les fonctions historiques.
-"""
+"""Filtres texte partagés : blocs <think>, markdown, stop phrases et motifs de
+question des presets."""
 
 import re
 
@@ -68,7 +65,20 @@ def check_stop_phrase(accumulated, chunk, stop_phrases=None):
     return chunk, False
 
 
+def _pattern_regex(pattern):
+    head = r"(?<!\w)" if pattern[:1].isalnum() else ""
+    tail = r"(?!\w)" if pattern[-1:].isalnum() else ""
+    return head + re.escape(pattern) + tail
+
+
 def contains_pattern(text, patterns):
-    """True si `text` (minuscule) contient l'un des motifs."""
+    """True si `text` (minuscule) contient l'un des motifs, en mots entiers :
+    « should i » ne trouve pas « should include »."""
     lowered = text.lower()
-    return any(pattern in lowered for pattern in patterns)
+    return any(re.search(_pattern_regex(p), lowered) for p in patterns)
+
+
+def patterns_absent_from(source, patterns):
+    """Motifs absents du texte source : une question citée de la sélection
+    n'est pas une question du modèle."""
+    return [p for p in patterns if not contains_pattern(source, [p])]

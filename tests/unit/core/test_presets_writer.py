@@ -195,10 +195,20 @@ def test_shorten_question_keeps_the_selection():
 
 
 def test_shorten_keeps_a_question_quoted_from_the_text():
-    doc = FakeWriterDoc(selection_text="Il hésite longuement. Dois-je partir ?")
-    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Dois-je partir ?"))])
+    doc = FakeWriterDoc(selection_text=(
+        "Comment puis-je obtenir mon attestation ? Il faut se rendre sur le site."))
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Comment puis-je obtenir mon attestation ? Allez sur le site."))])
     presets.run_shorten(_ctx(doc, shell), shell, "", None)
-    assert doc.replaced == "Dois-je partir ?"
+    assert doc.replaced == "Comment puis-je obtenir mon attestation ? Allez sur le site."
+
+
+def test_simplify_question_patterns_match_whole_words():
+    doc = FakeWriterDoc(selection_text="Les demandeurs doivent fournir des pièces.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Applicants send documents. They should include an ID."))])
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Applicants send documents. They should include an ID."
 
 
 def test_summarize_question_in_append_mode_is_reported():
