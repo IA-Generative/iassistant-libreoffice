@@ -944,25 +944,25 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return os.path.join(base, "prompt.txt") if base else ""
 
     def _prepare_local_storage(self):
-        """Une fois par processus : journal, migration du dossier legacy,
-        secrets hors de settings.json, empreinte d'installation, écoute de
-        désinstallation."""
+        """Une fois par processus, retentée par le MainJob suivant tant qu'elle
+        échoue : journal, migration du dossier legacy, secrets hors de
+        settings.json, empreinte d'installation, écoute de désinstallation."""
         with self.runtime.storage_lock:
             if self.runtime.storage_ready:
                 return
+            data_dir = self._data_dir()
+            if data_dir:
+                log_setup.install(data_dir)
+                for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
+                    log_to_file(f"[stockage] {action}")
+                self._move_secrets_out_of_settings()
+                self._apply_install_changes(self._local_config().record_install(
+                    self._get_extension_version(), self._package_root_dir() or ""))
+                try:
+                    self._register_uninstall_listener()
+                except Exception as exc:
+                    log_to_file(f"[désinstallation] écoute impossible : {exc}")
             self.runtime.storage_ready = True
-        data_dir = self._data_dir()
-        if data_dir:
-            log_setup.install(data_dir)
-            for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
-                log_to_file(f"[stockage] {action}")
-            self._move_secrets_out_of_settings()
-            self._apply_install_changes(self._local_config().record_install(
-                self._get_extension_version(), self._package_root_dir() or ""))
-            try:
-                self._register_uninstall_listener()
-            except Exception as exc:
-                log_to_file(f"[désinstallation] écoute impossible : {exc}")
 
     def _register_uninstall_listener(self):
         if self.runtime.uninstall_listener is not None:

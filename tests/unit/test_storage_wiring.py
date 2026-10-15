@@ -18,6 +18,37 @@ def _fetch(job, config):
     return job._fetch_config(force=True)
 
 
+def _count_migrations(monkeypatch, failures=0):
+    real = local_config.LocalConfig.migrate_legacy
+    calls = []
+
+    def migrate(self, home_dir):
+        calls.append(home_dir)
+        if len(calls) <= failures:
+            raise PermissionError("[WinError 5] Accès refusé")
+        return real(self, home_dir)
+
+    monkeypatch.setattr(local_config.LocalConfig, "migrate_legacy", migrate)
+    return calls
+
+
+def test_failed_storage_preparation_is_retried_by_the_next_job(tmp_path, monkeypatch):
+    _count_migrations(monkeypatch, failures=1)
+    make_job(config_dir=str(tmp_path))
+    install_state = os.path.join(local_config.data_dir(str(tmp_path)),
+                                 local_config.INSTALL_STATE_FILE)
+    assert not os.path.exists(install_state)
+    make_job(config_dir=str(tmp_path))
+    assert os.path.exists(install_state)
+
+
+def test_storage_preparation_runs_once_after_success(tmp_path, monkeypatch):
+    calls = _count_migrations(monkeypatch)
+    make_job(config_dir=str(tmp_path))
+    make_job(config_dir=str(tmp_path))
+    assert len(calls) == 1
+
+
 def test_set_config_writes_settings_file_not_config_json(tmp_path):
     job = make_job(config_dir=str(tmp_path))
     job.set_config("assistant_active_tab", "actions")
