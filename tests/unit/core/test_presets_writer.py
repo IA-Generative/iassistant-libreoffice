@@ -211,6 +211,14 @@ def test_simplify_question_patterns_match_whole_words():
     assert doc.replaced == "Applicants send documents. They should include an ID."
 
 
+def test_a_stop_phrase_split_across_deltas_is_cut_in_replace_mode():
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Résumé concis.", " [", "END", "]", " reste"))])
+    presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Résumé concis."
+
+
 def test_summarize_question_in_append_mode_is_reported():
     doc = FakeWriterDoc(selection_text="Un texte.")
     shell = FakeShell(responses=[FakeSSEResponse(

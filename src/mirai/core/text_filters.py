@@ -46,23 +46,11 @@ def strip_markdown(text):
     return text.strip()
 
 
-def check_stop_phrase(accumulated, chunk, stop_phrases=None):
-    """Retourne (texte_à_insérer, stop_détecté) pour le chunk courant.
-
-    Quand une stop phrase apparaît dans `accumulated`, retourne la portion de
-    `chunk` qui la précède (éventuellement vide) et True. Sinon le chunk
-    inchangé et False.
-    """
-    phrases = STOP_PHRASES if stop_phrases is None else stop_phrases
-    acc_lower = accumulated.lower()
-    for phrase in phrases:
-        pos = acc_lower.find(phrase.lower())
-        if pos == -1:
-            continue
-        already_inserted = len(accumulated) - len(chunk)
-        partial = chunk[:max(0, pos - already_inserted)] if pos > already_inserted else ""
-        return partial, True
-    return chunk, False
+def stop_phrase_position(text, phrases):
+    """Position de la première stop phrase dans `text`, ou -1."""
+    lowered = text.lower()
+    found = [pos for pos in (lowered.find(p.lower()) for p in phrases) if pos != -1]
+    return min(found, default=-1)
 
 
 def _pattern_regex(pattern):

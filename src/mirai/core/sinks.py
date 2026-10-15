@@ -10,8 +10,8 @@ principal via ctx.on_main.
 """
 
 from .text_filters import (
-    check_stop_phrase,
     contains_pattern,
+    stop_phrase_position,
     strip_markdown,
 )
 from .tools.calc_tools import safe_set_string
@@ -73,16 +73,16 @@ class _FilteredWriterSink:
             if self.on_question:
                 self.on_question(self)
             return
-        if self.stop_phrases is not None:
-            to_insert, stopped = check_stop_phrase(
-                self.accumulated, chunk, self.stop_phrases)
-            if stopped:
-                self.accumulated = self.accumulated[
-                    :len(self.accumulated) - len(chunk) + len(to_insert)].rstrip()
-                self.done = True
-            self._emit(to_insert)
+        pos = (stop_phrase_position(self.accumulated, self.stop_phrases)
+               if self.stop_phrases else -1)
+        if pos == -1:
+            self._emit(chunk)
             return
-        self._emit(chunk)
+        # La stop phrase peut arriver en plusieurs deltas : on coupe à sa
+        # position dans le texte accumulé, pas dans le dernier delta.
+        self._emit(self.accumulated[len(self.accumulated) - len(chunk):pos])
+        self.accumulated = self.accumulated[:pos].rstrip()
+        self.done = True
 
     def _replay(self, text):
         # Aucun delta reçu : réponse arrivée d'un bloc (mode JSON), ou deltas
