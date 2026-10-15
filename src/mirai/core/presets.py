@@ -102,7 +102,7 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
     return WriterReplaceSink(ctx, tee=tee, **kwargs)
 
 
-def _report_question(sink):
+def report_question(sink):
     """Le modèle a posé une question au lieu de produire le texte : la sélection
     reste intacte, le message va à la suite de la sélection ou à la palette
     selon la destination."""
@@ -204,7 +204,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                      tee=tee, stop_phrases=STOP_PHRASES,
                      question_patterns=patterns_absent_from(
                          original, EXTEND_QUESTION_PATTERNS),
-                     on_question=_report_question)
+                     on_question=report_question)
 
     ctx.undo_begin(_t("preset.undo_summarize"))
     try:
@@ -257,7 +257,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                      "\n---fin-de-reformulation---\n", tee=tee,
                      question_patterns=patterns_absent_from(
                          original, SIMPLIFY_QUESTION_PATTERNS),
-                     on_question=_report_question, stop_phrases=STOP_PHRASES)
+                     on_question=report_question, stop_phrases=STOP_PHRASES)
 
     ctx.undo_begin(_t("preset.undo_simplify"))
     try:
@@ -303,7 +303,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                      "\n---fin-du-texte-ajusté---\n", tee=tee,
                      question_patterns=patterns_absent_from(
                          original, EXTEND_QUESTION_PATTERNS),
-                     on_question=_report_question)
+                     on_question=report_question)
     ctx.undo_begin(undo_label)
     try:
         step = llm.step([{"role": "system", "content": system_prompt},

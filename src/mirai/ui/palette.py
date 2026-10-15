@@ -1899,7 +1899,8 @@ class AssistantPalette:
         choisi dans la palette — remplacement, ou ajout entre marqueurs si la
         case « Ajouter à la suite » est cochée.
         """
-        from ..core.presets import text_sink
+        from ..core.presets import report_question, text_sink
+        from ..core.text_filters import EXTEND_QUESTION_PATTERNS, STOP_PHRASES, patterns_absent_from
 
         self.journal_line(_t("palette.journal_selection_start", chars=len(selection)),
                           step=telemetry_steps.SELECTION_START,
@@ -1909,7 +1910,11 @@ class AssistantPalette:
         sink = self.dispatcher.call(
             lambda: text_sink(ctx, self.append_mode,
                               "\n\n---début-du-texte-modifié---\n",
-                              "\n---fin-du-texte-modifié---\n"),
+                              "\n---fin-du-texte-modifié---\n",
+                              stop_phrases=STOP_PHRASES,
+                              question_patterns=patterns_absent_from(
+                                  selection, EXTEND_QUESTION_PATTERNS),
+                              on_question=report_question),
             timeout=10)
 
         llm = LLMClient(self.shell)
@@ -1938,6 +1943,9 @@ class AssistantPalette:
         finally:
             self.dispatcher.call(ctx.undo_end, timeout=10)
 
+        if sink.question_detected:
+            self._stream_response("\n" + _t("preset.question_asked"))
+            return {"ok": False, "reason": "model_question"}
         how = (_t("palette.how_appended_selection") if self.append_mode
                else _t("palette.how_replaced"))
         self.journal_line(_t("palette.journal_selection_done", how=how),
