@@ -98,7 +98,7 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
     """
     if append_mode:
         return WriterInsertSink(ctx, header, footer, tee=tee, **kwargs)
-    return WriterReplaceSink(ctx, tee=tee)
+    return WriterReplaceSink(ctx, tee=tee, **kwargs)
 
 
 def _system(specific):

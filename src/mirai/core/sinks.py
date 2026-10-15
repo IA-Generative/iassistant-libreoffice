@@ -158,22 +158,26 @@ class WriterInsertSink(_FilteredWriterSink):
                 self._cursor, self.footer_marker, False))
 
 
-class WriterReplaceSink:
-    """Remplace la sélection par le texte final accumulé, puis la resélectionne
-    pour permettre l'itération."""
+class WriterReplaceSink(_FilteredWriterSink):
+    """Remplace la sélection par le texte final retenu, puis la resélectionne
+    pour permettre l'itération. Une question du modèle laisse la sélection
+    intacte."""
 
-    def __init__(self, ctx, tee=None):
-        self.ctx = ctx
-        self.tee = tee
-        self.accumulated = ""
+    def _emit(self, text):
+        if text and self.tee:
+            self.tee(text)
 
-    def stream_delta(self, chunk):
-        self.accumulated += chunk
+    def insert_message(self, message):
+        """Message de repli : en remplacement, il va à la palette, jamais dans
+        le document."""
         if self.tee:
-            self.tee(chunk)
+            self.tee(message)
 
     def finish(self, text, streamed):
-        final = (self.accumulated or text or "").strip()
+        self._replay(text)
+        if self.question_detected:
+            return
+        final = self.accumulated.strip()
         if not final:
             return
         self.ctx.on_main(lambda: self._replace_on_main(final))
