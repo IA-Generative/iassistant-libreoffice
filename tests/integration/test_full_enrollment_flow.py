@@ -26,6 +26,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from unittest.mock import MagicMock, patch
 
 from tests.integration.mock_http import MockHttpRouter
@@ -364,6 +365,38 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
         self._run_pkce_flow(browser)
         self.assertEqual(reached, [False])
+
+    def _run_pkce_flow_with_libreoffice_shell(self, python_browser):
+        """Flux PKCE où le service SystemShellExecute de LibreOffice ouvre la page,
+        donc envoie le callback ; rend les URL qu'il a ouvertes."""
+        opened = []
+        services = self.job.ctx.getServiceManager()
+        others = services.createInstanceWithContext.return_value
+        shell = MagicMock()
+        shell.execute.side_effect = lambda url, *args: (opened.append(url), _send_callback(url))
+        services.createInstanceWithContext.side_effect = lambda name, ctx: (
+            shell if name == "com.sun.star.system.SystemShellExecute" else others)
+        self._run_pkce_flow(python_browser)
+        return opened
+
+    def test_02f_without_a_browser_for_python_libreoffice_opens_the_login_page(self):
+        opened = self._run_pkce_flow_with_libreoffice_shell(lambda url: False)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02g_a_failing_python_browser_falls_back_to_libreoffice(self):
+        def browser(url):
+            raise webbrowser.Error("could not locate runnable browser")
+
+        opened = self._run_pkce_flow_with_libreoffice_shell(browser)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02h_login_page_opened_by_python_is_not_opened_again(self):
+        opened = self._run_pkce_flow_with_libreoffice_shell(
+            lambda url: _send_callback(url) == 200)
+        self.assertEqual(opened, [])
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
 
     def test_02e_relogin_failure_is_shown(self):
         """Poste déjà enrôlé : la reconnexion passe sans wizard, son échec
