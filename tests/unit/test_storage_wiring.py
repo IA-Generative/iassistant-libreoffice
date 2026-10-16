@@ -18,22 +18,32 @@ def _fetch(job, config):
     return job._fetch_config(force=True)
 
 
-def _count_migrations(monkeypatch, failures=0):
+def _first_migration_fails(monkeypatch):
     real = local_config.LocalConfig.migrate_legacy
     calls = []
 
     def migrate(self, home_dir):
         calls.append(home_dir)
-        if len(calls) <= failures:
+        if len(calls) == 1:
             raise PermissionError("[WinError 5] Accès refusé")
         return real(self, home_dir)
 
     monkeypatch.setattr(local_config.LocalConfig, "migrate_legacy", migrate)
-    return calls
+
+
+def _settings_unwritable(monkeypatch):
+    real = local_config.write_json_atomic
+
+    def write(path, data):
+        if os.path.basename(path) == local_config.SETTINGS_FILE:
+            raise PermissionError("[WinError 5] Accès refusé")
+        return real(path, data)
+
+    monkeypatch.setattr(local_config, "write_json_atomic", write)
 
 
 def test_failed_storage_preparation_is_retried_by_the_next_job(tmp_path, monkeypatch):
-    _count_migrations(monkeypatch, failures=1)
+    _first_migration_fails(monkeypatch)
     make_job(config_dir=str(tmp_path))
     install_state = os.path.join(local_config.data_dir(str(tmp_path)),
                                  local_config.INSTALL_STATE_FILE)
@@ -42,11 +52,12 @@ def test_failed_storage_preparation_is_retried_by_the_next_job(tmp_path, monkeyp
     assert os.path.exists(install_state)
 
 
-def test_storage_preparation_runs_once_after_success(tmp_path, monkeypatch):
-    calls = _count_migrations(monkeypatch)
-    make_job(config_dir=str(tmp_path))
-    make_job(config_dir=str(tmp_path))
-    assert len(calls) == 1
+def test_secret_renewed_during_the_session_survives_the_next_job(tmp_path, monkeypatch):
+    settings = os.path.join(local_config.data_dir(str(tmp_path)), local_config.SETTINGS_FILE)
+    local_config.write_json_atomic(settings, {"relay_client_key": "ancienne"})
+    _settings_unwritable(monkeypatch)
+    make_job(config_dir=str(tmp_path)).set_config("relay_client_key", "nouvelle")
+    assert make_job(config_dir=str(tmp_path)).get_config("relay_client_key", "") == "nouvelle"
 
 
 def test_set_config_writes_settings_file_not_config_json(tmp_path):

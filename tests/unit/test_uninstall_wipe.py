@@ -181,6 +181,14 @@ def test_skipped_listener_registration_is_logged(tmp_path, monkeypatch):
     assert shell_runtime.get().uninstall_listener is None
 
 
+def test_listener_that_failed_to_register_is_registered_by_the_next_job(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.mirai.entrypoint.MirAIUninstallListener",
+                        MagicMock(side_effect=[RuntimeError("boom"), MagicMock()]))
+    make_job(config_dir=str(tmp_path))
+    job = make_job(config_dir=str(tmp_path))
+    job.ctx.getValueByName.return_value.addModifyListener.assert_called_once()
+
+
 def test_failure_in_the_check_is_logged_not_raised(tmp_path, monkeypatch):
     job = _populated(tmp_path)
     logged = []
