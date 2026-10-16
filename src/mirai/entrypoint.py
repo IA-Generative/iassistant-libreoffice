@@ -944,25 +944,23 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return os.path.join(base, "prompt.txt") if base else ""
 
     def _prepare_local_storage(self):
-        """Une fois par processus : journal, migration du dossier legacy,
-        secrets hors de settings.json, empreinte d'installation, écoute de
-        désinstallation."""
+        """Une fois par processus, retentée par le MainJob suivant tant qu'elle
+        échoue : journal, migration du dossier legacy, secrets hors de
+        settings.json, empreinte d'installation, écoute de désinstallation."""
         with self.runtime.storage_lock:
-            if self.runtime.storage_ready:
-                return
-            self.runtime.storage_ready = True
-        data_dir = self._data_dir()
-        if data_dir:
-            log_setup.install(data_dir)
-            for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
-                log_to_file(f"[stockage] {action}")
-            self._move_secrets_out_of_settings()
-            self._apply_install_changes(self._local_config().record_install(
-                self._get_extension_version(), self._package_root_dir() or ""))
-            try:
-                self._register_uninstall_listener()
-            except Exception as exc:
-                log_to_file(f"[désinstallation] écoute impossible : {exc}")
+            data_dir = self._data_dir()
+            if data_dir and not self.runtime.storage_ready:
+                log_setup.install(data_dir)
+                for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
+                    log_to_file(f"[stockage] {action}")
+                self._move_secrets_out_of_settings()
+                self._apply_install_changes(self._local_config().record_install(
+                    self._get_extension_version(), self._package_root_dir() or ""))
+                self.runtime.storage_ready = True
+        try:
+            self._register_uninstall_listener()
+        except Exception as exc:
+            log_to_file(f"[désinstallation] écoute impossible : {exc}")
 
     def _register_uninstall_listener(self):
         if self.runtime.uninstall_listener is not None:
@@ -1059,7 +1057,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         Un secret n'y revient que par un écrivain plus récent (version antérieure
         après un retour arrière, reprise par la migration) : il remplace donc
-        celui du coffre."""
+        celui du coffre, une seule fois par processus."""
         cfg = self._local_config()
         settings = cfg.settings()
         scope = self._credential_scope()
@@ -1067,12 +1065,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         refused = []
         for key in credentials.STORED_KEYS:
             value = settings.get(key)
-            if value in (None, ""):
+            if value in (None, "") or self.runtime.secrets_copied:
                 continue
             if self._store_secret(key, value, scope):
                 stored.append(key)
             else:
                 refused.append(key)
+        self.runtime.secrets_copied = True
         stale = [key for key in settings
                  if key in credentials.STORED_KEYS or key in credentials.MEMORY_KEYS
                  or key in local_config.SECRET_DM_KEYS or key == "llmTokenExpiresAt"]

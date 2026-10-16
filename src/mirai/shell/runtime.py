@@ -36,10 +36,14 @@ class ShellRuntime:
         self.feed_rewrite_last = None           # dernière version inscrite avec succès
         self.feed_rewrite_last_result = None    # (résultat, version) du dernier appel
 
-        # Préparation du stockage local (journal, migration, empreinte) : une
-        # fois par processus.
+        # Préparation du stockage local (journal, migration, empreinte) :
+        # retentée par chaque MainJob jusqu'à ce qu'elle réussisse.
         self.storage_ready = False
         self.storage_lock = threading.Lock()
+        # Secrets de settings.json recopiés dans le coffre une seule fois : si
+        # leur retrait de settings.json échoue, la reprise écraserait un secret
+        # renouvelé depuis.
+        self.secrets_copied = False
         self.uninstall_listener = None
         self.wiped = False
 
