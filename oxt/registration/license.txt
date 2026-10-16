@@ -13,23 +13,32 @@ Ce logiciel est développé dans le cadre du programme MIrAI du
 ministère de l'Intérieur.
 
 
+Licence
+
+Ce logiciel est distribué sous Mozilla Public License 2.0 (MPL 2.0).
+Copyright (c) 2025-2026 Ministère de l'Intérieur.
+
+Le texte de la licence accompagne l'extension (fichier LICENSE) et
+se trouve sur : https://mozilla.org/MPL/2.0/
+
+Le code source est disponible sur :
+  https://github.com/IA-Generative/iassistant-libreoffice
+
+
 Origine du projet
 
-Cette extension s'appuie sur le travail original de John Balis,
-auteur de l'extension « localwriter » pour LibreOffice, publiée
-sous licence libre :
+Cette extension dérive de « localwriter », extension LibreOffice de
+John Balis (Copyright (c) 2024 John Balis), publiée sous MPL 2.0 :
   https://github.com/balisujohn/localwriter
 
-Des portions de code sont issues du projet LibreOffice, distribuées
-sous licence Mozilla Public License 2.0 (MPL 2.0) :
+localwriter dérive lui-même d'un changement du projet LibreOffice,
+distribué par The Document Foundation sous MPL 2.0 :
   https://gerrit.libreoffice.org/c/core/+/159938
 
-Le code source de cette version est disponible sur :
-  https://github.com/IA-Generative/AssistantMiraiLibreOffice
-
-Conformément à la licence MPL 2.0, l'ensemble des modifications
-est distribué sous la même licence et les portions dérivées
-conservent leurs mentions d'origine.
+Les fichiers hérités restent sous MPL 2.0 et conservent leurs
+mentions d'origine. Une boîte de saisie reprise du wiki de The
+Document Foundation est sous licence CC BY-SA 3.0 ; sa mention
+figure dans le code source.
 
 
 Limites de l'intelligence artificielle
