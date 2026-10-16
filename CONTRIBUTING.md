@@ -33,18 +33,24 @@ seule fois chacun : `tests/unit/test_i18n.py` vérifie la parité, les doublons,
 les clés écrites en toutes lettres dans un appel `_t("…")` et les libellés de
 menu d'`oxt/Addons.xcu`, qui restent en XML.
 
-## La coquille ne grossit plus
+## Base de code saine
 
-La refacto de `src/mirai/entrypoint.py` suit
-[docs/adr/0001-refacto-strangler.md](docs/adr/0001-refacto-strangler.md).
+Le code neuf va là où il se lit seul : un module ou une classe par responsabilité,
+des dépendances reçues explicitement plutôt que lues sur `self`, des fonctions qui
+tiennent sur un écran (`03-test-local.sh` compte les fonctions de `core/` et `ui/`
+dont la complexité dépasse 10 ; la cible est zéro).
 
-- Une PR fonctionnelle qui touche une zone d'`entrypoint.py` en extrait ce
-  qu'elle ajoute.
-- Les règles de `tests/unit/rules/` bornent la coquille et les membres privés de
-  `MainJob` cités par les tests. Ces bornes ne font que baisser.
-- L'état qui survit d'une action à l'autre vit dans `src/mirai/shell/runtime.py`,
-  jamais en attribut de classe de `MainJob`. Une tâche de fond lancée par
-  `MainJob.__init__` figure dans `MainJob.STARTUP_TASKS`.
-- `core/` et `ui/` n'importent jamais `entrypoint` : ils passent par la façade
-  `core/shell_facade.py`.
-- Tout accès UNO se fait sur le thread principal (`core/ui_thread.py`).
+`src/mirai/entrypoint.py` est le contre-exemple, pas le modèle : il se vide par
+extraction, selon [docs/adr/0001-refacto-strangler.md](docs/adr/0001-refacto-strangler.md).
+Ce qu'une PR y ajouterait va dans `src/mirai/shell/` : l'état qui survit d'une
+action à l'autre dans `shell/runtime.py` (`ShellRuntime`), une tâche de fond lancée
+par `MainJob.__init__` dans `MainJob.STARTUP_TASKS`.
+
+`tests/unit/rules/test_shell_budget.py` et `test_test_surface.py` mesurent cette
+extraction : taille de la coquille, état de classe, threads, membres privés de
+`MainJob` cités par les tests. Quand une borne bloque une PR, deux issues : sortir
+ce que la PR ajoute dans son propre module, ou relever la borne et le dire dans la
+PR. Compacter le code pour passer n'en est pas une.
+
+Les règles d'architecture (thread principal, façade, formules Calc, télémétrie)
+sont dans [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), chacune doublée d'un test.
