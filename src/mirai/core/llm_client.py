@@ -22,6 +22,9 @@ from .tool_calls import ToolCall
 
 DEFAULT_STEP_MAX_TOKENS = 4000
 
+# Statuts par lesquels un relais rejette un corps portant `tools`.
+TOOLS_REJECTED = ("http_400", "http_404", "http_422")
+
 _FENCE_RE = re.compile(r"```[a-zA-Z]*\n?|```")
 
 
@@ -168,7 +171,7 @@ class LLMClient:
 
         # Auto-détection : le relais rejette la requête portant des tools →
         # bascule définitive en mode JSON et re-tentative immédiate.
-        if (result.error in ("http_400", "http_404", "http_422")
+        if (result.error in TOOLS_REJECTED
                 and mode == "native" and self.configured_mode == "auto"):
             self.shell.log("[llm] tools natifs rejetés — bascule en mode json")
             try:

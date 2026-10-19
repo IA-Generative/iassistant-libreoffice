@@ -13,6 +13,8 @@ run agentique se termine en succès en laissant le document intact.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.mirai.core.capabilities import (
     Capabilities,
     cache_key,
@@ -33,9 +35,10 @@ class _Step:
 class ScriptedLLM:
     """Rejoue une séquence de réponses, en notant les appels reçus."""
 
-    def __init__(self, steps):
+    def __init__(self, steps, configured_mode="native"):
         self._steps = list(steps)
         self.calls = 0
+        self.configured_mode = configured_mode
 
     def step(self, messages, tools=None, **_kwargs):
         self.calls += 1
@@ -98,12 +101,46 @@ def test_model_that_never_calls_a_tool():
 
 
 def test_relay_refusing_tools():
-    llm = ScriptedLLM([_Step(error="http_400")])
+    """Mode natif imposé : le refus du corps portant `tools` mesure la capacité A."""
+    llm = ScriptedLLM([_Step(error="http_400")], configured_mode="native")
 
     verdict = probe(llm, model="ancien")
 
     assert verdict.accepts_tools is False
+    assert not verdict.error
     assert "http_400" in verdict.detail
+
+
+@pytest.mark.parametrize("configured_mode", ["auto", "json"])
+def test_relay_error_outside_native_mode_is_an_interruption(configured_mode):
+    """Hors natif imposé, un 400 n'atteint la sonde qu'après le repli JSON, sans
+    `tools` dans le corps : il ne dit rien des outils."""
+    llm = ScriptedLLM([_Step(error="http_400")], configured_mode=configured_mode)
+
+    verdict = probe(llm, model="ancien")
+
+    assert verdict.error == "http_400"
+    assert verdict.supports_agentic is False
+
+
+def test_a_step_without_text_nor_tool_call_measures_nothing():
+    """Flux vide (raisonnement qui épuise le budget, erreur envoyée en bande) :
+    ni verdict, ni « n'appelle aucun outil »."""
+    llm = ScriptedLLM([_Step()])
+
+    verdict = probe(llm, model="muet")
+
+    assert verdict.error == "empty_response"
+    assert verdict.supports_agentic is False
+
+
+def test_an_empty_second_turn_measures_nothing():
+    llm = ScriptedLLM([_Step([_read_call()]), _Step()])
+
+    verdict = probe(llm, model="muet")
+
+    assert verdict.error == "empty_response"
+    assert verdict.chains is False
 
 
 def test_second_turn_failure_is_not_a_chain():
@@ -112,6 +149,7 @@ def test_second_turn_failure_is_not_a_chain():
     verdict = probe(llm, model="instable")
 
     assert verdict.chains is False
+    assert verdict.error == "network_error"
     assert "second tour" in verdict.detail
 
 
@@ -149,6 +187,14 @@ def test_verdict_survives_a_round_trip():
 
     assert restored.chains is True
     assert restored.model == "m"
+
+
+def test_an_interrupted_probe_is_never_cached():
+    shell = FakeShell()
+    save_cached(shell, "e", "m", Capabilities(chains=True))
+    save_cached(shell, "e", "m", Capabilities(error="http_401"))
+
+    assert load_cached(shell, "e", "m").chains is True
 
 
 def test_cache_is_per_endpoint_and_model():
