@@ -1,5 +1,7 @@
 """Tools UNO restants : carte du document, find/replace, plages Calc, fill down."""
 
+import pytest
+
 from src.mirai.core.context import ToolContext
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.tools import register_all
@@ -43,6 +45,36 @@ def test_writer_document_map_numbered_and_truncated():
     result = _registry().call_tool("writer_get_document_map",
                                    {"max_chars": 900}, _writer_ctx(long_doc))
     assert result.data["truncated"] is True
+    assert "tronqué" in result.content
+
+
+@pytest.mark.parametrize("paragraph_count, config, args", [
+    (200, {}, {}),
+    (200, {}, {"max_chars": 20000}),
+    (200, {"tool_result_max_chars": 1500}, {}),
+    (56, {}, {}),
+], ids=["defaut", "max_chars_au_dela_du_plafond", "plafond_configure_bas",
+        "tient_sans_ses_reperes"])
+def test_writer_document_map_large_document_keeps_its_end(paragraph_count, config, args):
+    """Sur un grand document, le modèle reçoit encore la fin de la carte.
+
+    Le registre plafonne chaque résultat à `tool_result_max_chars` : la carte
+    doit tenir dessous avec ses repères de fin, sans quoi le modèle perd le
+    rappel d'étape suivante et ne sait plus jusqu'où il a lu.
+    """
+    def map_of(paragraphs):
+        doc = FakeWriterDoc(paragraphs=paragraphs)
+        ctx = ToolContext(doc, doc.controller, "writer", FakeShell(config))
+        return _registry().call_tool("writer_get_document_map", args, ctx)
+
+    reminder = map_of(["Court."]).content.splitlines()[-1]
+    paragraphs = [f"Paragraphe {i} " + "x" * 85 for i in range(1, paragraph_count + 1)]
+
+    result = map_of(paragraphs)
+
+    assert result.content.endswith(reminder)
+    assert result.data["truncated"] is True
+    assert "FIN DU DOCUMENT" not in result.content
     assert "tronqué" in result.content
 
 
