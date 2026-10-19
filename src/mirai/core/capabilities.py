@@ -74,6 +74,7 @@ class Capabilities:
     calls_tool: bool = False
     chains: bool = False
     detail: str = ""
+    error: str = ""      # sonde interrompue : "http_401", "network_error"…
 
     @property
     def supports_agentic(self) -> bool:
@@ -152,6 +153,7 @@ def probe(llm, model=""):
 
     first = llm.step(messages, tools=PROBE_TOOLS)
     if first.error:
+        capabilities.error = first.error
         capabilities.detail = f"appel refusé ({first.error})"
         return capabilities
 
@@ -173,6 +175,7 @@ def probe(llm, model=""):
                 for c in (first.tool_calls or [])])
     second = llm.step(messages + exchange, tools=PROBE_TOOLS)
     if second.error:
+        capabilities.error = second.error
         capabilities.detail = f"second tour refusé ({second.error})"
         return capabilities
 
