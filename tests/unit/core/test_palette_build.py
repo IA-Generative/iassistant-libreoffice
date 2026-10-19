@@ -11,7 +11,9 @@ famille de pannes qui empêche l'ouverture : attribut manquant, appel de
 méthode inexistante, mauvaise signature.
 """
 
+import gc
 import threading
+import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -1157,3 +1159,13 @@ def test_return_in_the_prompt_sends_the_request(palette_module):
     _press_key(palette_module, "prompt", palette_module.KEY_RETURN)
     async_callback.run()
     assert _step_spans(palette.shell, "run.refused")[0]["refuse.reason"] == "empty_prompt"
+
+
+def test_a_deferred_action_is_released_once_it_has_run(palette_module):
+    palette = _build(palette_module)
+    async_callback = _deliver_async_callbacks(palette)
+    _press_key(palette_module, "prompt", palette_module.KEY_RETURN)
+    deferred = weakref.ref(async_callback.pending[0][0])
+    async_callback.run()
+    gc.collect()
+    assert deferred() is None

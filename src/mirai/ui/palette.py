@@ -1589,7 +1589,11 @@ class AssistantPalette:
             async_callback = self.uno_ctx.getServiceManager() \
                 .createInstanceWithContext("com.sun.star.awt.AsyncCallback",
                                            self.uno_ctx)
-            deferred = _DeferredCall(fn)
+            def run():
+                self._handlers.remove(deferred)
+                fn()
+
+            deferred = _DeferredCall(run)
             self._handlers.append(deferred)   # référence vivante jusqu'au notify
             async_callback.addCallback(deferred, None)
         except Exception:
