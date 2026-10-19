@@ -227,8 +227,8 @@ comme « la demande porte sur le document entier ».
 `<UserConfig>/mirai/assistant_conversation.json` — 20 échanges / 100 Ko max,
 écriture atomique, tolérant à la corruption, local uniquement, bouton
 « Nouvelle conversation ». Les tours user + réponses finales seulement
-(jamais les tool calls). Injection des derniers échanges dans le contexte
-(cap ~4 000 caractères).
+(jamais les tool calls). Injection des derniers échanges de la même
+application (Writer ou Calc) dans le contexte (cap ~4 000 caractères).
 
 ## Fichiers locaux et secrets — modules partagés de `src/mirai/`
 

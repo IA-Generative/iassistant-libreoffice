@@ -3,6 +3,8 @@ conversation, observer (journal d'actions), erreurs HTTP."""
 
 import tempfile
 
+import pytest
+
 from src.mirai.core.conversation import ConversationStore
 from src.mirai.core.llm_client import StepResult
 from src.mirai.core.orchestrator import Orchestrator, RunObserver
@@ -160,8 +162,8 @@ def test_conversation_recorded_and_injected():
     shell = FakeShell()
     ctx = _Ctx(shell)
     store = ConversationStore(tempfile.mkdtemp())
-    store.append("user", "question précédente")
-    store.append("assistant", "réponse précédente")
+    store.append("user", "question précédente", "writer")
+    store.append("assistant", "réponse précédente", "writer")
     llm = FakeLLM([StepResult(text="Nouvelle réponse.")])
     orchestrator = Orchestrator(llm, _registry(), ctx, conversation=store)
     orchestrator.run_agentic("nouvelle question", PaletteSink())
@@ -173,6 +175,28 @@ def test_conversation_recorded_and_injected():
     entries = store.load()
     assert entries[-1]["text"] == "Nouvelle réponse."
     assert entries[-2]["text"] == "nouvelle question"
+
+
+def _run_and_read_context(store, app, prompt, answer):
+    """Fait un run complet dans `app` ; rend tout le texte envoyé au modèle."""
+    llm = FakeLLM([StepResult(text=answer)])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell(), app=app),
+                                conversation=store)
+    orchestrator.run_agentic(prompt, PaletteSink())
+    return "\n".join(m["content"] for m in llm.seen_messages[0])
+
+
+@pytest.mark.parametrize("app, other", [("writer", "calc"), ("calc", "writer")])
+def test_conversation_context_stays_within_its_application(app, other):
+    store = ConversationStore(tempfile.mkdtemp())
+    _run_and_read_context(store, other, f"question {other}", f"réponse {other}")
+    _run_and_read_context(store, app, f"question {app}", f"réponse {app}")
+
+    sent = _run_and_read_context(store, app, "suite", "fin")
+
+    assert f"question {app}" in sent and f"réponse {app}" in sent
+    assert f"question {other}" not in sent
+    assert f"réponse {other}" not in sent
 
 
 def test_conversation_not_polluted_by_failed_run():

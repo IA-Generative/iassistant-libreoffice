@@ -67,18 +67,38 @@ def test_wrong_shape_recovers_empty():
 
 def test_context_messages_capped_and_ordered():
     store = _store()
-    store.append("user", "ancienne question " + "a" * 100)
-    store.append("assistant", "ancienne réponse " + "b" * 100)
-    store.append("user", "récente question")
-    store.append("assistant", "récente réponse")
-    messages = store.context_messages(max_chars=60)
+    store.append("user", "ancienne question " + "a" * 100, "writer")
+    store.append("assistant", "ancienne réponse " + "b" * 100, "writer")
+    store.append("user", "récente question", "writer")
+    store.append("assistant", "récente réponse", "writer")
+    messages = store.context_messages("writer", max_chars=60)
     assert messages[-1]["content"] == "récente réponse"
     assert len(messages) <= 3
     assert [m["content"] for m in messages] == ["récente question", "récente réponse"]  # ordre chronologique conservé
     assert messages[0]["role"] in ("user", "assistant")
 
 
+def test_context_budget_not_spent_on_the_other_application():
+    store = _store()
+    store.append("user", "question writer", "writer")
+    store.append("assistant", "réponse writer", "writer")
+    store.append("user", "c" * 100, "calc")
+    store.append("assistant", "d" * 100, "calc")
+    messages = store.context_messages("writer", max_chars=60)
+    assert [m["content"] for m in messages] == ["question writer", "réponse writer"]
+
+
+def test_entries_without_application_are_not_injected():
+    store = _store()
+    with open(store._path, "w", encoding="utf-8") as fh:
+        json.dump({"entries": [{"role": "user", "text": "origine inconnue"},
+                               {"role": "assistant", "text": "réponse inconnue"}]}, fh)
+    assert store.context_messages("writer") == []
+    assert store.context_messages("calc") == []
+    assert len(store.load()) == 2   # toujours affichées, seulement pas réinjectées
+
+
 def test_missing_file_is_empty():
     store = _store()
     assert store.load() == []
-    assert store.context_messages() == []
+    assert store.context_messages("writer") == []

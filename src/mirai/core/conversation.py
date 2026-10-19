@@ -47,9 +47,14 @@ class ConversationStore:
     def clear(self):
         self._write([])
 
-    def context_messages(self, max_chars=DEFAULT_CONTEXT_MAX_CHARS):
-        """Derniers échanges au format messages[], plafonnés en caractères."""
-        entries = self.load()
+    def load_for(self, app):
+        """Entrées de `app` seules ; une entrée sans application connue
+        n'appartient à aucune."""
+        return [e for e in self.load() if e.get("app") == app]
+
+    def context_messages(self, app, max_chars=DEFAULT_CONTEXT_MAX_CHARS):
+        """Derniers échanges de `app` au format messages[], plafonnés en caractères."""
+        entries = self.load_for(app)
         selected = []
         total = 0
         for entry in reversed(entries):

@@ -101,7 +101,7 @@ class Orchestrator:
 
         messages = [{"role": "system", "content": system_prompt}]
         if self.conversation is not None:
-            messages.extend(self.conversation.context_messages())
+            messages.extend(self.conversation.context_messages(self.ctx.app))
         messages.append({"role": "user",
                          "content": self._with_scope(user_prompt)})
         tools = self.registry.openai_tools(self.ctx.app)
