@@ -136,6 +136,8 @@ class MainThreadDispatcher:
                 result_queue.put(("error", exc))
 
         self._queue.put(_run_and_report)
+        if not self._pumping:
+            self._arm_pump_from_worker()
         try:
             status, payload = result_queue.get(timeout=timeout)
         except queue.Empty:
@@ -206,7 +208,7 @@ class MainThreadDispatcher:
         Se réarmer inconditionnellement monopolise la boucle d'événements :
         LibreOffice passe son temps à traiter des tours de pompe à vide et ne
         répond plus à la souris ni au clavier. La pompe s'éteint donc dès que
-        la file est vide ; c'est `post()` qui la relance à la tâche suivante.
+        la file est vide ; `post()` ou `call()` la relance à la tâche suivante.
         """
         self.drain()
         if self._closed or self._queue.empty():

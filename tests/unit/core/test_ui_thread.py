@@ -133,6 +133,29 @@ def test_call_rapporte_le_resultat():
     assert result["value"] == 42
 
 
+def test_isolated_call_from_a_worker_completes_without_other_traffic():
+    """Un call() seul, sans aucun post() autour, doit aboutir.
+
+    La boucle d'événements ne joue que ce qu'AsyncCallback lui a confié : rien
+    d'autre ne vide la file du dispatcher à sa place.
+    """
+    dispatcher, callback = _dispatcher()
+    result = {}
+
+    def worker():
+        try:
+            result["value"] = dispatcher.call(lambda: 6 * 7, timeout=2)
+        except DispatcherTimeout as exc:
+            result["value"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    _run_event_loop_until(callback, thread)
+    thread.join(timeout=5)
+
+    assert result["value"] == 42
+
+
 def test_call_propage_lexception_de_fn():
     dispatcher, _callback = _dispatcher()
     captured = {}
@@ -225,5 +248,17 @@ def _drain_until(dispatcher, thread, attempts=300):
         dispatcher.drain()
         if not thread.is_alive():
             dispatcher.drain()
+            return
+        threading.Event().wait(0.01)
+
+
+def _run_event_loop_until(callback, thread, attempts=300):
+    """Joue la boucle d'événements, réduite aux tâches confiées à AsyncCallback."""
+    for _ in range(attempts):
+        # Ne jouer qu'une file non vide : l'addCallback du worker est alors
+        # terminé et ne peut pas tomber dans la liste qu'on est en train de vider.
+        if callback.queued:
+            callback.drain()
+        if not thread.is_alive():
             return
         threading.Event().wait(0.01)
