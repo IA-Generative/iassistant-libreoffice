@@ -1570,8 +1570,9 @@ class AssistantPalette:
         if self.busy:
             return
         self._session["clears"] += 1
-        self.conversation.clear()
-        self._current_exchange = []
+        self.conversation.clear_for(self._history_app)
+        if self._exchange_app == self._history_app:   # le tour en cours peut être à l'autre
+            self._current_exchange = []
         self._history_cache = None
         self._set_text("response", "")
         self.set_journal_text("")

@@ -23,8 +23,8 @@ def test_roundtrip():
 
 def test_clear():
     store = _store()
-    store.append("user", "x")
-    store.clear()
+    store.append("user", "x", "writer")
+    store.clear_for("writer")
     assert store.load() == []
 
 
@@ -96,6 +96,15 @@ def test_entries_without_application_are_not_injected():
     assert store.context_messages("writer") == []
     assert store.context_messages("calc") == []
     assert len(store.load()) == 2   # toujours affichées, seulement pas réinjectées
+
+
+def test_clear_for_keeps_the_other_application():
+    store = _store()
+    store.append("user", "question writer", "writer")
+    store.append("assistant", "réponse writer", "writer")
+    store.append("user", "question calc", "calc")
+    store.clear_for("calc")
+    assert [e["text"] for e in store.load()] == ["question writer", "réponse writer"]
 
 
 def test_missing_file_is_empty():

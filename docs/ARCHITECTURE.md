@@ -232,7 +232,7 @@ comme « la demande porte sur le document entier ».
 
 `<UserConfig>/mirai/assistant_conversation.json` — 20 échanges / 100 Ko max,
 écriture atomique, tolérant à la corruption, local uniquement, bouton
-« Nouvelle conversation ». Les tours user + réponses finales seulement
+« Nouvelle conversation » (efface le fil de l'application affichée). Les tours user + réponses finales seulement
 (jamais les tool calls). Injection des derniers échanges de la même
 application (Writer ou Calc) dans le contexte (cap ~4 000 caractères).
 L'onglet « Conversation » de la palette affiche le fil d'une seule application

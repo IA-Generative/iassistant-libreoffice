@@ -44,8 +44,9 @@ class ConversationStore:
             entries = entries[2:]   # retire la paire la plus ancienne
         self._write(entries)
 
-    def clear(self):
-        self._write([])
+    def clear_for(self, app):
+        """Efface le fil de `app` ; les autres applications gardent le leur."""
+        self._write([e for e in self.load() if e.get("app") != app])
 
     def load_for(self, app):
         """Entrées de `app` seules ; une entrée sans application connue

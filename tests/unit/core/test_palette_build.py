@@ -439,6 +439,19 @@ def test_a_window_that_is_neither_writer_nor_calc_keeps_the_displayed_thread(
     assert "question calc" in shown and "writer" not in shown
 
 
+def test_new_conversation_clears_only_the_displayed_application(
+        palette_module, monkeypatch, tmp_path):
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+
+    palette._on_clear()
+
+    assert store.load_for("writer") == []
+    assert [e["text"] for e in store.load_for("calc")] == ["question calc", "réponse calc"]
+    assert palette_module._fake_dialog.getControl("response").shown_text == ""
+
+
 def test_starting_a_run_shows_the_thread_of_its_application(
         palette_module, monkeypatch, tmp_path):
     """Document changé sans que la palette soit réactivée (pendant un run,
