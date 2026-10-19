@@ -152,11 +152,12 @@ def _empty(step):
     return not (step.text or "").strip() and not step.tool_calls
 
 
-def _interrupted(capabilities, step, refused):
-    """Le verdict porte l'erreur, et n'en est pas un."""
+def _interrupted(capabilities, step, refused_key):
+    """Le verdict porte l'erreur, et n'en est pas un. Son détail est la seule
+    phrase du message d'échec : il est traduit."""
     capabilities.error = step.error or "empty_response"
-    capabilities.detail = (f"{refused} ({step.error})" if step.error
-                           else f"réponse vide ({capabilities.error})")
+    capabilities.detail = (_t(refused_key, error=step.error) if step.error
+                           else _t("caps.empty", error=capabilities.error))
     return capabilities
 
 
@@ -177,7 +178,7 @@ def probe(llm, model=""):
         capabilities.detail = f"outils refusés ({first.error})"
         return capabilities
     if first.error or _empty(first):
-        return _interrupted(capabilities, first, "appel refusé")
+        return _interrupted(capabilities, first, "caps.refused")
 
     capabilities.accepts_tools = True
     names = _tool_names(first)
@@ -197,7 +198,7 @@ def probe(llm, model=""):
                 for c in (first.tool_calls or [])])
     second = llm.step(messages + exchange, tools=PROBE_TOOLS)
     if second.error or _empty(second):
-        return _interrupted(capabilities, second, "second tour refusé")
+        return _interrupted(capabilities, second, "caps.second_turn_refused")
 
     second_names = _tool_names(second)
     capabilities.chains = WRITE_TOOL in second_names
