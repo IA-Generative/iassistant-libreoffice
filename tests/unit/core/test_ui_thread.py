@@ -166,7 +166,7 @@ def test_call_rapporte_le_resultat():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _drain_until(dispatcher, thread)
+    _pump_until(dispatcher.drain, thread)
     thread.join(timeout=5)
 
     assert result["value"] == 42
@@ -189,7 +189,7 @@ def test_isolated_call_from_a_worker_completes_without_other_traffic():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _run_event_loop_until(callback, thread)
+    _pump_until(callback.drain, thread)
     thread.join(timeout=5)
 
     assert result["value"] == 42
@@ -207,7 +207,7 @@ def test_call_propage_lexception_de_fn():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _drain_until(dispatcher, thread)
+    _pump_until(dispatcher.drain, thread)
     thread.join(timeout=5)
 
     assert isinstance(captured.get("exc"), KeyError)
@@ -281,23 +281,11 @@ def _raise_key_error():
     raise KeyError("absent")
 
 
-def _drain_until(dispatcher, thread, attempts=300):
-    """Joue le rôle de la boucle d'événements pendant que le worker attend."""
+def _pump_until(step, thread, attempts=300):
+    """Joue la boucle d'événements (`step`) pendant que le worker attend."""
     for _ in range(attempts):
-        dispatcher.drain()
+        step()
         if not thread.is_alive():
-            dispatcher.drain()
-            return
-        threading.Event().wait(0.01)
-
-
-def _run_event_loop_until(callback, thread, attempts=300):
-    """Joue la boucle d'événements, réduite aux tâches confiées à AsyncCallback."""
-    for _ in range(attempts):
-        # Ne jouer qu'une file non vide : l'addCallback du worker est alors
-        # terminé et ne peut pas tomber dans la liste qu'on est en train de vider.
-        if callback.queued:
-            callback.drain()
-        if not thread.is_alive():
+            step()
             return
         threading.Event().wait(0.01)
