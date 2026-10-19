@@ -420,6 +420,25 @@ def test_a_queued_end_of_run_render_does_not_overwrite_the_switched_thread(
     assert "question calc" in shown and "writer" not in shown
 
 
+def test_a_window_that_is_neither_writer_nor_calc_keeps_the_displayed_thread(
+        palette_module, monkeypatch, tmp_path):
+    """Aucun run n'est possible depuis le Centre de démarrage ou Impress : le
+    fil affiché reste celui de la dernière application."""
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    _make_calc_the_active_document(palette)
+    _activate_window(palette_module)
+
+    desktop = MagicMock()
+    desktop.getCurrentComponent.return_value = object()      # ni Text ni Sheets
+    palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
+    _activate_window(palette_module)
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "question calc" in shown and "writer" not in shown
+
+
 def test_starting_a_run_shows_the_thread_of_its_application(
         palette_module, monkeypatch, tmp_path):
     """Document changé sans que la palette soit réactivée (pendant un run,

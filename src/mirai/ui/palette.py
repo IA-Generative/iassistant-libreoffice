@@ -1118,7 +1118,7 @@ class AssistantPalette:
         except Exception:
             pass          # contrôle disposé : la palette se ferme, rien à signaler
         self.refresh_title()
-        self._show_history_of(self.current_app())
+        self._show_history_of(self.current_app(fallback=self._history_app))
 
     def _show_history_of(self, app):
         """Affiche le fil de `app` : celui que son prochain run réinjectera."""
@@ -1164,24 +1164,27 @@ class AssistantPalette:
         except Exception:
             return ""
 
-    def current_app(self):
+    def current_app(self, fallback=None):
         """Application du document ACTIF, pas celle de l'ouverture.
 
-        `self.app`, figé à la création, n'est qu'un défaut de repli.
+        `fallback` est rendu quand le composant courant n'est ni Writer ni
+        Calc (Centre de démarrage, Impress) ; par défaut `self.app`, figé à
+        la création.
         """
+        default = self.app if fallback is None else fallback
         try:
             desktop = self.uno_ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.frame.Desktop", self.uno_ctx)
             model = desktop.getCurrentComponent()
             if model is None:
-                return self.app
+                return default
             if hasattr(model, "Text"):
                 return "writer"
             if hasattr(model, "Sheets"):
                 return "calc"
         except Exception:
             pass
-        return self.app
+        return default
 
     def _describe_selection(self):
         """Décrit la cible courante ; ne rend JAMAIS None ni ne lève."""
