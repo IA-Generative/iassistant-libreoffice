@@ -98,8 +98,8 @@ PULSE_INTERVAL_S = 0.2    # cadence d'animation de la jauge d'activité
 
 # Zone basse : quatre contenus, un seul rectangle. L'identifiant sert aussi de
 # nom de contrôle (« response » est créé dans _build, hors de la boucle).
-# « Conversation » : le fil en cours, restauré d'une session à l'autre (une
-# seule conversation en v1).
+# « Conversation » : le fil de l'application du document actif, restauré
+# d'une session à l'autre.
 TABS = (("response", "tab.conversation"),
         ("suggestions", "tab.suggestions"),
         ("reasoning", "tab.reasoning"),
