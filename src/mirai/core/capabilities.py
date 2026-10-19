@@ -123,7 +123,12 @@ def load_cached(shell, endpoint, model):
 
 
 def save_cached(shell, endpoint, model, capabilities):
-    """Mémorise le verdict sans écraser ceux des autres modèles."""
+    """Mémorise le verdict sans écraser ceux des autres modèles.
+
+    Une sonde interrompue n'est pas un verdict : elle n'est jamais mémorisée.
+    """
+    if capabilities.error:
+        return
     try:
         raw = shell.get_config(CONFIG_KEY, "") or ""
         store = json.loads(raw) if raw else {}

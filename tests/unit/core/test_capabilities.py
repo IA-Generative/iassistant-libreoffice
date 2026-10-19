@@ -188,6 +188,14 @@ def test_verdict_survives_a_round_trip():
     assert restored.model == "m"
 
 
+def test_an_interrupted_probe_is_never_cached():
+    shell = FakeShell()
+    save_cached(shell, "e", "m", Capabilities(chains=True))
+    save_cached(shell, "e", "m", Capabilities(error="http_401"))
+
+    assert load_cached(shell, "e", "m").chains is True
+
+
 def test_cache_is_per_endpoint_and_model():
     """Un verdict vaut pour un couple, pas pour un poste."""
     shell = FakeShell()
