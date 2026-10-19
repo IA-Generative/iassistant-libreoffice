@@ -198,6 +198,7 @@ from .i18n import (
     set_locale as _i18n_set_locale,
 )
 from .shell import runtime as _shell_runtime
+from .shell.open_url import open_url
 from .shell.ui_locale import extension_locale as _extension_locale
 from .security_flow import (
     SecureBootstrapFlow,
@@ -4104,8 +4105,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         server_thread.start()
 
         try:
-            if on_listening:
-                on_listening()
+            if on_listening and not on_listening():
+                return None, "browser_unavailable"
             start = time.time()
             while (
                 time.time() - start < timeout_seconds
@@ -4245,23 +4246,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             "Keycloak auth URL built: "
             f"auth_endpoint={auth_endpoint} client_id={client_id} redirect_uri={redirect_uri}"
         )
-        # Ouvert une fois le serveur de callback à l'écoute : avec une session SSO
-        # déjà ouverte, Keycloak redirige aussitôt vers le callback.
-        def _open_browser():
-            try:
-                import webbrowser
-                webbrowser.open(auth_url)
-            except Exception:
-                try:
-                    from com.sun.star.system import XSystemShellExecute
-                    shell = self.ctx.getServiceManager().createInstanceWithContext(
-                        "com.sun.star.system.SystemShellExecute", self.ctx
-                    )
-                    if isinstance(shell, XSystemShellExecute):
-                        shell.execute(auth_url, "", 0)
-                except Exception as e:
-                    log_to_file(f"Failed to open browser: {str(e)}")
-
         auth_cancel_event = threading.Event()
 
         # Étape 4/5 : attente du callback Keycloak
@@ -4376,11 +4360,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if auth_timeout_seconds < 60:
             auth_timeout_seconds = 60
 
+        # Ouvert une fois le serveur de callback à l'écoute : avec une session SSO
+        # déjà ouverte, Keycloak redirige aussitôt vers le callback.
         code, error = self._wait_for_auth_code(
             redirect_uri, state,
             timeout_seconds=auth_timeout_seconds,
             tick=_tick,
-            cancel_event=auth_cancel_event, on_listening=_open_browser
+            cancel_event=auth_cancel_event,
+            on_listening=lambda: open_url(self.ctx, auth_url),
         )
 
         if wait_dialog:
@@ -4421,6 +4408,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             err_txt = (
                 _t("enroll.timeout_text")
                 if error == "timeout"
+                else _t("msg.no_browser")
+                if error == "browser_unavailable"
                 else _t("enroll.error_config_text", error=error or _t("enroll.unknown_error"))
             )
             if wiz_dialog:
@@ -10330,11 +10319,11 @@ EDITED VERSION:
 
     def _open_url_config(self, key):
         """Ouvre l'URL d'une clé de configuration, avec repli sur le portail."""
-        import webbrowser
         url = self.get_config(key, "") or self.get_config("portal_url", "")
         if not url:
             raise RuntimeError(f"aucune URL configurée ({key})")
-        webbrowser.open(url)
+        if not open_url(self.ctx, url):
+            raise RuntimeError(_t("msg.no_browser"))
 
     def trigger(self, args):
         # Parse &src= suffix if present (menu, toolbar, key)

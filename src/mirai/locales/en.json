@@ -216,6 +216,7 @@
   "msg.no_answer": "No response received from the model. Check the token and try again.",
   "msg.action_failed_title": "Action failed",
   "msg.action_failed_body": "\"{action}\" could not run.\n\n{exc}",
+  "msg.no_browser": "No browser could be opened on this computer.\n\nSet a default browser, then try again.",
   "msg.action_unavailable_title": "Action unavailable",
   "msg.action_unavailable_body": "The \"{action}\" action is not available here.\n\nOpen a Writer or Calc document, then try again.",
   "llm.answer_language": "LANGUAGE RULE: you MUST answer in English, unless the task explicitly requires another language (for example a translation).",

@@ -26,6 +26,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from unittest.mock import MagicMock, patch
 
 from tests.integration.mock_http import MockHttpRouter
@@ -364,6 +365,78 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
         self._run_pkce_flow(browser)
         self.assertEqual(reached, [False])
+
+    def _run_pkce_flow_with_libreoffice_shell(self, python_browser, shell_execute=None):
+        """Flux PKCE où le service SystemShellExecute de LibreOffice ouvre la page,
+        donc envoie le callback ; rend les URL qu'il a ouvertes et le mock des
+        messages affichés. `shell_execute` remplace l'ouverture par LibreOffice."""
+        opened = []
+        services = self.job.ctx.getServiceManager()
+        others = services.createInstanceWithContext.return_value
+        shell = MagicMock()
+        shell.execute.side_effect = shell_execute or (
+            lambda url, *args: (opened.append(url), _send_callback(url)))
+        # Tout autre service reste le mock partagé, quelle que soit la signature
+        # de l'appel (nom seul, ou nom et contexte).
+        services.createInstanceWithContext.side_effect = lambda name, *args: (
+            shell if name == "com.sun.star.system.SystemShellExecute" else others)
+        shown = self._run_pkce_flow(python_browser)
+        return opened, shown
+
+    def test_02f_without_a_browser_for_python_libreoffice_opens_the_login_page(self):
+        opened, _ = self._run_pkce_flow_with_libreoffice_shell(lambda url: False)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02g_a_failing_python_browser_falls_back_to_libreoffice(self):
+        def browser(url):
+            raise webbrowser.Error("could not locate runnable browser")
+
+        opened, _ = self._run_pkce_flow_with_libreoffice_shell(browser)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02h_login_page_opened_by_python_is_not_opened_again(self):
+        opened, _ = self._run_pkce_flow_with_libreoffice_shell(
+            lambda url: _send_callback(url) == 200)
+        self.assertEqual(opened, [])
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02i_log_keeps_no_authorization_parameter_when_libreoffice_fails(self):
+        """L'exception de LibreOffice cite l'URL complète, state et code_challenge
+        compris : le journal n'en garde que le type."""
+        urls = []
+
+        def browser(url):
+            urls.append(url)
+            return False
+
+        def shell_execute(url, *args):
+            # Le callback part d'abord : le test n'attend pas le délai du flux.
+            _send_callback(url)
+            raise RuntimeError(
+                f"XSystemShellExecute.execute URIS_ONLY with non-absolute URI reference {url}")
+
+        with self.assertLogs(level="INFO") as logs:
+            self._run_pkce_flow_with_libreoffice_shell(browser, shell_execute)
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
+        secrets = [params["state"][0], params["code_challenge"][0]]
+        self.assertEqual([line for line in logs.output if any(s in line for s in secrets)], [])
+        self.assertTrue(any("RuntimeError" in line for line in logs.output))
+
+    def test_02j_when_libreoffice_opens_no_browser_either_the_user_is_told_at_once(self):
+        """Ni Python ni LibreOffice n'ouvrent la page : message immédiat au lieu
+        du délai d'attente."""
+        def shell_execute(url, *args):
+            raise RuntimeError("no https handler")
+
+        started = time.time()
+        opened, shown = self._run_pkce_flow_with_libreoffice_shell(lambda url: False, shell_execute)
+        self.assertLess(time.time() - started, 10)
+        self.assertEqual(opened, [])
+        self.assertEqual(self._exchanged_codes(), [])
+        shown.assert_called_once()
+        self.assertIn(t("msg.no_browser"), shown.call_args.args[1])
 
     def test_02e_relogin_failure_is_shown(self):
         """Poste déjà enrôlé : la reconnexion passe sans wizard, son échec
