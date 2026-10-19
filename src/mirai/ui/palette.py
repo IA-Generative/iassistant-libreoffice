@@ -1551,7 +1551,7 @@ class AssistantPalette:
         self.conversation.clear()
         self._current_exchange = []
         self._history_cache = None
-        self._models["response"].Text = ""
+        self._set_text("response", "")
         self.set_journal_text("")
         self.set_status(_t("palette.cleared"))
 

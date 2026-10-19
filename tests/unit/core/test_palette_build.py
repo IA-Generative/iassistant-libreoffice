@@ -61,6 +61,9 @@ class FakeControl:
         self.visible = True
         self.model = FakeControlModel()
         self.listeners = []
+        # Ce que l'écran affiche : écrire `model.Text` ne repeint pas un
+        # contrôle doté d'un peer, seul `setText()` le fait.
+        self.shown_text = ""
 
     def setPosSize(self, *_args):
         pass
@@ -88,6 +91,7 @@ class FakeControl:
 
     def setText(self, text):
         self.model.Text = text
+        self.shown_text = text
 
     def isVisible(self):
         return self.visible
@@ -1169,3 +1173,14 @@ def test_a_deferred_action_is_released_once_it_has_run(palette_module):
     async_callback.run()
     gc.collect()
     assert deferred() is None
+
+
+def test_new_conversation_clears_the_displayed_reply(palette_module):
+    palette = _build(palette_module)
+    palette._append_response("MIrAI : ", "ancienne réponse")
+    response = palette_module._fake_dialog.getControl("response")
+    assert "ancienne réponse" in response.shown_text
+    for listener in palette_module._fake_dialog.getControl("link_clear").listeners:
+        if hasattr(listener, "mousePressed"):
+            listener.mousePressed(None)
+    assert response.shown_text == ""
