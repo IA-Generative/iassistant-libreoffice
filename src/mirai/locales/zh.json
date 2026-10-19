@@ -216,6 +216,7 @@
   "msg.no_answer": "未收到模型响应。请检查令牌并重试。",
   "msg.action_failed_title": "操作失败",
   "msg.action_failed_body": "“{action}” 无法执行。\n\n{exc}",
+  "msg.no_browser": "无法在此计算机上打开浏览器。\n\n请设置默认浏览器，然后重试。",
   "msg.action_unavailable_title": "操作不可用",
   "msg.action_unavailable_body": "“{action}” 操作在此处不可用。\n\n请打开 Writer 或 Calc 文档后重试。",
   "llm.answer_language": "语言规则：你必须用中文回答，除非任务明确要求使用其他语言（例如翻译）。",

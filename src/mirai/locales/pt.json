@@ -216,6 +216,7 @@
   "msg.no_answer": "Nenhuma resposta recebida do modelo. Verifique o token e tente novamente.",
   "msg.action_failed_title": "Ação impossível",
   "msg.action_failed_body": "«{action}» não pôde ser executada.\n\n{exc}",
+  "msg.no_browser": "Não foi possível abrir nenhum navegador neste computador.\n\nDefina um navegador padrão e tente novamente.",
   "msg.action_unavailable_title": "Ação indisponível",
   "msg.action_unavailable_body": "A ação «{action}» não está disponível aqui.\n\nAbra um documento do Writer ou Calc e tente novamente.",
   "llm.answer_language": "REGRA DE IDIOMA: você DEVE responder em português, salvo se a tarefa exigir explicitamente outro idioma (por exemplo, uma tradução).",

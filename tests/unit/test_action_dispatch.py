@@ -6,8 +6,9 @@ et il ne se passait *rien du tout* — pas de message, pas de trace. Un clic san
 effet n'est pas diagnosticable ; c'est ce que ces tests interdisent désormais.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from src.mirai.i18n import t
 from src.mirai.menu_actions.calc import handle_calc_action
 from src.mirai.menu_actions.writer import handle_writer_action
 from tests.stubs.uno_stubs import make_job
@@ -69,6 +70,20 @@ def test_website_works_without_any_document():
     job, rec = _job()
     assert job._handle_shell_action("OpenmiraiWebsite") is True
     assert rec.opened_urls == ["portal_url"]
+
+
+def test_documentation_without_any_browser_tells_the_user():
+    """Ni Python ni LibreOffice n'ouvrent l'URL : un message, pas un clic muet."""
+    job = make_job()
+    messages = []
+    job._show_message = lambda title, body: messages.append(body)
+    job._send_telemetry = lambda *a, **k: None
+    job.get_config = lambda key, default="": "https://doc.example" if key == "doc_url" else default
+    job.ctx.getServiceManager().createInstanceWithContext.side_effect = RuntimeError("no handler")
+
+    with patch("webbrowser.open", return_value=False):
+        assert job._handle_shell_action("Documentation") is True
+    assert messages and t("msg.no_browser") in messages[0]
 
 
 def test_settings_and_about_work_without_any_document():

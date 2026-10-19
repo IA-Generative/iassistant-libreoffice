@@ -424,6 +424,20 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.assertEqual([line for line in logs.output if any(s in line for s in secrets)], [])
         self.assertTrue(any("RuntimeError" in line for line in logs.output))
 
+    def test_02j_when_libreoffice_opens_no_browser_either_the_user_is_told_at_once(self):
+        """Ni Python ni LibreOffice n'ouvrent la page : message immédiat au lieu
+        du délai d'attente."""
+        def shell_execute(url, *args):
+            raise RuntimeError("no https handler")
+
+        started = time.time()
+        opened, shown = self._run_pkce_flow_with_libreoffice_shell(lambda url: False, shell_execute)
+        self.assertLess(time.time() - started, 10)
+        self.assertEqual(opened, [])
+        self.assertEqual(self._exchanged_codes(), [])
+        shown.assert_called_once()
+        self.assertIn(t("msg.no_browser"), shown.call_args.args[1])
+
     def test_02e_relogin_failure_is_shown(self):
         """Poste déjà enrôlé : la reconnexion passe sans wizard, son échec
         s'affiche quand même."""
