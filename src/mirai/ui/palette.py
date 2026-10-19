@@ -1122,6 +1122,9 @@ class AssistantPalette:
 
     def _show_history_of(self, app):
         """Affiche le fil de `app` : celui que son prochain run réinjectera."""
+        # Un rendu de fin de run encore en file passerait APRÈS celui-ci et
+        # ramènerait l'autre fil à l'écran : on le livre d'abord.
+        self.dispatcher.drain()
         if app == self._history_app:
             return
         self._history_app = app

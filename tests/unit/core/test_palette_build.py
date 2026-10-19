@@ -393,6 +393,33 @@ def test_a_failed_run_message_survives_a_round_trip_to_the_other_application(
     assert "⚠ Erreur HTTP 500" in shown and "question writer" in shown
 
 
+def test_a_queued_end_of_run_render_does_not_overwrite_the_switched_thread(
+        palette_module, monkeypatch, tmp_path):
+    """Le rendu de fin de run posté par le worker attend la boucle d'événements :
+    activer la palette sur l'autre application entre-temps ne doit pas laisser
+    ce rendu recouvrir le fil nouvellement affiché."""
+    from src.mirai.core.ui_thread import MainThreadDispatcher
+    from tests.unit.core.test_ui_thread import FakeAsyncCallback, FakeUnoContext
+
+    callback = FakeAsyncCallback()
+    monkeypatch.setattr(palette_module, "MainThreadDispatcher",
+                        lambda _ctx, log=None: MainThreadDispatcher(FakeUnoContext(callback)))
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    worker = threading.Thread(
+        target=lambda: palette._append_response("MIrAI : ", "réponse finale writer"))
+    worker.start()
+    worker.join()
+
+    _make_calc_the_active_document(palette)
+    _activate_window(palette_module)
+    callback.drain()          # la boucle d'événements livre le lot en attente
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "question calc" in shown and "writer" not in shown
+
+
 def test_starting_a_run_shows_the_thread_of_its_application(
         palette_module, monkeypatch, tmp_path):
     """Document changé sans que la palette soit réactivée (pendant un run,
