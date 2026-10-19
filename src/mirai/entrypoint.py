@@ -4253,14 +4253,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 if webbrowser.open(auth_url):
                     return
             except Exception as e:
-                log_to_file(f"webbrowser.open failed: {str(e)}")
+                log_to_file(f"webbrowser.open failed: {type(e).__name__}")
             log_to_file("Python opened no browser: opening the login page through LibreOffice")
             try:
                 self.ctx.getServiceManager().createInstanceWithContext(
                     "com.sun.star.system.SystemShellExecute", self.ctx
                 ).execute(auth_url, "", 2)  # URIS_ONLY : jamais un fichier ni un programme local
             except Exception as e:
-                log_to_file(f"Failed to open browser: {str(e)}")
+                log_to_file(f"Failed to open browser: {type(e).__name__}")
 
         auth_cancel_event = threading.Event()
 
