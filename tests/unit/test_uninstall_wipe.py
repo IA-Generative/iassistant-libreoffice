@@ -129,7 +129,7 @@ def test_nothing_is_written_after_the_wipe(tmp_path):
     job._save_update_state({"campaign_id": 1, "target_version": "2"}, "downloaded")
     job._save_prompt_calc("x")
     FileJsonStore(str(tmp_path / "mirai" / "state.json")).write({"a": 1})
-    ConversationStore(str(tmp_path / "mirai")).append("user", "salut")
+    ConversationStore(str(tmp_path / "mirai")).append("user", "salut", "writer")
     assert job._prompt_log_path() == ""
     assert not (tmp_path / "mirai").exists()
 

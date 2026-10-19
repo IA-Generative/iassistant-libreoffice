@@ -35,7 +35,7 @@ class ConversationStore:
         except Exception:
             return []
 
-    def append(self, role, text, app=""):
+    def append(self, role, text, app):
         entries = self.load()
         entries.append({"role": str(role), "text": str(text), "app": str(app)})
         entries = entries[-self._max_entries:]

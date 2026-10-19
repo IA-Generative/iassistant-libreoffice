@@ -31,8 +31,8 @@ def test_clear():
 def test_max_exchanges_cap():
     store = _store(max_exchanges=2)
     for i in range(10):
-        store.append("user", f"q{i}")
-        store.append("assistant", f"r{i}")
+        store.append("user", f"q{i}", "writer")
+        store.append("assistant", f"r{i}", "writer")
     entries = store.load()
     assert len(entries) == 4
     assert entries[-1]["text"] == "r9"
@@ -41,8 +41,8 @@ def test_max_exchanges_cap():
 def test_max_bytes_cap():
     store = _store(max_bytes=2000)
     for _ in range(10):
-        store.append("user", "x" * 400)
-        store.append("assistant", "y" * 400)
+        store.append("user", "x" * 400, "writer")
+        store.append("assistant", "y" * 400, "writer")
     size = os.path.getsize(store._path)
     assert size <= 3000  # marge pour l'enveloppe JSON
     assert len(store.load()) >= 2
@@ -50,11 +50,11 @@ def test_max_bytes_cap():
 
 def test_corrupted_file_recovers_empty():
     store = _store()
-    store.append("user", "ok")
+    store.append("user", "ok", "writer")
     with open(store._path, "w", encoding="utf-8") as fh:
         fh.write("{pas du json")
     assert store.load() == []
-    store.append("user", "après corruption")   # ne lève pas
+    store.append("user", "après corruption", "writer")   # ne lève pas
     assert len(store.load()) == 1
 
 
