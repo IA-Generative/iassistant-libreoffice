@@ -34,7 +34,6 @@ def test_model_capabilities(job):
             _t("entry.test_failed", detail=exc))
         return None
 
-    caps.save_cached(shell, endpoint, model_name, verdict)
     shell.log(f"[capabilities] {model_name} → accepte={verdict.accepts_tools} "
               f"appelle={verdict.calls_tool} enchaîne={verdict.chains} "
               f"({verdict.detail})")
@@ -45,6 +44,15 @@ def test_model_capabilities(job):
         "assistant.chains": str(verdict.chains).lower(),
     })
 
+    # Une sonde interrompue ne dit rien du modèle. Ni verdict annoncé, ni
+    # verdict mémorisé : il écraserait le précédent.
+    if verdict.error:
+        job._show_message(
+            _t("entry.test_title"),
+            _t("entry.test_failed", detail=verdict.detail))
+        return verdict
+
+    caps.save_cached(shell, endpoint, model_name, verdict)
     job._show_message(
         _t("entry.test_title"),
         _t("entry.model_line", model=model_name or _t("entry.model_undefined"))
