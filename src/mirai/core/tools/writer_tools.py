@@ -5,12 +5,24 @@ JAMAIS en argument JSON — elle arrive par le sink de streaming (voir
 orchestrator). Les tools mutants restent donc courts et sûrs.
 """
 
+from ..registry import result_max_chars
 from ..tool_calls import ToolResult, ToolSpec
 
 try:
     from com.sun.star.text.ControlCharacter import PARAGRAPH_BREAK
 except ImportError:      # hors LibreOffice (tests)
     PARAGRAPH_BREAK = 0
+
+# Rappel d'action DANS le résultat de l'outil. Une consigne du prompt
+# système se dilue ; celle-ci arrive juste avant que le modèle ne décide de
+# son prochain coup. Sans elle, il lisait le document (iterations=2) puis
+# répondait du texte, en laissant le document intact.
+_NEXT_STEP = ("\n\nÉTAPE SUIVANTE OBLIGATOIRE : si la demande implique de "
+              "modifier le document, appelle MAINTENANT writer_replace_paragraphs "
+              "avec le texte réécrit. Ne réponds pas le texte modifié en clair — "
+              "il ne serait PAS appliqué au document.")
+# Borne haute d'un repère de fin de carte, numéros compris.
+_END_MARKER_ROOM = 100
 
 
 def _selection_range(ctx):
@@ -31,7 +43,11 @@ def get_selection(ctx, args):
 
 
 def get_document_map(ctx, args):
-    max_chars = int(args.get("max_chars", 6000))
+    # Le registre coupe tout résultat au-delà de son plafond : la place des
+    # repères de fin est réservée avant de remplir, sinon ce sont eux qu'il
+    # couperait.
+    max_chars = min(int(args.get("max_chars", 6000)),
+                    result_max_chars(ctx) - _END_MARKER_ROOM - len(_NEXT_STEP))
     lines = []
     total = 0
     index = 0
@@ -72,14 +88,7 @@ def get_document_map(ctx, args):
         # paragraphes, le modèle ignorant combien il y en avait.
         body += (f"\n[FIN DU DOCUMENT — {index} paragraphes au total, "
                  f"de [P1] à [P{index}]]")
-    # Rappel d'action DANS le résultat de l'outil. Une consigne du prompt
-    # système se dilue ; celle-ci arrive juste avant que le modèle ne décide de
-    # son prochain coup. Sans elle, il lisait le document (iterations=2) puis
-    # répondait du texte, en laissant le document intact.
-    body += ("\n\nÉTAPE SUIVANTE OBLIGATOIRE : si la demande implique de "
-             "modifier le document, appelle MAINTENANT writer_replace_paragraphs "
-             "avec le texte réécrit. Ne réponds pas le texte modifié en clair — "
-             "il ne serait PAS appliqué au document.")
+    body += _NEXT_STEP
     return ToolResult(call_id="", ok=True, content=body or "(document vide)",
                       data={"paragraph_count": index, "truncated": truncated})
 
