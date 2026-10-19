@@ -101,13 +101,7 @@ class MainThreadDispatcher:
             # Déjà au bon endroit : inutile de faire un détour par la file.
             _Task(fn).run()
             return True
-        self._queue.put(fn)
-        # Relancer la pompe si elle s'est éteinte faute de travail. L'armement
-        # depuis un worker n'est pas garanti d'être délivré immédiatement — il
-        # le sera au premier réveil de la boucle — mais tant qu'un run produit
-        # du trafic régulier (fragments, jauge), la pompe reste vivante.
-        if not self._pumping:
-            self._arm_pump_from_worker()
+        self._enqueue(fn)
         return True
 
     def call(self, fn, timeout: float = 30.0):
@@ -137,9 +131,7 @@ class MainThreadDispatcher:
             except Exception as exc:      # relayée à l'appelant
                 result_queue.put(("error", exc))
 
-        self._queue.put(_run_and_report)
-        if not self._pumping:
-            self._arm_pump_from_worker()
+        self._enqueue(_run_and_report)
         try:
             status, payload = result_queue.get(timeout=timeout)
         except queue.Empty:
@@ -182,6 +174,19 @@ class MainThreadDispatcher:
                 fn()
             except Exception:
                 pass          # une mise à jour d'affichage ratée n'est pas fatale
+
+    def _enqueue(self, fn):
+        """File la tâche PUIS relit la pompe, pour la relancer si elle s'est éteinte.
+
+        L'ordre compte : `_pump_once` relit la file après avoir baissé le
+        drapeau, et c'est ce qui rattrape une tâche déposée pendant
+        l'extinction. L'armement depuis un worker n'est délivré qu'au prochain
+        réveil de la boucle ; tant qu'un run produit du trafic régulier
+        (fragments, jauge), la pompe reste vivante.
+        """
+        self._queue.put(fn)
+        if not self._pumping:
+            self._arm_pump_from_worker()
 
     def _arm_pump_from_worker(self):
         """Tentative d'armement depuis un thread de fond (best effort)."""
