@@ -68,7 +68,9 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
      boucle d'événements ; la tâche attend le prochain geste de l'utilisateur.
      Les tâches passent donc par une file, drainée par une pompe qui tourne sur
      le thread principal et **se réarme elle-même** — armée au démarrage du run
-     (depuis le thread principal), éteinte à sa fin. 0,1 % de CPU au repos.
+     (depuis le thread principal), éteinte à sa fin. Entre deux vagues de
+     travail elle s'éteint ; `post()` et `call()` la réarment depuis le worker,
+     armement délivré au prochain réveil de la boucle. 0,1 % de CPU au repos.
      Il n'existe pas de timer UNO : `com.sun.star.awt.Timer` renvoie `null`.
    - **La pompe s'éteint dès que la file est vide** — se réarmer sans
      condition monopolise la boucle et gèle l'interface immédiatement.
