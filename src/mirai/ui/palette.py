@@ -484,6 +484,7 @@ class AssistantPalette:
         self._bottom_height = 0        # ajusté par le redimensionnement
         self._current_exchange = []    # tour en cours, affiché en tête du fil
         self._history_cache = None     # historique relu seulement quand il change
+        self._history_app = app        # application dont le fil est affiché
         self._journal_lines = []       # onglet « Actions » du run courant
         self._tab_before_reasoning = None   # onglet à restaurer en refermant
         self._analysis_text = ""       # analyse du document, quand elle arrive
@@ -1105,7 +1106,10 @@ class AssistantPalette:
             pass
 
     def refresh_selection_label(self):
-        """Recalcule le libellé de cible ET le titre. Thread principal uniquement."""
+        """Recalcule le libellé de cible, le titre ET le fil affiché.
+
+        Thread principal uniquement.
+        """
         if self.busy:
             return
         try:
@@ -1113,6 +1117,16 @@ class AssistantPalette:
         except Exception:
             pass          # contrôle disposé : la palette se ferme, rien à signaler
         self.refresh_title()
+        self._show_history_of(self.current_app())
+
+    def _show_history_of(self, app):
+        """Affiche le fil de `app` : celui que son prochain run réinjectera."""
+        if app == self._history_app:
+            return
+        self._history_app = app
+        self._current_exchange = []
+        self._history_cache = None
+        self._render_conversation()
 
     def refresh_title(self):
         """Nomme dans le titre le document sur lequel la demande portera.
@@ -1482,7 +1496,7 @@ class AssistantPalette:
         # grande chaîne postée au thread principal — de quoi saturer sa file
         # d'événements et donner l'impression d'une interface figée.
         if self._history_cache is None:
-            self._history_cache = self.conversation.load()
+            self._history_cache = self.conversation.load_for(self._history_app)
         entries = self._history_cache
         # Les entrées arrivent dans l'ordre chronologique, par paires
         # (utilisateur, assistant) : on regroupe puis on inverse les groupes,
@@ -1650,6 +1664,7 @@ class AssistantPalette:
         self._delta_buffer.reset()
         self._current_exchange = []    # nouvel échange : le précédent est persisté
         self._history_cache = None     # le tour précédent a rejoint l'historique
+        self._history_app = ctx.app
         self._journal_lines = []
         self._progress = RunProgress()
         self._set_input_enabled(False)
