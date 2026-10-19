@@ -50,6 +50,25 @@ class FakeUnoContext:
         return self._callback
 
 
+class _DispatcherStoppedUnderAWorker(MainThreadDispatcher):
+    """Dispatcher qui laisse un worker poster à l'instant où la pompe s'éteint.
+
+    Le worker passe juste avant l'écriture de `_pumping = False` et voit donc
+    la pompe encore allumée : une fenêtre trop étroite pour être atteinte de
+    façon fiable par le minutage.
+    """
+
+    worker_action = None
+
+    def __setattr__(self, name, value):
+        if name == "_pumping" and value is False and self.worker_action is not None:
+            action, self.worker_action = self.worker_action, None
+            thread = threading.Thread(target=action)
+            thread.start()
+            thread.join(timeout=5)
+        super().__setattr__(name, value)
+
+
 def _dispatcher(fail=False):
     callback = FakeAsyncCallback()
     return MainThreadDispatcher(FakeUnoContext(callback, fail=fail)), callback
@@ -80,6 +99,26 @@ def test_post_from_a_worker_waits_for_the_pump():
 
     assert seen == [], "la tâche ne doit pas s'exécuter dans le worker"
     dispatcher.drain()
+    assert seen == ["fait"]
+
+
+def test_task_posted_while_the_pump_stops_still_runs():
+    """Une tâche postée pendant l'extinction de la pompe ne reste pas en file.
+
+    Entrelacement reproduit : la pompe vient de constater sa file vide, un
+    worker poste en la voyant encore allumée, puis elle s'éteint.
+    """
+    callback = FakeAsyncCallback()
+    dispatcher = _DispatcherStoppedUnderAWorker(FakeUnoContext(callback))
+    seen = []
+    dispatcher.worker_action = lambda: dispatcher.post(lambda: seen.append("fait"))
+
+    dispatcher.start_pump()
+    for _ in range(10):
+        if not callback.queued:
+            break
+        callback.drain()
+
     assert seen == ["fait"]
 
 
@@ -127,7 +166,30 @@ def test_call_rapporte_le_resultat():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _drain_until(dispatcher, thread)
+    _pump_until(dispatcher.drain, thread)
+    thread.join(timeout=5)
+
+    assert result["value"] == 42
+
+
+def test_isolated_call_from_a_worker_completes_without_other_traffic():
+    """Un call() seul, sans aucun post() autour, doit aboutir.
+
+    La boucle d'événements ne joue que ce qu'AsyncCallback lui a confié : rien
+    d'autre ne vide la file du dispatcher à sa place.
+    """
+    dispatcher, callback = _dispatcher()
+    result = {}
+
+    def worker():
+        try:
+            result["value"] = dispatcher.call(lambda: 6 * 7, timeout=2)
+        except DispatcherTimeout as exc:
+            result["value"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    _pump_until(callback.drain, thread)
     thread.join(timeout=5)
 
     assert result["value"] == 42
@@ -145,7 +207,7 @@ def test_call_propage_lexception_de_fn():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _drain_until(dispatcher, thread)
+    _pump_until(dispatcher.drain, thread)
     thread.join(timeout=5)
 
     assert isinstance(captured.get("exc"), KeyError)
@@ -219,11 +281,11 @@ def _raise_key_error():
     raise KeyError("absent")
 
 
-def _drain_until(dispatcher, thread, attempts=300):
-    """Joue le rôle de la boucle d'événements pendant que le worker attend."""
+def _pump_until(step, thread, attempts=300):
+    """Joue la boucle d'événements (`step`) pendant que le worker attend."""
     for _ in range(attempts):
-        dispatcher.drain()
+        step()
         if not thread.is_alive():
-            dispatcher.drain()
+            step()
             return
         threading.Event().wait(0.01)
