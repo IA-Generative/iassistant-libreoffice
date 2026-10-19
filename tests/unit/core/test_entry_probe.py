@@ -1,7 +1,7 @@
 """« Tester le modèle » : seule une sonde aboutie devient un verdict.
 
-Une sonde interrompue (jeton refusé, délai dépassé, relais indisponible) ne dit
-rien du modèle. La mémoriser écraserait le verdict précédent et figerait le
+Une sonde interrompue (jeton refusé, délai dépassé, relais indisponible, réponse
+vide) ne dit rien du modèle. La mémoriser écraserait le verdict précédent et figerait le
 modèle hors du mode agentique jusqu'à la prochaine sonde réussie ; l'annoncer
 comme un verdict tromperait l'utilisateur.
 """
@@ -17,6 +17,7 @@ from tests.stubs.fake_shell import (
     FakeShell,
     FakeSSEResponse,
     native_tool_call_chunks,
+    reasoning_chunks,
     text_chunks,
 )
 
@@ -30,6 +31,11 @@ def _http_error(status):
                                   io.BytesIO(b"{}"))
 
 
+def _starved():
+    """Le modèle réfléchit jusqu'au plafond de jetons et ne répond jamais."""
+    return FakeSSEResponse(reasoning_chunks("hmm", finish="length"))
+
+
 # Scénario → (réponses du relais, erreur attendue dans le message).
 INTERRUPTED = {
     "jeton_refuse": (lambda: [_http_error(401), _http_error(401)], "http_401"),
@@ -39,6 +45,8 @@ INTERRUPTED = {
                      "writer_get_document_map", "{}")),
                  _http_error(503)],
         "http_503"),
+    # Premier essai puis reprise élargie, affamés tous les deux.
+    "reponse_vide": (lambda: [_starved(), _starved()], "empty_response"),
 }
 
 

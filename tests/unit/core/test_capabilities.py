@@ -123,6 +123,26 @@ def test_relay_error_outside_native_mode_is_an_interruption(configured_mode):
     assert verdict.supports_agentic is False
 
 
+def test_a_step_without_text_nor_tool_call_measures_nothing():
+    """Flux vide (raisonnement qui épuise le budget, erreur envoyée en bande) :
+    ni verdict, ni « n'appelle aucun outil »."""
+    llm = ScriptedLLM([_Step()])
+
+    verdict = probe(llm, model="muet")
+
+    assert verdict.error == "empty_response"
+    assert verdict.supports_agentic is False
+
+
+def test_an_empty_second_turn_measures_nothing():
+    llm = ScriptedLLM([_Step([_read_call()]), _Step()])
+
+    verdict = probe(llm, model="muet")
+
+    assert verdict.error == "empty_response"
+    assert verdict.chains is False
+
+
 def test_second_turn_failure_is_not_a_chain():
     llm = ScriptedLLM([_Step([_read_call()]), _Step(error="network_error")])
 

@@ -142,6 +142,19 @@ def _tool_names(step):
     return [call.name for call in (getattr(step, "tool_calls", None) or [])]
 
 
+def _empty(step):
+    """Flux terminé sans texte ni appel d'outil : rien n'a été mesuré."""
+    return not (step.text or "").strip() and not step.tool_calls
+
+
+def _interrupted(capabilities, step, refused):
+    """Le verdict porte l'erreur, et n'en est pas un."""
+    capabilities.error = step.error or "empty_response"
+    capabilities.detail = (f"{refused} ({step.error})" if step.error
+                           else f"réponse vide ({capabilities.error})")
+    return capabilities
+
+
 def probe(llm, model=""):
     """Mesure les trois capacités. Deux allers-retours au plus.
 
@@ -158,10 +171,8 @@ def probe(llm, model=""):
         # de la capacité A. En auto, le client a déjà basculé en JSON.
         capabilities.detail = f"outils refusés ({first.error})"
         return capabilities
-    if first.error:
-        capabilities.error = first.error
-        capabilities.detail = f"appel refusé ({first.error})"
-        return capabilities
+    if first.error or _empty(first):
+        return _interrupted(capabilities, first, "appel refusé")
 
     capabilities.accepts_tools = True
     names = _tool_names(first)
@@ -180,10 +191,8 @@ def probe(llm, model=""):
         first, [ToolResult(call_id=getattr(c, "id", ""), ok=True, content=PROBE_MAP)
                 for c in (first.tool_calls or [])])
     second = llm.step(messages + exchange, tools=PROBE_TOOLS)
-    if second.error:
-        capabilities.error = second.error
-        capabilities.detail = f"second tour refusé ({second.error})"
-        return capabilities
+    if second.error or _empty(second):
+        return _interrupted(capabilities, second, "second tour refusé")
 
     second_names = _tool_names(second)
     capabilities.chains = WRITE_TOOL in second_names
