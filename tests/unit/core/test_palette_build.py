@@ -314,6 +314,163 @@ def test_current_exchange_stays_on_top(palette_module):
     assert text.index("en cours") < text.index("ancienne")
 
 
+def _make_calc_the_active_document(palette):
+    class _Calc:
+        Sheets = object()
+        CurrentController = None
+
+    desktop = MagicMock()
+    desktop.getCurrentComponent.return_value = _Calc()
+    palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
+
+
+def _make_writer_the_active_document(palette):
+    class _Writer:
+        Text = object()
+        CurrentController = None
+
+    desktop = MagicMock()
+    desktop.getCurrentComponent.return_value = _Writer()
+    palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
+
+
+def _activate_window(palette_module):
+    for listener in palette_module._fake_dialog.top_listeners:
+        listener.windowActivated(None)
+
+
+def _store_with_both_applications(directory):
+    from src.mirai.core.conversation import ConversationStore
+    store = ConversationStore(str(directory))
+    for app in ("writer", "calc"):
+        store.append("user", f"question {app}", app)
+        store.append("assistant", f"réponse {app}", app)
+    return store
+
+
+@pytest.mark.parametrize("app, other", [("writer", "calc"), ("calc", "writer")])
+def test_conversation_tab_shows_only_the_current_application(
+        palette_module, monkeypatch, tmp_path, app, other):
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    _build(palette_module, app)
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert f"question {app}" in shown and f"réponse {app}" in shown
+    assert f"question {other}" not in shown and f"réponse {other}" not in shown
+
+
+def test_conversation_tab_follows_a_switch_to_another_application(
+        palette_module, monkeypatch, tmp_path):
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    palette._append_response("MIrAI : ", "dernier échange writer")
+    _make_calc_the_active_document(palette)
+    for listener in palette_module._fake_dialog.top_listeners:
+        listener.windowActivated(None)
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "question calc" in shown and "réponse calc" in shown
+    assert "writer" not in shown
+
+
+def test_a_failed_run_message_survives_a_round_trip_to_the_other_application(
+        palette_module, monkeypatch, tmp_path):
+    """Un run en échec n'est pas persisté : son message ne vit que dans le tour
+    en cours, qui réapparaît quand on revient sur son application."""
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    palette._append_response("MIrAI : ", "⚠ Erreur HTTP 500")
+
+    _make_calc_the_active_document(palette)
+    _activate_window(palette_module)
+    _make_writer_the_active_document(palette)
+    _activate_window(palette_module)
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "⚠ Erreur HTTP 500" in shown and "question writer" in shown
+
+
+def test_a_queued_end_of_run_render_does_not_overwrite_the_switched_thread(
+        palette_module, monkeypatch, tmp_path):
+    """Le rendu de fin de run posté par le worker attend la boucle d'événements :
+    activer la palette sur l'autre application entre-temps ne doit pas laisser
+    ce rendu recouvrir le fil nouvellement affiché."""
+    from src.mirai.core.ui_thread import MainThreadDispatcher
+    from tests.unit.core.test_ui_thread import FakeAsyncCallback, FakeUnoContext
+
+    callback = FakeAsyncCallback()
+    monkeypatch.setattr(palette_module, "MainThreadDispatcher",
+                        lambda _ctx, log=None: MainThreadDispatcher(FakeUnoContext(callback)))
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    worker = threading.Thread(
+        target=lambda: palette._append_response("MIrAI : ", "réponse finale writer"))
+    worker.start()
+    worker.join()
+
+    _make_calc_the_active_document(palette)
+    _activate_window(palette_module)
+    callback.drain()          # la boucle d'événements livre le lot en attente
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "question calc" in shown and "writer" not in shown
+
+
+def test_a_window_that_is_neither_writer_nor_calc_keeps_the_displayed_thread(
+        palette_module, monkeypatch, tmp_path):
+    """Aucun run n'est possible depuis le Centre de démarrage ou Impress : le
+    fil affiché reste celui de la dernière application."""
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    _make_calc_the_active_document(palette)
+    _activate_window(palette_module)
+
+    desktop = MagicMock()
+    desktop.getCurrentComponent.return_value = object()      # ni Text ni Sheets
+    palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
+    _activate_window(palette_module)
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "question calc" in shown and "writer" not in shown
+
+
+def test_new_conversation_clears_only_the_displayed_application(
+        palette_module, monkeypatch, tmp_path):
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+
+    palette._on_clear()
+
+    assert store.load_for("writer") == []
+    assert [e["text"] for e in store.load_for("calc")] == ["question calc", "réponse calc"]
+    assert palette_module._fake_dialog.getControl("response").shown_text == ""
+
+
+def test_starting_a_run_shows_the_thread_of_its_application(
+        palette_module, monkeypatch, tmp_path):
+    """Document changé sans que la palette soit réactivée (pendant un run,
+    l'activation est ignorée) : l'envoi suivant affiche le fil qu'il réinjecte."""
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    monkeypatch.setattr(palette, "_run_in_worker", lambda *_a: None)
+    _make_calc_the_active_document(palette)
+    palette._models["prompt"].Text = "totalise la colonne"
+
+    palette._start_run(preset=None)
+    palette._stop_pulse()
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "totalise la colonne" in shown and "question calc" in shown
+    assert "writer" not in shown
+
+
 # Mode « ajouter à la suite »
 
 def test_append_mode_checkbox_exists(palette_module):

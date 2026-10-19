@@ -35,7 +35,7 @@ class ConversationStore:
         except Exception:
             return []
 
-    def append(self, role, text, app=""):
+    def append(self, role, text, app):
         entries = self.load()
         entries.append({"role": str(role), "text": str(text), "app": str(app)})
         entries = entries[-self._max_entries:]
@@ -44,12 +44,18 @@ class ConversationStore:
             entries = entries[2:]   # retire la paire la plus ancienne
         self._write(entries)
 
-    def clear(self):
-        self._write([])
+    def clear_for(self, app):
+        """Efface le fil de `app` ; les autres applications gardent le leur."""
+        self._write([e for e in self.load() if e.get("app") != app])
 
-    def context_messages(self, max_chars=DEFAULT_CONTEXT_MAX_CHARS):
-        """Derniers échanges au format messages[], plafonnés en caractères."""
-        entries = self.load()
+    def load_for(self, app):
+        """Entrées de `app` seules ; une entrée sans application connue
+        n'appartient à aucune."""
+        return [e for e in self.load() if e.get("app") == app]
+
+    def context_messages(self, app, max_chars=DEFAULT_CONTEXT_MAX_CHARS):
+        """Derniers échanges de `app` au format messages[], plafonnés en caractères."""
+        entries = self.load_for(app)
         selected = []
         total = 0
         for entry in reversed(entries):

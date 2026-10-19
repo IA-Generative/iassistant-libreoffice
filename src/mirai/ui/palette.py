@@ -98,8 +98,8 @@ PULSE_INTERVAL_S = 0.2    # cadence d'animation de la jauge d'activité
 
 # Zone basse : quatre contenus, un seul rectangle. L'identifiant sert aussi de
 # nom de contrôle (« response » est créé dans _build, hors de la boucle).
-# « Conversation » : le fil en cours, restauré d'une session à l'autre (une
-# seule conversation en v1).
+# « Conversation » : le fil de l'application du document actif, restauré
+# d'une session à l'autre.
 TABS = (("response", "tab.conversation"),
         ("suggestions", "tab.suggestions"),
         ("reasoning", "tab.reasoning"),
@@ -484,6 +484,8 @@ class AssistantPalette:
         self._bottom_height = 0        # ajusté par le redimensionnement
         self._current_exchange = []    # tour en cours, affiché en tête du fil
         self._history_cache = None     # historique relu seulement quand il change
+        self._history_app = app        # application dont le fil est affiché
+        self._exchange_app = app       # application du tour en cours
         self._journal_lines = []       # onglet « Actions » du run courant
         self._tab_before_reasoning = None   # onglet à restaurer en refermant
         self._analysis_text = ""       # analyse du document, quand elle arrive
@@ -1105,7 +1107,10 @@ class AssistantPalette:
             pass
 
     def refresh_selection_label(self):
-        """Recalcule le libellé de cible ET le titre. Thread principal uniquement."""
+        """Recalcule le libellé de cible, le titre ET le fil affiché.
+
+        Thread principal uniquement.
+        """
         if self.busy:
             return
         try:
@@ -1113,6 +1118,18 @@ class AssistantPalette:
         except Exception:
             pass          # contrôle disposé : la palette se ferme, rien à signaler
         self.refresh_title()
+        self._show_history_of(self.current_app(fallback=self._history_app))
+
+    def _show_history_of(self, app):
+        """Affiche le fil de `app` : celui que son prochain run réinjectera."""
+        # Un rendu de fin de run encore en file passerait APRÈS celui-ci et
+        # ramènerait l'autre fil à l'écran : on le livre d'abord.
+        self.dispatcher.drain()
+        if app == self._history_app:
+            return
+        self._history_app = app
+        self._history_cache = None
+        self._render_conversation()
 
     def refresh_title(self):
         """Nomme dans le titre le document sur lequel la demande portera.
@@ -1147,24 +1164,27 @@ class AssistantPalette:
         except Exception:
             return ""
 
-    def current_app(self):
+    def current_app(self, fallback=None):
         """Application du document ACTIF, pas celle de l'ouverture.
 
-        `self.app`, figé à la création, n'est qu'un défaut de repli.
+        `fallback` est rendu quand le composant courant n'est ni Writer ni
+        Calc (Centre de démarrage, Impress) ; par défaut `self.app`, figé à
+        la création.
         """
+        default = self.app if fallback is None else fallback
         try:
             desktop = self.uno_ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.frame.Desktop", self.uno_ctx)
             model = desktop.getCurrentComponent()
             if model is None:
-                return self.app
+                return default
             if hasattr(model, "Text"):
                 return "writer"
             if hasattr(model, "Sheets"):
                 return "calc"
         except Exception:
             pass
-        return self.app
+        return default
 
     def _describe_selection(self):
         """Décrit la cible courante ; ne rend JAMAIS None ni ne lève."""
@@ -1473,7 +1493,9 @@ class AssistantPalette:
         avoir à faire défiler pour voir ce qui vient d'arriver.
         """
         blocks = []
-        if self._current_exchange:
+        # Un run en échec n'est jamais persisté : son tour reste en mémoire et
+        # ne s'affiche que sur le fil de son application.
+        if self._current_exchange and self._exchange_app == self._history_app:
             blocks.append("\n".join(self._current_exchange))
 
         # L'historique est mis en CACHE : cette méthode est rappelée à chaque
@@ -1482,7 +1504,7 @@ class AssistantPalette:
         # grande chaîne postée au thread principal — de quoi saturer sa file
         # d'événements et donner l'impression d'une interface figée.
         if self._history_cache is None:
-            self._history_cache = self.conversation.load()
+            self._history_cache = self.conversation.load_for(self._history_app)
         entries = self._history_cache
         # Les entrées arrivent dans l'ordre chronologique, par paires
         # (utilisateur, assistant) : on regroupe puis on inverse les groupes,
@@ -1548,8 +1570,9 @@ class AssistantPalette:
         if self.busy:
             return
         self._session["clears"] += 1
-        self.conversation.clear()
-        self._current_exchange = []
+        self.conversation.clear_for(self._history_app)
+        if self._exchange_app == self._history_app:   # le tour en cours peut être à l'autre
+            self._current_exchange = []
         self._history_cache = None
         self._set_text("response", "")
         self.set_journal_text("")
@@ -1650,6 +1673,8 @@ class AssistantPalette:
         self._delta_buffer.reset()
         self._current_exchange = []    # nouvel échange : le précédent est persisté
         self._history_cache = None     # le tour précédent a rejoint l'historique
+        self._history_app = ctx.app
+        self._exchange_app = ctx.app
         self._journal_lines = []
         self._progress = RunProgress()
         self._set_input_enabled(False)
