@@ -716,18 +716,16 @@ class AssistantPalette:
             except Exception:
                 pass
 
-        key_handler = _KeyHandler(self._on_send, self.close)
-        prompt_control.addKeyListener(key_handler)
-        self._handlers.append(key_handler)
+        send_handler = _KeyHandler(self._on_send, lambda: None)
+        prompt_control.addKeyListener(send_handler)
+        self._handlers.append(send_handler)
 
-        # Échap doit fermer quel que soit le contrôle qui a le focus : le
-        # brancher sur le seul champ de prompt laissait la fenêtre coincée dès
-        # que le focus était ailleurs (une chip, la zone de réponse…).
+        # Échap ferme la palette quel que soit le contrôle qui a le focus.
         escape_handler = _KeyHandler(lambda: None, self.close)
         self._handlers.append(escape_handler)
-        for name in ("response", "journal", "send", *self._chip_names):
+        for control in dialog.getControls():
             try:
-                dialog.getControl(name).addKeyListener(escape_handler)
+                control.addKeyListener(escape_handler)
             except Exception:
                 pass          # enregistrement du listener refusé : sans gravité
 

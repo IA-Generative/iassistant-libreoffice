@@ -117,6 +117,9 @@ class FakeDialog:
     def getControl(self, name):
         return self.controls.setdefault(name, FakeControl(name))
 
+    def getControls(self):
+        return list(self.controls.values())
+
     def setVisible(self, value):
         self.visible = value
 
@@ -1102,3 +1105,55 @@ def test_current_app_falls_back_when_no_document(palette_module):
     desktop.getCurrentComponent.return_value = None
     palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
     assert palette.current_app() == "writer"
+
+
+# Interactions de la palette
+
+class _AsyncCallback:
+    """com.sun.star.awt.AsyncCallback : garde les rappels, les délivre sur demande."""
+
+    def __init__(self):
+        self.pending = []
+
+    def addCallback(self, callback, data):
+        self.pending.append((callback, data))
+
+    def run(self):
+        pending, self.pending = self.pending, []
+        for callback, data in pending:
+            callback.notify(data)
+
+
+def _deliver_async_callbacks(palette):
+    async_callback = _AsyncCallback()
+    services = palette.uno_ctx.getServiceManager.return_value
+    others = services.createInstanceWithContext.return_value
+    services.createInstanceWithContext.side_effect = lambda name, _ctx: (
+        async_callback if name == "com.sun.star.awt.AsyncCallback" else others)
+    return async_callback
+
+
+def _press_key(palette_module, control_name, key_code):
+    event = SimpleNamespace(KeyCode=key_code, Modifiers=0)
+    for listener in palette_module._fake_dialog.getControl(control_name).listeners:
+        if hasattr(listener, "keyPressed"):
+            listener.keyPressed(event)
+
+
+@pytest.mark.parametrize("control_name", [
+    "prompt", "response", "suggestions", "journal", "reasoning",
+    "append_mode", "link_clear", "send", "chip_summarize",
+])
+def test_escape_closes_the_palette_whatever_control_has_the_focus(palette_module, control_name):
+    palette = _build(palette_module)
+    palette.show()
+    _press_key(palette_module, control_name, palette_module.KEY_ESCAPE)
+    assert palette_module._fake_dialog.visible is False
+
+
+def test_return_in_the_prompt_sends_the_request(palette_module):
+    palette = _build(palette_module)
+    async_callback = _deliver_async_callbacks(palette)
+    _press_key(palette_module, "prompt", palette_module.KEY_RETURN)
+    async_callback.run()
+    assert _step_spans(palette.shell, "run.refused")[0]["refuse.reason"] == "empty_prompt"
