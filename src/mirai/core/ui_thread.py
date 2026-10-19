@@ -101,21 +101,17 @@ class MainThreadDispatcher:
             # Déjà au bon endroit : inutile de faire un détour par la file.
             _Task(fn).run()
             return True
-        self._queue.put(fn)
-        # Relancer la pompe si elle s'est éteinte faute de travail. L'armement
-        # depuis un worker n'est pas garanti d'être délivré immédiatement — il
-        # le sera au premier réveil de la boucle — mais tant qu'un run produit
-        # du trafic régulier (fragments, jauge), la pompe reste vivante.
-        if not self._pumping:
-            self._arm_pump_from_worker()
+        self._enqueue(fn)
         return True
 
     def call(self, fn, timeout: float = 30.0):
         """Exécute fn sur le thread principal et rend son résultat.
 
-        À appeler depuis le worker. Lève DispatcherClosed si la palette est
-        fermée, DispatcherTimeout au-delà du délai, et propage telle quelle
-        l'exception levée par fn.
+        À appeler depuis le worker. Arme la pompe si elle est éteinte ; parti
+        d'un worker, cet armement n'est délivré qu'au prochain réveil de la
+        boucle d'événements, et `timeout` couvre cette attente. Lève
+        DispatcherClosed si la palette est fermée, DispatcherTimeout au-delà
+        du délai, et propage telle quelle l'exception levée par fn.
         """
         if self._closed:
             raise DispatcherClosed("palette fermée")
@@ -135,7 +131,7 @@ class MainThreadDispatcher:
             except Exception as exc:      # relayée à l'appelant
                 result_queue.put(("error", exc))
 
-        self._queue.put(_run_and_report)
+        self._enqueue(_run_and_report)
         try:
             status, payload = result_queue.get(timeout=timeout)
         except queue.Empty:
@@ -154,7 +150,8 @@ class MainThreadDispatcher:
         RÉARME elle-même via AsyncCallback. Le réarmement partant du thread
         principal, il est délivré de façon fiable — contrairement à un
         addCallback émis depuis un worker, qui attend le prochain réveil de la
-        boucle. Elle ne tourne que pendant un run : `stop_pump()` l'éteint.
+        boucle. Elle s'éteint dès que la file est vide ; `post()` et `call()`
+        la relancent depuis le worker, `stop_pump()` l'éteint en fin de run.
         """
         if self._pumping or self._closed:
             return
@@ -177,6 +174,19 @@ class MainThreadDispatcher:
                 fn()
             except Exception:
                 pass          # une mise à jour d'affichage ratée n'est pas fatale
+
+    def _enqueue(self, fn):
+        """File la tâche PUIS relit la pompe, pour la relancer si elle s'est éteinte.
+
+        L'ordre compte : `_pump_once` relit la file après avoir baissé le
+        drapeau, et c'est ce qui rattrape une tâche déposée pendant
+        l'extinction. L'armement depuis un worker n'est délivré qu'au prochain
+        réveil de la boucle ; tant qu'un run produit du trafic régulier
+        (fragments, jauge), la pompe reste vivante.
+        """
+        self._queue.put(fn)
+        if not self._pumping:
+            self._arm_pump_from_worker()
 
     def _arm_pump_from_worker(self):
         """Tentative d'armement depuis un thread de fond (best effort)."""
@@ -206,12 +216,18 @@ class MainThreadDispatcher:
         Se réarmer inconditionnellement monopolise la boucle d'événements :
         LibreOffice passe son temps à traiter des tours de pompe à vide et ne
         répond plus à la souris ni au clavier. La pompe s'éteint donc dès que
-        la file est vide ; c'est `post()` qui la relance à la tâche suivante.
+        la file est vide ; `post()` ou `call()` la relance à la tâche suivante.
         """
         self.drain()
         if self._closed or self._queue.empty():
             self._pumping = False
-            return
+            # Un worker dépose sa tâche PUIS lit `_pumping` : s'il l'a lu juste
+            # avant l'extinction, il n'a pas réarmé. D'où cette relecture. S'il
+            # l'a lu juste après, il a réarmé et on réarme aussi : deux pompes
+            # tournent tant que la file ne se vide pas, puis s'éteignent.
+            if self._closed or self._queue.empty():
+                return
+            self._pumping = True
         self._arm_pump()
 
     def _async_callback(self):

@@ -1298,11 +1298,11 @@ class AssistantPalette:
     def start_document_analysis(self):
         """Lance l'analyse en tâche de fond. Thread principal uniquement.
 
-        Le texte est lu ICI, avant de partir : la pompe du dispatcher ne tourne
-        que pendant un run, donc un `call` depuis le thread d'analyse expirait
-        au bout de 10 s (« le thread principal n'a pas répondu »). Même raison
-        pour `start_pump()` — il n'est fiable que depuis le thread principal,
-        et sans lui le résultat ne serait jamais affiché.
+        Le texte est lu ICI, avant de partir : lu par `call()` depuis le thread
+        d'analyse, il dépendrait d'un armement de pompe émis depuis un worker,
+        délivré seulement au prochain réveil de la boucle d'événements. Même
+        raison pour `start_pump()` : depuis le thread principal, l'armement est
+        délivré tout de suite, et sans lui le résultat ne serait jamais affiché.
 
         Rend True si l'analyse a démarré (lu par les tests).
         """

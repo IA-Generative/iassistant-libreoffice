@@ -865,12 +865,9 @@ def test_heal_does_nothing_on_a_healthy_palette(palette_module):
 
 # Analyse asynchrone du document (onglet Suggestions)
 #
-# La pompe du dispatcher NE TOURNE QUE PENDANT UN RUN (ui_thread.start_pump).
-# La première version lisait le document par `dispatcher.call` depuis le thread
-# d'analyse : hors run, l'appel expirait au bout de 10 s et l'onglet restait
-# muet — « le thread principal n'a pas répondu », constaté en recette le
-# 2026-08-04. Le texte est donc lu sur le THREAD PRINCIPAL avant de partir, et
-# la pompe est armée là aussi.
+# Le texte est lu sur le THREAD PRINCIPAL avant de partir, et la pompe est
+# armée là aussi : un `call()` ou un armement émis depuis le thread d'analyse
+# n'est délivré qu'au prochain réveil de la boucle d'événements.
 
 class _Reponse:
     def __init__(self, text="", error="", finish_reason="stop"):
