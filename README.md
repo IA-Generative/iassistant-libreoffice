@@ -370,7 +370,14 @@ sequenceDiagram
 
 ## License
 
-- Voir `registration/license.txt`
+MIrAI est distribué sous [Mozilla Public License 2.0](LICENSE).
+Copyright (c) 2025-2026 Ministère de l'Intérieur.
 
-Dépôt de référence :
-- [IA-Generative/AssistantMiraiLibreOffice](https://github.com/IA-Generative/AssistantMiraiLibreOffice) — ce dépôt
+L'extension dérive de [localwriter](https://github.com/balisujohn/localwriter)
+de John Balis (Copyright (c) 2024 John Balis, MPL 2.0), lui-même dérivé d'un
+changement LibreOffice de The Document Foundation (MPL 2.0). Les fichiers
+hérités restent sous MPL 2.0 et conservent leurs mentions d'origine ; une
+boîte de saisie reprise du wiki de The Document Foundation est sous
+CC BY-SA 3.0, avec sa mention dans le source.
+
+Dépôt de référence : [IA-Generative/iassistant-libreoffice](https://github.com/IA-Generative/iassistant-libreoffice)

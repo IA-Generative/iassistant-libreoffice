@@ -1,99 +1,118 @@
-# CLAUDE.md — MIrAI LibreOffice Extension
+# CLAUDE.md : MIrAI LibreOffice
 
-## Project
+Extension LibreOffice (OXT) qui met un assistant IA dans Writer et Calc. Python pur
+sur l'API UNO, exécuté par le Python embarqué de LibreOffice (3.11) : bibliothèque
+standard et UNO seulement, aucun paquet pip. Backend OpenAI-compatible, configuration,
+enrôlement et mises à jour viennent du Device Management (dépôt voisin
+`../device-management/`).
 
-Extension LibreOffice (OXT) intégrant un assistant IA dans Writer et Calc. Se connecte à un backend OpenAI-compatible via Device Management.
+Documents, commentaires et libellés sont en français ; identifiants, branches et
+commits en anglais. Format des commits, branches et PR : CONTRIBUTING.md.
 
-## Quick commands
+## Commandes
 
 ```bash
-# Build
-./scripts/02-build-oxt.sh
-
-# Dev cycle (build + install + launch LO)
-./scripts/dev-launch.sh
-./scripts/dev-launch.sh --config config/profiles/config.default.integration.json
-
-# Clean install (purge cache + uninstall)
-./scripts/00-clean-install.sh --uninstall
-
-# Deploy release (immediate: every release until device-management#49 ships)
-./scripts/deploy-release.sh \
-  --bootstrap-url https://bootstrap.fake-domain.name \
-  --config config/profiles/config.default.production.json \
-  --strategy immediate
-
-# Deploy release (canary rollout, once device-management#49 ships)
-./scripts/deploy-release.sh \
-  --bootstrap-url https://bootstrap.fake-domain.name \
-  --config config/profiles/config.default.integration.json \
-  --strategy canary
-
-# Check campaign progress
-curl -s -H "X-Admin-Token: $DM_ADMIN_TOKEN" \
-  https://bootstrap.fake-domain.name/api/campaigns/{id}/progress | python3 -m json.tool
-
-# Simulate 100 devices
-python3 tests/simulation/deploy_simulator.py \
-  --devices 100 --bootstrap-url https://bootstrap.fake-domain.name --profile int
-
-# Tests (unitaires + intégration + lint + build)
-./scripts/03-test-local.sh
-python3 -m pytest tests/unit/ tests/integration/ -q
-
-# K8s deploy (device-management Scaleway)
-cd ../device-management && ./scripts/k8s/deploy.sh scaleway
+./scripts/03-test-local.sh                           # lint + tests + build, ce que la CI exécute
+python3 -m pytest tests/unit tests/integration -q    # tests seuls (pytest suffit)
+./scripts/02-build-oxt.sh --config config/profiles/config.default.dev.json --install
 ```
 
-## Architecture
+Toujours un `--config` au build : sans lui, l'OXT embarque le `config/config.default.json`
+gitignoré du poste. `dev-launch.sh` et `00-clean-install.sh` sont macOS seulement.
+Déploiement et campagnes : docs/DEPLOY.md ; toute release part en `immediate` tant que
+device-management#49 n'est pas livré.
 
-> Le cœur est un moteur MCP interne + une palette universelle DSFR : voir
-> **docs/ARCHITECTURE.md** (carte des couches, tools, règles, checklist
-> « ajouter un tool »). La coquille (enrollment/SSO/DM/update/télémétrie) est
-> extraite progressivement d'entrypoint.py : voir
-> **docs/adr/0001-refacto-strangler.md**.
+## Carte
 
-- `src/mirai/entrypoint.py` — Coquille (MainJob) + dispatch `OpenAssistant`
-- `src/mirai/shell/` — Modules extraits de la coquille ; UNO importé en tête,
-  chargés par entrypoint sur le thread principal (règle testée)
-- `src/mirai/core/` — Moteur : registry de tools UNO, orchestrateur agentique,
-  client LLM double-mode (natif/JSON), sinks, presets, conversation, façade
-  (`shell_facade.py` — seul pont vers MainJob, duck-typé, jamais d'import)
-- `src/mirai/ui/` — Palette universelle (dsfr.py tokens + palette.py)
-- `src/mirai/menu_actions/` — legacy, encore présent (suppression décidée,
-  voir l'ADR 0001)
-- `oxt/Addons.xcu` — menu « 🤖 MIrAI » : entrée « 🤖 Ouvrir l'assistant »
-  (+ Paramètres, Tester le modèle, Documentation, À propos) et bouton de barre ; raccourci
-  Ctrl+Alt+Espace (macOS : Ctrl+Opt+Espace) — jamais Ctrl+Shift+Espace
-- `config/profiles/` — Bootstrap config profiles (dev, docker, integration, kubernetes, production)
+docs/ARCHITECTURE.md est la carte (couches, tools, règles, « ajouter un tool en 5
+étapes ») ; la refacto de la coquille suit docs/adr/0001-refacto-strangler.md.
 
-## Key constraints
+- `src/mirai/entrypoint.py` : la coquille (`MainJob`) : enrôlement, SSO, Device
+  Management, mise à jour, télémétrie, dispatch des actions.
+- `src/mirai/shell/` : modules extraits de la coquille ; `runtime.py` porte l'état du
+  processus.
+- `src/mirai/core/` : le moteur : registry de tools UNO, orchestrateur, client LLM ;
+  `shell_facade.py` est le seul pont vers `MainJob`, duck-typé.
+- `src/mirai/ui/` : la palette universelle (DSFR).
+- `src/mirai/menu_actions/`, `formatting/`, `security_flow.py` : legacy, suppression
+  décidée (ADR 0001).
+- `oxt/` : description, menu `🤖 MIrAI`, raccourci, jobs ; `config/profiles/` : les
+  profils embarqués au build.
+- `tests/unit/rules/` : les règles d'architecture, exécutables ; `tests/stubs/` : les
+  faux UNO, dont `install()` précède tout import de `src.mirai` (d'où E402 toléré
+  dans `tests/`).
 
-- **La coquille ne grossit plus** : une PR fonctionnelle qui touche une zone
-  d'`entrypoint.py` en extrait ce qu'elle ajoute ; une PR fait un déplacement ou
-  une correction, jamais les deux. Bornes testées dans `tests/unit/rules/`
-  (`test_shell_budget.py`, `test_test_surface.py`), qui ne font que baisser.
-  L'état partagé entre actions vit dans `shell/runtime.py` (`self.runtime`),
-  jamais en attribut de classe ; les tâches de fond de `__init__` sont
-  `MainJob.STARTUP_TASKS` (règle testée).
-- **Threading**: le run vit dans un thread worker ; tout accès UNO (document,
-  contrôles, undo, tools) repasse par `MainThreadDispatcher` (`core/ui_thread.py`).
-  `processEventsToIdle` est **interdit hors d'`entrypoint.pump_events`**, qui ne
-  pompe que sur le thread principal (depuis un thread de fond, LibreOffice
-  plante) — règles testées dans `tests/unit/rules/`.
-- **Formules Calc** : tout ce que l'assistant écrit dans une cellule passe par
-  `calc_tools.safe_set_string` ou `calc_functions.formula_refusal` (ni réseau, ni
-  fichier) — voir docs/ARCHITECTURE.md, règle 6.
-- **No pip**: Only `urllib.request` — no external Python packages in the plugin
-- **UNO API**: All UI via `com.sun.star.awt.*` dialogs
-- **Config profiles**: `dev`, `int`, `prod` (not `integration` — device-management rejects it)
-- **core/ui n'importent jamais entrypoint** (règle testée : `tests/unit/rules/test_no_entrypoint_import.py`)
-- **macOS dev** : si `unopkg` échoue en SIGKILL « Launch Constraint Violation », re-signer ad hoc les binaires auxiliaires de LibreOffice.app (voir docs/ARCHITECTURE.md §Environnement) — à refaire après chaque mise à jour de LO
+## Règles
 
-## Device Management (sibling repo)
+Chacune existe parce que la violer plante LibreOffice, fait fuir une donnée ou rend
+le moteur intestable. `tests/unit/rules/` et `tests/unit/core/test_formula_guard.py`
+les font respecter.
 
-Located at `../device-management/`. Key files:
-- `app/main.py` — Config endpoint, update directives, enrollment
-- `app/admin/` — Admin UI (campaigns, artifacts, cohorts, devices)
-- `deploy/k8s/overlays/scaleway/` — Scaleway Kapsule deployment
-- K8s DNS resolver: `10.32.0.10` (for relay-assistant nginx)
+1. **Tout accès UNO se fait sur le thread principal.** Le run vit dans un thread
+   worker ; document, contrôles, undo et tools y repassent par
+   `MainThreadDispatcher.call` (lire ou modifier) ou `.post` (afficher), dans
+   `core/ui_thread.py`. Seule `entrypoint.pump_events` pompe les événements, et
+   seulement sur le thread principal : pomper depuis un autre thread tue
+   LibreOffice (abort dans `DispatchUserEvents`). Un module qui a besoin d'UNO
+   l'importe en tête de fichier : un import UNO paresseux échoue hors du thread
+   principal.
+2. **`core/` et `ui/` atteignent la coquille par `core/shell_facade.py`**, jamais
+   par un import d'`entrypoint` : c'est ce qui permet de tester le moteur sans
+   LibreOffice.
+3. **Une cellule Calc s'écrit par `calc_tools.safe_set_string`** ou après
+   `calc_functions.formula_refusal` : aucune formule produite par l'assistant
+   n'atteint le réseau ni un fichier.
+4. **La télémétrie ne porte jamais de contenu documentaire** : compteurs, statuts,
+   durées et noms de tools seulement.
+5. **Bibliothèque standard et UNO seulement** : `urllib.request` pour le réseau,
+   validateur JSON maison dans `core/tool_calls.py`, dialogues `com.sun.star.awt`.
+
+## Base de code saine
+
+Le code neuf va là où il se lit seul : un module ou une classe par responsabilité,
+des dépendances reçues explicitement plutôt que lues sur `self`, des fonctions qui
+tiennent sur un écran (ruff mesure la complexité, cible : aucune fonction au-delà
+de 10). `entrypoint.py` est le contre-exemple, pas le modèle : il se vide par
+extraction (docs/adr/0001-refacto-strangler.md), et ce qu'une PR y ajouterait va
+dans `shell/` : l'état qui survit d'une action à l'autre dans `ShellRuntime`, une
+tâche de fond lancée par `__init__` dans `MainJob.STARTUP_TASKS`.
+
+`tests/unit/rules/test_shell_budget.py` et `test_test_surface.py` mesurent cette
+extraction. Quand une borne bloque, deux issues : sortir ce que la PR ajoute dans
+son propre module, ou relever la borne et le dire dans la PR. Compacter le code
+pour passer n'en est pas une.
+
+## Tests et commentaires
+
+Un test décrit ce que le code fait pour un utilisateur ou un appelant. Il ne décrit
+pas la modification qui vient d'être faite : son nom et sa docstring restent vrais
+quand plus personne ne se souvient du ticket.
+
+Mauvais :
+
+```python
+def test_notify_update_blocked_uses_querybox(tmp_path):
+    """Régression : la boîte doit être un QUERYBOX (type 4), un INFOBOX
+    n'affichait pas « Oui » (bug observé sur la 0.0.1.0.18)."""
+```
+
+Bon :
+
+```python
+def test_update_blocked_with_a_folder_offers_yes_and_no(tmp_path):
+    """Quand un dossier est proposé, la boîte pose une question (Oui/Non)."""
+```
+
+Un commentaire dit pourquoi le code est ainsi aujourd'hui, jamais ce qu'il était
+avant ni quel ticket l'a changé : `git log` s'en charge. Les tests de
+`tests/unit/rules/` décrivent une règle, pas une fonctionnalité : c'est leur rôle.
+
+## Pièges
+
+- Profils : le fichier s'appelle `config.default.integration.json`, le profil demandé
+  au Device Management s'appelle `int` (noms acceptés : `dev`, `int`, `prod`).
+- Raccourci de la palette : Ctrl+Alt+Espace (macOS : Ctrl+Opt+Espace), jamais
+  Ctrl+Shift+Espace, qui insère une espace insécable dans Writer et sélectionne
+  tout dans Calc.
+- macOS : `unopkg` tué par « Launch Constraint Violation » après chaque mise à jour
+  de LibreOffice : re-signer ses binaires (docs/ARCHITECTURE.md, § Environnement).

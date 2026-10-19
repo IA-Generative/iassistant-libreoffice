@@ -37,6 +37,7 @@ REQUIRED_MEMBERS = [
     "dm-manifest.json",           # métadonnées Device Management
     "dm-config.json",             # template config DM
     "assets/logo.png",            # logo catalogue DM
+    "LICENSE",                    # texte de la MPL 2.0
 ] + [f"src/mirai/locales/{lang}.json" for lang in SUPPORTED]
 
 FORBIDDEN_SUFFIXES = (".pyc", ".DS_Store")

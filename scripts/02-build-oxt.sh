@@ -247,6 +247,7 @@ mkdir -p "$STAGE_DIR/docs"
 [ -f "$ROOT_DIR/README.md" ] && cp "$ROOT_DIR/README.md" "$STAGE_DIR/docs/README.md"
 [ -f "$ROOT_DIR/docs/notice-utilisateur.md" ] && cp "$ROOT_DIR/docs/notice-utilisateur.md" "$STAGE_DIR/docs/notice-utilisateur.md"
 [ -f "$STAGE_DIR/registration/license.txt" ] && cp "$STAGE_DIR/registration/license.txt" "$STAGE_DIR/docs/license.txt"
+[ -f "$ROOT_DIR/LICENSE" ] && cp "$ROOT_DIR/LICENSE" "$STAGE_DIR/LICENSE"
 
 find "$STAGE_DIR" -name ".DS_Store" -delete
 find "$STAGE_DIR" -name "*.pyc" -delete
@@ -264,7 +265,7 @@ log "OK: Package created: $OUTPUT_PATH"
 # Verify DM-required files are present
 _dm_ok=true
 _oxt_files=$(unzip -l "$OUTPUT_PATH" 2>/dev/null)
-for _check in "dm-manifest.json" "dm-config.json" "description.xml" "assets/logo.png" "docs/README.md" "docs/notice-utilisateur.md" "docs/license.txt" "registration/license.txt" "config/calc-functions.json"; do
+for _check in "dm-manifest.json" "dm-config.json" "description.xml" "assets/logo.png" "docs/README.md" "docs/notice-utilisateur.md" "docs/license.txt" "registration/license.txt" "LICENSE" "config/calc-functions.json"; do
   if ! echo "$_oxt_files" | grep -qF "$_check"; then
     warn "Missing in package: $_check"
     _dm_ok=false
