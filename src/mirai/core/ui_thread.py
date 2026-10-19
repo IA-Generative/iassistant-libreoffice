@@ -113,9 +113,11 @@ class MainThreadDispatcher:
     def call(self, fn, timeout: float = 30.0):
         """Exécute fn sur le thread principal et rend son résultat.
 
-        À appeler depuis le worker. Lève DispatcherClosed si la palette est
-        fermée, DispatcherTimeout au-delà du délai, et propage telle quelle
-        l'exception levée par fn.
+        À appeler depuis le worker. Arme la pompe si elle est éteinte ; parti
+        d'un worker, cet armement n'est délivré qu'au prochain réveil de la
+        boucle d'événements, et `timeout` couvre cette attente. Lève
+        DispatcherClosed si la palette est fermée, DispatcherTimeout au-delà
+        du délai, et propage telle quelle l'exception levée par fn.
         """
         if self._closed:
             raise DispatcherClosed("palette fermée")
@@ -156,7 +158,8 @@ class MainThreadDispatcher:
         RÉARME elle-même via AsyncCallback. Le réarmement partant du thread
         principal, il est délivré de façon fiable — contrairement à un
         addCallback émis depuis un worker, qui attend le prochain réveil de la
-        boucle. Elle ne tourne que pendant un run : `stop_pump()` l'éteint.
+        boucle. Elle s'éteint dès que la file est vide ; `post()` et `call()`
+        la relancent depuis le worker, `stop_pump()` l'éteint en fin de run.
         """
         if self._pumping or self._closed:
             return
