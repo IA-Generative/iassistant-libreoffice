@@ -235,6 +235,8 @@ comme « la demande porte sur le document entier ».
 « Nouvelle conversation ». Les tours user + réponses finales seulement
 (jamais les tool calls). Injection des derniers échanges de la même
 application (Writer ou Calc) dans le contexte (cap ~4 000 caractères).
+L'onglet « Conversation » de la palette affiche le fil d'une seule application
+et suit le document actif (activation de la fenêtre ou début de run).
 
 ## Fichiers locaux et secrets — modules partagés de `src/mirai/`
 
