@@ -25,6 +25,7 @@ import dataclasses
 import json
 
 from ..i18n import t as _t
+from .llm_client import TOOLS_REJECTED
 from .tool_calls import ToolResult
 
 CONFIG_KEY = "assistant_model_capabilities"
@@ -152,6 +153,11 @@ def probe(llm, model=""):
                 {"role": "user", "content": PROBE_TASK}]
 
     first = llm.step(messages, tools=PROBE_TOOLS)
+    if first.error in TOOLS_REJECTED and llm.configured_mode == "native":
+        # Mode natif imposé : le rejet du corps portant `tools` EST la mesure
+        # de la capacité A. En auto, le client a déjà basculé en JSON.
+        capabilities.detail = f"outils refusés ({first.error})"
+        return capabilities
     if first.error:
         capabilities.error = first.error
         capabilities.detail = f"appel refusé ({first.error})"

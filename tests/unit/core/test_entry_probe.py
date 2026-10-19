@@ -101,6 +101,20 @@ def test_an_interrupted_probe_is_reported_as_a_failed_test(monkeypatch, scenario
     assert not [key for key in VERDICT_SENTENCES if t(key) in shown]
 
 
+def test_a_relay_refusing_tools_in_native_mode_is_a_verdict(monkeypatch):
+    """Mode natif imposé : sans repli JSON, le refus des outils est mesuré et
+    mémorisé, même par-dessus un verdict agentique devenu faux."""
+    shell = _shell([_http_error(400)], previous=AGENTIC)
+    shell.config["llm_tool_mode"] = "native"
+
+    [shown] = _probe_from_menu(monkeypatch, shell)
+
+    verdict = capabilities.load_cached(shell, ENDPOINT, MODEL)
+    assert verdict.accepts_tools is False
+    assert verdict.supports_agentic is False
+    assert t("caps.no_tools") in shown
+
+
 def test_a_model_answering_without_tools_is_still_a_verdict(monkeypatch):
     shell = _shell([FakeSSEResponse(text_chunks("Bien sûr, voici…"))],
                    previous=AGENTIC)

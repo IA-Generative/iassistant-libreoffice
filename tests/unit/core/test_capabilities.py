@@ -13,6 +13,8 @@ run agentique se termine en succès en laissant le document intact.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.mirai.core.capabilities import (
     Capabilities,
     cache_key,
@@ -33,9 +35,10 @@ class _Step:
 class ScriptedLLM:
     """Rejoue une séquence de réponses, en notant les appels reçus."""
 
-    def __init__(self, steps):
+    def __init__(self, steps, configured_mode="native"):
         self._steps = list(steps)
         self.calls = 0
+        self.configured_mode = configured_mode
 
     def step(self, messages, tools=None, **_kwargs):
         self.calls += 1
@@ -98,12 +101,26 @@ def test_model_that_never_calls_a_tool():
 
 
 def test_relay_refusing_tools():
-    llm = ScriptedLLM([_Step(error="http_400")])
+    """Mode natif imposé : le refus du corps portant `tools` mesure la capacité A."""
+    llm = ScriptedLLM([_Step(error="http_400")], configured_mode="native")
 
     verdict = probe(llm, model="ancien")
 
     assert verdict.accepts_tools is False
+    assert not verdict.error
     assert "http_400" in verdict.detail
+
+
+@pytest.mark.parametrize("configured_mode", ["auto", "json"])
+def test_relay_error_outside_native_mode_is_an_interruption(configured_mode):
+    """Hors natif imposé, un 400 n'atteint la sonde qu'après le repli JSON, sans
+    `tools` dans le corps : il ne dit rien des outils."""
+    llm = ScriptedLLM([_Step(error="http_400")], configured_mode=configured_mode)
+
+    verdict = probe(llm, model="ancien")
+
+    assert verdict.error == "http_400"
+    assert verdict.supports_agentic is False
 
 
 def test_second_turn_failure_is_not_a_chain():
