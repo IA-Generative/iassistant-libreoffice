@@ -485,6 +485,7 @@ class AssistantPalette:
         self._current_exchange = []    # tour en cours, affiché en tête du fil
         self._history_cache = None     # historique relu seulement quand il change
         self._history_app = app        # application dont le fil est affiché
+        self._exchange_app = app       # application du tour en cours
         self._journal_lines = []       # onglet « Actions » du run courant
         self._tab_before_reasoning = None   # onglet à restaurer en refermant
         self._analysis_text = ""       # analyse du document, quand elle arrive
@@ -1124,7 +1125,6 @@ class AssistantPalette:
         if app == self._history_app:
             return
         self._history_app = app
-        self._current_exchange = []
         self._history_cache = None
         self._render_conversation()
 
@@ -1487,7 +1487,9 @@ class AssistantPalette:
         avoir à faire défiler pour voir ce qui vient d'arriver.
         """
         blocks = []
-        if self._current_exchange:
+        # Un run en échec n'est jamais persisté : son tour reste en mémoire et
+        # ne s'affiche que sur le fil de son application.
+        if self._current_exchange and self._exchange_app == self._history_app:
             blocks.append("\n".join(self._current_exchange))
 
         # L'historique est mis en CACHE : cette méthode est rappelée à chaque
@@ -1665,6 +1667,7 @@ class AssistantPalette:
         self._current_exchange = []    # nouvel échange : le précédent est persisté
         self._history_cache = None     # le tour précédent a rejoint l'historique
         self._history_app = ctx.app
+        self._exchange_app = ctx.app
         self._journal_lines = []
         self._progress = RunProgress()
         self._set_input_enabled(False)

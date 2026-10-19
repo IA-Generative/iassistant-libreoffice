@@ -324,6 +324,21 @@ def _make_calc_the_active_document(palette):
     palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
 
 
+def _make_writer_the_active_document(palette):
+    class _Writer:
+        Text = object()
+        CurrentController = None
+
+    desktop = MagicMock()
+    desktop.getCurrentComponent.return_value = _Writer()
+    palette.uno_ctx.getServiceManager.return_value.createInstanceWithContext.return_value = desktop
+
+
+def _activate_window(palette_module):
+    for listener in palette_module._fake_dialog.top_listeners:
+        listener.windowActivated(None)
+
+
 def _store_with_both_applications(directory):
     from src.mirai.core.conversation import ConversationStore
     store = ConversationStore(str(directory))
@@ -358,6 +373,24 @@ def test_conversation_tab_follows_a_switch_to_another_application(
     shown = palette_module._fake_dialog.getControl("response").shown_text
     assert "question calc" in shown and "réponse calc" in shown
     assert "writer" not in shown
+
+
+def test_a_failed_run_message_survives_a_round_trip_to_the_other_application(
+        palette_module, monkeypatch, tmp_path):
+    """Un run en échec n'est pas persisté : son message ne vit que dans le tour
+    en cours, qui réapparaît quand on revient sur son application."""
+    store = _store_with_both_applications(tmp_path)
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    palette = _build(palette_module, "writer")
+    palette._append_response("MIrAI : ", "⚠ Erreur HTTP 500")
+
+    _make_calc_the_active_document(palette)
+    _activate_window(palette_module)
+    _make_writer_the_active_document(palette)
+    _activate_window(palette_module)
+
+    shown = palette_module._fake_dialog.getControl("response").shown_text
+    assert "⚠ Erreur HTTP 500" in shown and "question writer" in shown
 
 
 def test_starting_a_run_shows_the_thread_of_its_application(
