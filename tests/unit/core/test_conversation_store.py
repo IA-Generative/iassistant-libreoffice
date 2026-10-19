@@ -95,7 +95,7 @@ def test_entries_without_application_are_not_injected():
                                {"role": "assistant", "text": "réponse inconnue"}]}, fh)
     assert store.context_messages("writer") == []
     assert store.context_messages("calc") == []
-    assert len(store.load()) == 2   # toujours affichées, seulement pas réinjectées
+    assert len(store.load()) == 2   # toujours dans le fichier, ni réinjectées ni affichées
 
 
 def test_clear_for_keeps_the_other_application():
