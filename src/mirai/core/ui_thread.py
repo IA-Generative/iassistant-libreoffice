@@ -222,7 +222,9 @@ class MainThreadDispatcher:
         if self._closed or self._queue.empty():
             self._pumping = False
             # Un worker dépose sa tâche PUIS lit `_pumping` : s'il l'a lu juste
-            # avant l'extinction, il n'a pas réarmé. D'où cette relecture.
+            # avant l'extinction, il n'a pas réarmé. D'où cette relecture. S'il
+            # l'a lu juste après, il a réarmé et on réarme aussi : deux pompes
+            # tournent tant que la file ne se vide pas, puis s'éteignent.
             if self._closed or self._queue.empty():
                 return
             self._pumping = True
