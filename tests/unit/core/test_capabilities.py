@@ -149,6 +149,7 @@ def test_second_turn_failure_is_not_a_chain():
     verdict = probe(llm, model="instable")
 
     assert verdict.chains is False
+    assert verdict.error == "network_error"
     assert "second tour" in verdict.detail
 
 
