@@ -128,7 +128,11 @@ outil (B), il enchaîne lecture → écriture (C). Seul A était sondé ; c'est 
 décide du chemin. Mesuré sur Ollama : llama3.2 = A✓B✓C✓, gemma4:12b = A✓B✓C✗,
 mistral = A✓B✗C✗. La sonde (2 allers-retours) est déclenchée depuis le menu
 « Tester le modèle », son verdict mis en cache par couple (endpoint, modèle) et
-annoncé à l'utilisateur. Sans mesure, on suppose C faux — le chemin déterministe
+annoncé à l'utilisateur. Une sonde interrompue (jeton refusé, délai dépassé,
+relais indisponible, réponse vide) n'est ni annoncée comme verdict ni mémorisée :
+le verdict précédent reste en place. En mode `native` imposé, un 400/404/422 sur
+le corps portant `tools` reste la mesure de A ; en `auto`, c'est le client qui la
+fait en basculant en JSON. Sans mesure, on suppose C faux — le chemin déterministe
 aboutit toujours, le mode agentique peut échouer en silence.
 
 **Le tool calling est une commodité, jamais une garantie.** Sur un modèle de
