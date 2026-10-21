@@ -76,7 +76,7 @@ def test_shorten_targets_current_paragraph_without_selection():
     assert doc.replaced == "court."   # le paragraphe est remplacé
 
 
-def test_stopped_rewrite_keeps_the_selection():
+def test_stopped_shorten_keeps_the_selection():
     """« Arrêter » pendant le flux : la sélection n'est pas remplacée par un
     texte tronqué, et l'arrêt est annoncé comme tel."""
     cancel = threading.Event()
