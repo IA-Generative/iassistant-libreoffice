@@ -3,10 +3,18 @@ moteur (vrai LLMClient + SSE scripté + faux document) — marqueurs, stop
 phrases, retry sur question, undo unique. Assertions portées des
 comportements de menu_actions/writer.py."""
 
+import threading
+
 from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
+from src.mirai.i18n import t as _t
 from tests.stubs.fake_docs import FakeWriterDoc
-from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+from tests.stubs.fake_shell import (
+    FakeShell,
+    FakeSSEResponse,
+    StoppedSSEResponse,
+    text_chunks,
+)
 
 
 def _ctx(doc, shell):
@@ -66,6 +74,19 @@ def test_shorten_targets_current_paragraph_without_selection():
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("court."))])
     presets.run_shorten(_ctx(doc, shell), shell, "", None)
     assert doc.replaced == "court."   # le paragraphe est remplacé
+
+
+def test_stopped_rewrite_keeps_the_selection():
+    """« Arrêter » pendant le flux : la sélection n'est pas remplacée par un
+    texte tronqué, et l'arrêt est annoncé comme tel."""
+    cancel = threading.Event()
+    doc = FakeWriterDoc(selection_text="Un texte bien trop long à raccourcir.")
+    shell = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Un ", "texte ", "court."), cancel)])
+    message = presets.run_shorten(_ctx(doc, shell), shell, "", None,
+                                  cancel_event=cancel)
+    assert doc.replaced is None
+    assert message == _t("run.stopped")
 
 
 def test_extend_question_triggers_single_retry():
