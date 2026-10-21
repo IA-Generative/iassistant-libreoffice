@@ -269,6 +269,7 @@ class FakeCalcSheet:
         self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
         self.copies = []                      # ((col, row) source, (col, row) cible)
+        self.protected = False
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
 
@@ -277,7 +278,10 @@ class FakeCalcSheet:
 
     def copyRange(self, destination, source):
         """Calc décale les références relatives de la copie ; le faux recopie
-        la formule telle quelle."""
+        la formule telle quelle. Sur une feuille protégée, Calc ignore la
+        copie sans lever d'erreur."""
+        if self.protected:
+            return
         for d_row in range(source.EndRow - source.StartRow + 1):
             for d_col in range(source.EndColumn - source.StartColumn + 1):
                 src = (source.StartColumn + d_col, source.StartRow + d_row)

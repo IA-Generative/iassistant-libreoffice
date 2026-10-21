@@ -400,7 +400,15 @@ def fill_formula_down(ctx, args):
             break
         target = sheet.getCellByPosition(out_col, row_idx)
         sheet.copyRange(target.getCellAddress(), source_cell.getRangeAddress())
-        filled += 1
+        # Sur une feuille protégée, Calc ignore la copie sans lever d'erreur.
+        if target.getFormula().startswith("="):
+            filled += 1
+    if not filled:
+        return ToolResult(
+            call_id="", ok=False, content="",
+            error=(f"Formule de {from_ref} recopiée sur aucune ligne : la ligne "
+                   f"{start_row + 2} est sans données ou au-delà de to_row, ou la "
+                   "feuille est protégée."))
     return ToolResult(call_id="", ok=True,
                       content=f"Formule recopiée sur {filled} ligne(s).")
 

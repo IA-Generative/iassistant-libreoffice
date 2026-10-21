@@ -204,6 +204,21 @@ def test_calc_fill_formula_down_lets_calc_adjust_the_copy(formula):
     assert sheet.copies == [((2, 1), (2, 2))]
 
 
+@pytest.mark.parametrize("to_row, grid, protected", [
+    (2, {(0, 1): "1", (0, 2): "2"}, False),     # to_row = ligne source
+    (5, {(0, 1): "1"}, False),                  # ligne 3 sans données
+    (5, {(0, 1): "1", (0, 2): "2"}, True),      # Calc refuse la copie
+])
+def test_calc_fill_formula_down_fails_when_no_row_is_copied(to_row, grid, protected):
+    sheet = FakeCalcSheet(grid=grid)
+    sheet.formulas[(2, 1)] = "=A2*2"
+    sheet.protected = protected
+    result = _fill_down(sheet, to_row)
+    assert not result.ok
+    assert "C2" in result.error
+    assert list(sheet.formulas) == [(2, 1)]
+
+
 def test_calc_get_selection_overview():
     sheet = FakeCalcSheet(grid={(0, 0): "Nom", (0, 1): "Alice"})
     doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
