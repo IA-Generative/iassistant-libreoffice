@@ -143,6 +143,22 @@ def test_cancel_event_stops_the_stream():
     assert len(seen) == 1, "aucun chunk ne doit être traité après l'annulation"
 
 
+def test_a_stop_during_an_http_error_reply_is_a_stop():
+    """« Arrêter » pendant l'attente, puis une erreur HTTP : c'est un arrêt,
+    et l'erreur du relais est quand même signalée à la coquille."""
+    shell = FakeShell(responses=[_http_error(429)])
+    cancel = threading.Event()
+
+    def _request():
+        cancel.set()          # le clic arrive pendant l'attente du relais
+        return object()
+
+    outcome = sse_pump.run_stream(shell, _request, lambda e: None, cancel_event=cancel)
+    assert outcome.cancelled is True
+    assert not outcome.ok
+    assert shell.llm_errors and shell.llm_errors[0][0] == 429
+
+
 def test_cancel_before_start_does_no_network():
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("a"))])
     cancel = threading.Event()

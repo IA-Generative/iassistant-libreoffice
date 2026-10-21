@@ -28,6 +28,21 @@ class FakeSSEResponse:
         return iter(self._lines)
 
 
+class StoppedSSEResponse(FakeSSEResponse):
+    """Flux pendant lequel l'utilisateur clique sur « Arrêter » : l'événement
+    d'annulation est armé juste après la livraison du premier chunk."""
+
+    def __init__(self, chunks, cancel_event):
+        super().__init__(chunks)
+        self._cancel_event = cancel_event
+
+    def __iter__(self):
+        for index, line in enumerate(self._lines):
+            if index == 1:
+                self._cancel_event.set()
+            yield line
+
+
 def text_chunks(*texts, finish="stop"):
     """Chunks SSE simulant un texte streamé delta par delta."""
     chunks = [{"choices": [{"delta": {"content": t}}]} for t in texts]
