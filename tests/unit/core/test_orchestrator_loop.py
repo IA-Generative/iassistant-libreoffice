@@ -174,7 +174,7 @@ def test_stop_during_the_stream_ends_the_run_as_stopped():
     assert not [e for e in observer.events if e[0] == "error"]
 
 
-def test_network_failure_is_still_reported_as_unreachable():
+def test_network_failure_is_reported_as_unreachable():
     shell = FakeShell(responses=[OSError("connexion refusée")])
     orchestrator = Orchestrator(LLMClient(shell), _registry(), _Ctx(shell),
                                 cancel_event=threading.Event())
