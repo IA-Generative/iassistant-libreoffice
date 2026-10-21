@@ -73,9 +73,8 @@ def cell_by_ref(sheet, ref):
 
 def get_cell_error(cell):
     try:
-        value = cell.getString()
-        if value and value.startswith("#"):
-            return value
+        if cell.getError():
+            return cell.getString()
     except Exception:
         pass
     return ""

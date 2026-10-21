@@ -129,6 +129,7 @@ def test_calc_write_cells():
 def test_calc_set_formula_reports_error_token():
     sheet = FakeCalcSheet()
     sheet.formula_results["=VLOOKUP(Z1;A1:B2;2;0)"] = "#N/A"
+    sheet.formula_errors["=VLOOKUP(Z1;A1:B2;2;0)"] = 32767
     doc = FakeCalcDoc(sheet)
     result = _registry().call_tool(
         "calc_set_formula", {"ref": "C1", "formula": "```\n=VLOOKUP(Z1;A1:B2;2;0)\n```"},
@@ -136,6 +137,28 @@ def test_calc_set_formula_reports_error_token():
     assert not result.ok
     assert "#N/A" in result.content
     assert sheet.formulas[(2, 0)] == "=VLOOKUP(Z1;A1:B2;2;0)"   # fences nettoyées
+
+
+def test_calc_set_formula_reports_calc_error_code():
+    sheet = FakeCalcSheet()
+    sheet.formula_results["=SQRT(-1)"] = "Err:502"
+    sheet.formula_errors["=SQRT(-1)"] = 502
+    doc = FakeCalcDoc(sheet)
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=SQRT(-1)"}, _calc_ctx(doc))
+    assert not result.ok
+    assert result.error == "Err:502"
+
+
+@pytest.mark.parametrize("formula, shown", [('="#tag"', "#tag"), ('="Err:1"', "Err:1")])
+def test_calc_set_formula_accepts_a_text_result_that_looks_like_an_error(formula, shown):
+    sheet = FakeCalcSheet()
+    sheet.formula_results[formula] = shown
+    doc = FakeCalcDoc(sheet)
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": formula}, _calc_ctx(doc))
+    assert result.ok
+    assert shown in result.content
 
 
 def test_calc_fill_formula_down_stops_at_empty_row():

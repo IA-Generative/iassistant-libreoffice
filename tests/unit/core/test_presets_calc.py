@@ -130,6 +130,7 @@ def test_formula_agentic_applies_and_explains():
 def test_formula_error_feedback_loop():
     sheet = FakeCalcSheet(grid={(0, 1): "5"})
     sheet.formula_results["=SUM(A2:A9;B2:B9)"] = "Err:522"
+    sheet.formula_errors["=SUM(A2:A9;B2:B9)"] = 522
     sheet.formula_results["=SUM(A2:B9)"] = "5"
     doc = FakeCalcDoc(sheet, selection_ref="C2:C2")
     shell = FakeShell(

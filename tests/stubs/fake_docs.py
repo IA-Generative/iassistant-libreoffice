@@ -185,6 +185,9 @@ class FakeCell:
     def getFormula(self):
         return self._sheet.formulas.get((self._col, self._row), "")
 
+    def getError(self):
+        return self._sheet.formula_errors.get(self.getFormula(), 0)
+
     def setPropertyValue(self, name, value):
         self.properties[name] = value
 
@@ -256,6 +259,7 @@ class FakeCalcSheet:
         self.grid = dict(grid or {})          # (col, row) → str
         self.formulas = {}
         self.formula_results = {}             # formule → valeur affichée simulée
+        self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
