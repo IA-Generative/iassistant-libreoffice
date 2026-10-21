@@ -51,6 +51,24 @@ def unfreeze_for_tests():
     _frozen = False
 
 
+# Sous Windows, remplacer un fichier ouvert ailleurs échoue (WinError 5). Les
+# lectures et remplacements de ce processus passent donc sous un même verrou,
+# réentrant car LocalConfig.update le tient de la lecture à l'écriture ; un
+# handle extérieur (antivirus, indexeur) est attendu par quelques reprises.
+_file_lock = threading.RLock()
+_REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
+
+
+def _replace(source, target):
+    for delay in _REPLACE_RETRY_DELAYS:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(source, target)
+
+
 def write_json_atomic(path, data):
     """Écrit `data` en JSON sans jamais exposer de fichier tronqué : fichier
     temporaire du même dossier (0600 via mkstemp), fsync, puis os.replace,
@@ -65,7 +83,8 @@ def write_json_atomic(path, data):
             json.dump(data, handle, ensure_ascii=False, indent=1)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        with _file_lock:
+            _replace(tmp_path, path)
     except BaseException:
         try:
             os.remove(tmp_path)
@@ -77,7 +96,7 @@ def write_json_atomic(path, data):
 def read_json(path):
     """Objet JSON de `path`, ou {} (absent, illisible, autre type)."""
     try:
-        with open(path, encoding="utf-8") as handle:
+        with _file_lock, open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError):
         return {}
@@ -100,8 +119,6 @@ LOCAL_ONLY_KEYS = frozenset({
     "proxy_allow_insecure_ssl", "ca_bundle_path",
 })
 _SETTINGS_SECTIONS = ("config", "settings", "parameters", "mirai", "mirai_config", "miraiConfig")
-
-_write_lock = threading.Lock()
 
 
 def data_dir(user_config_dir):
@@ -213,7 +230,7 @@ class LocalConfig:
         path = self._path(SETTINGS_FILE)
         if not path:
             return
-        with _write_lock:
+        with _file_lock:
             data = self.settings()
             data.update(values or {})
             for key in remove:

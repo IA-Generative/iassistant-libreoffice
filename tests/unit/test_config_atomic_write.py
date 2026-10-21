@@ -6,18 +6,68 @@ credentials — c'est une façon d'entrer dans l'« état absorbant » (marqué
 enrôlé, sans paire relais) sans que personne ne l'ait demandé.
 """
 
+import contextlib
 import json
 import os
 import threading
 
-from tests.stubs.uno_stubs import install, make_job
+from tests.stubs.uno_stubs import install, make_job, read_user_config
 
 install()
+
+from src.mirai import local_config
 
 
 def _job(tmp_path):
     config_dir = str(tmp_path)
     return make_job(config_dir=config_dir), config_dir
+
+
+def _leftovers(config_dir):
+    return [n for n in os.listdir(os.path.join(config_dir, "mirai")) if n.startswith(".tmp-")]
+
+
+def _settings_locked(monkeypatch, refusals):
+    """Remplacement de settings.json refusé `refusals` fois, comme sous Windows
+    quand un antivirus tient le fichier ouvert."""
+    real = os.replace
+    attempts = []
+
+    def replace(source, target):
+        if os.path.basename(target) == local_config.SETTINGS_FILE:
+            attempts.append(target)
+            if len(attempts) <= refusals:
+                raise PermissionError(13, "[WinError 5] Accès refusé")
+        return real(source, target)
+
+    monkeypatch.setattr(os, "replace", replace)
+
+
+def _windows_sharing(monkeypatch):
+    """Sémantique Windows : un fichier ouvert en lecture ne peut pas être
+    remplacé. Rend la liste des remplacements refusés."""
+    real_open, real_replace = open, os.replace
+    reading = []
+    refused = []
+
+    @contextlib.contextmanager
+    def tracked_open(path, *args, **kwargs):
+        with real_open(path, *args, **kwargs) as handle:
+            reading.append(path)
+            try:
+                yield handle
+            finally:
+                reading.remove(path)
+
+    def replace(source, target):
+        if target in reading:
+            refused.append(target)
+            raise PermissionError(13, "[WinError 5] Accès refusé")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(local_config, "open", tracked_open, raising=False)
+    monkeypatch.setattr(os, "replace", replace)
+    return refused
 
 
 def test_value_is_persisted(tmp_path):
@@ -77,3 +127,43 @@ def test_existing_keys_survive_a_write(tmp_path):
         data = json.load(fh)
     assert data["device_name"] == "poste-a"
     assert data["llm_tool_mode"] == "native"
+
+
+def test_setting_survives_a_briefly_locked_settings_file(tmp_path, monkeypatch, fast_clock):
+    job, config_dir = _job(tmp_path)
+    _settings_locked(monkeypatch, refusals=2)
+    job.set_config("plugin_uuid", "u-1")
+    assert read_user_config(config_dir)["plugin_uuid"] == "u-1"
+    assert _leftovers(config_dir) == []
+
+
+def test_lasting_lock_keeps_the_previous_settings_and_no_leftover(tmp_path, monkeypatch,
+                                                                  fast_clock):
+    job, config_dir = _job(tmp_path)
+    job.set_config("device_name", "poste-a")
+    _settings_locked(monkeypatch, refusals=float("inf"))
+    job.set_config("device_name", "poste-b")
+    assert read_user_config(config_dir)["device_name"] == "poste-a"
+    assert _leftovers(config_dir) == []
+
+
+def test_reads_in_the_process_never_hold_up_a_settings_write(tmp_path, monkeypatch, fast_clock):
+    job, config_dir = _job(tmp_path)
+    job.set_config("payload", "initial")
+    refused = _windows_sharing(monkeypatch)
+    reader = local_config.LocalConfig(config_dir, [])
+    stop = threading.Event()
+
+    def _read():
+        while not stop.is_set():
+            reader.get("payload")
+
+    thread = threading.Thread(target=_read, daemon=True)
+    thread.start()
+    for index in range(200):
+        job.set_config("payload", str(index))
+    stop.set()
+    thread.join(timeout=5)
+
+    assert refused == []
+    assert read_user_config(config_dir)["payload"] == "199"
