@@ -791,10 +791,41 @@ def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch,
     palette._run_in_worker(None, "reformule", ctx, "reformule", snapshot=snapshot)
 
     shown = palette._models["response"].Text
-    assert _t("run.stopped") in shown
+    assert "⏹ " + _t("run.stopped") in shown
     assert _t("run.err_network") not in shown
+    assert "⏹ " + _t("run.stopped") in palette._models["journal"].Text
     assert _run_spans(palette)[0]["assistant.reason"] == "cancelled"
     assert doc.replaced is None and doc.inserted == ""
+
+
+def test_a_stopped_agentic_run_keeps_its_journal_and_says_stopped(
+        palette_module, monkeypatch):
+    """« Arrêter » pendant un run agentique : le fil et l'onglet Actions
+    annoncent l'arrêt, à la suite des lignes déjà journalisées."""
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.llm_client import LLMClient
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, StoppedSSEResponse, text_chunks
+
+    cancel = threading.Event()
+    relay = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Une ", "réponse ", "coupée."), cancel)])
+    monkeypatch.setattr(palette_module, "LLMClient",
+                        lambda _shell, max_tokens=None: LLMClient(relay))
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    palette._cancel = cancel
+    doc = FakeWriterDoc(paragraphs=["Un paragraphe."])
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+
+    palette._run_in_worker(None, "résume", ctx, "résume")
+
+    stop_line = "⏹ " + _t("run.stopped")
+    assert stop_line in palette._models["response"].Text
+    mode = LLMClient(relay).effective_mode()
+    assert palette._models["journal"].Text.splitlines() == [
+        _t("palette.mode_tools", mode=mode), stop_line]
+    assert _run_spans(palette)[0]["assistant.reason"] == "cancelled"
 
 
 def test_document_rewrite_reports_why_it_did_nothing(palette_module):
