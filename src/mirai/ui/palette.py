@@ -399,6 +399,11 @@ class _PaneClickHandler(unohelper.Base, XMouseListener):
         pass
 
 
+def _stop_line():
+    """Rendu d'un arrêt voulu : ni le glyphe des erreurs, ni celui des succès."""
+    return "⏹ " + _t("run.stopped")
+
+
 class _JournalObserver(RunObserver):
     """Alimente le journal d'actions de la palette (optionnel, repliable)."""
 
@@ -471,6 +476,10 @@ class _JournalObserver(RunObserver):
 
     def on_error(self, code, message):
         self.lines.append(f"⚠ {message}")
+        self._render()
+
+    def on_stop(self):
+        self.lines.append(_stop_line())
         self._render()
 
 
@@ -1884,6 +1893,10 @@ class AssistantPalette:
                                 cancel_event=self._cancel,
                                 dispatcher=self.dispatcher,
                                 append_mode=self.append_mode)
+        if self._cancelled():
+            self._append_response(_t("palette.assistant_prefix"))
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
         # Le texte du message vient du modèle : l'onglet Actions le montre, le
         # fichier n'en garde que la longueur et la télémétrie aussi.
         self.journal_line(f"✓ {preset.label}", detail=message[:70],
@@ -1898,9 +1911,10 @@ class AssistantPalette:
     def _run_agentic(self, preset, prompt_text, ctx):
         """Run piloté par le LLM, qui appelle les outils du registre."""
 
+        observer = _JournalObserver(self)
         orchestrator = Orchestrator(
             LLMClient(self.shell), self.registry, ctx,
-            observer=_JournalObserver(self),
+            observer=observer,
             conversation=self.conversation,
             cancel_event=self._cancel,
             dispatcher=self.dispatcher,
@@ -1910,7 +1924,9 @@ class AssistantPalette:
         self._append_response(_t("palette.assistant_prefix"))
         result = orchestrator.run_agentic(user_prompt, sink, preset_extra=extra)
         self._delta_buffer.flush()
-        if not result.ok:
+        if result.reason == "cancelled":
+            self._report_stop(observer)
+        elif not result.ok:
             self._stream_response("⚠ " + (result.text or result.reason))
         elif not isinstance(sink, PaletteSink):
             self._stream_response(result.text or _t("palette.applied"))
@@ -1960,11 +1976,12 @@ class AssistantPalette:
                 cancel_event=self._cancel,
                 progress=self._progress)
             self._delta_buffer.flush()
+            if self._cancelled():
+                self._report_stop()
+                return {"ok": False, "reason": "cancelled"}
             if step.error:
                 self._stream_response("⚠ " + error_message(step.error))
                 return {"ok": False, "reason": step.error}
-            if self._cancelled():
-                return {"ok": False, "reason": "cancelled"}
             self.dispatcher.call(
                 lambda: sink.finish(step.text, step.streamed), timeout=30)
         finally:
@@ -2034,11 +2051,12 @@ class AssistantPalette:
             progress=self._progress)
         self._delta_buffer.flush()
 
+        if self._cancelled():
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
         if step.error:
             self._stream_response("⚠ " + error_message(step.error))
             return {"ok": False, "reason": step.error}
-        if self._cancelled():
-            return {"ok": False, "reason": "cancelled"}
 
         rewritten = doc_rewrite.parse_rewritten(step.text)
         if not rewritten:
@@ -2120,6 +2138,18 @@ class AssistantPalette:
         if sink is None:
             sink = PaletteSink(on_delta=self._stream_response)
         return extra, user_prompt, sink
+
+    def _report_stop(self, observer=None):
+        """Un arrêt voulu, rendu de la même façon sur chaque chemin de run.
+
+        Le journal d'un run agentique appartient à son observer : passer par
+        lui évite d'écraser les lignes d'outils déjà affichées.
+        """
+        if observer is None:
+            self.journal_line(_stop_line())
+        else:
+            observer.on_stop()
+        self._stream_response(_stop_line())
 
     def _finish_run(self):
         """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""

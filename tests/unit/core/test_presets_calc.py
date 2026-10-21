@@ -2,6 +2,8 @@
 (cellule fusionnée sous la sélection), formule agentique (via orchestrateur).
 Assertions portées de menu_actions/calc.py."""
 
+import threading
+
 from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.llm_client import LLMClient
@@ -9,10 +11,12 @@ from src.mirai.core.orchestrator import Orchestrator
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tools import register_all
+from src.mirai.i18n import t as _t
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet
 from tests.stubs.fake_shell import (
     FakeShell,
     FakeSSEResponse,
+    StoppedSSEResponse,
     native_tool_call_chunks,
     text_chunks,
 )
@@ -61,6 +65,35 @@ def test_transform_skips_empty_rows():
     message = presets.run_transform(_ctx(doc, shell), shell, "majuscule", None)
     assert "1 ligne(s)" in message
     assert (1, 1) not in sheet.grid and (1, 2) not in sheet.grid
+
+
+def test_stopped_transform_leaves_the_cells_untouched():
+    """« Arrêter » pendant la première ligne : ni texte tronqué ni #ERREUR, et
+    aucune ligne suivante n'est demandée."""
+    cancel = threading.Event()
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("APP", "LE"), cancel),
+        FakeSSEResponse(text_chunks("PEAR")),
+    ])
+    message = presets.run_transform(_ctx(doc, shell), shell,
+                                    "traduire en anglais", None,
+                                    cancel_event=cancel)
+    assert sheet.grid.get((1, 0), "") == ""
+    assert sheet.grid.get((1, 1), "") == ""
+    assert shell.urlopen_calls == 1
+    assert message == _t("run.stopped")
+
+
+def test_failed_transform_flags_the_cell():
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1")
+    shell = FakeShell(responses=[OSError("connexion refusée")])
+    message = presets.run_transform(_ctx(doc, shell), shell,
+                                    "traduire en anglais", None)
+    assert sheet.grid[(1, 0)].startswith("#ERREUR")
+    assert message == _t("run.err_network")
 
 
 def test_transform_without_instruction():

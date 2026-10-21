@@ -34,7 +34,7 @@ class StepResult:
     tool_calls: list = dataclasses.field(default_factory=list)
     finish_reason: str = ""
     streamed: bool = False    # True si le texte a déjà été poussé au sink
-    error: str = ""           # "http_429", "network_error"… — étape interrompue
+    error: str = ""           # "http_429", "network_error", "cancelled"… — étape interrompue
     raw_json: str = ""        # réponse JSON brute (mode json, ré-encodage fidèle)
     reasoning_chars: int = 0  # raisonnement reçu — sert à diagnostiquer un
                               # budget épuisé avant la réponse (cf. step())
@@ -333,6 +333,8 @@ class LLMClient:
             pass
 
         if not outcome.ok:
+            if outcome.cancelled:
+                return StepResult(error="cancelled")
             if isinstance(outcome.error, sse_pump.StreamHttpError):
                 return StepResult(error=f"http_{outcome.error.status}",
                                   finish_reason=finish[0],
