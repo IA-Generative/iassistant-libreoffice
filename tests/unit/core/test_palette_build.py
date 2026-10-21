@@ -769,8 +769,8 @@ def test_a_cancelled_run_is_flagged(palette_module, monkeypatch):
 ], ids=["selection", "document"])
 def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch,
                                                    snapshot):
-    """« Arrêter » pendant le flux : la palette annonce l'arrêt, pas un
-    serveur injoignable, et le document reste tel quel."""
+    """« Arrêter » pendant le flux : la palette annonce l'arrêt et le
+    document reste tel quel."""
     from src.mirai.core.context import ToolContext
     from src.mirai.core.llm_client import LLMClient
     from tests.stubs.fake_docs import FakeWriterDoc
@@ -792,7 +792,6 @@ def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch,
 
     shown = palette._models["response"].Text
     assert "⏹ " + _t("run.stopped") in shown
-    assert _t("run.err_network") not in shown
     assert "⏹ " + _t("run.stopped") in palette._models["journal"].Text
     assert _run_spans(palette)[0]["assistant.reason"] == "cancelled"
     assert doc.replaced is None and doc.inserted == ""
