@@ -1893,6 +1893,10 @@ class AssistantPalette:
                                 cancel_event=self._cancel,
                                 dispatcher=self.dispatcher,
                                 append_mode=self.append_mode)
+        if self._cancelled():
+            self._append_response(_t("palette.assistant_prefix"))
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
         # Le texte du message vient du modèle : l'onglet Actions le montre, le
         # fichier n'en garde que la longueur et la télémétrie aussi.
         self.journal_line(f"✓ {preset.label}", detail=message[:70],

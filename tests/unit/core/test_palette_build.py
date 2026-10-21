@@ -828,6 +828,43 @@ def test_a_stopped_agentic_run_keeps_its_journal_and_says_stopped(
     assert _run_spans(palette)[0]["assistant.reason"] == "cancelled"
 
 
+def test_a_stopped_pipeline_preset_reports_the_stop(palette_module, monkeypatch,
+                                                    tmp_path):
+    """« Arrêter » pendant un preset piloté par Python : le run est rapporté
+    arrêté, et rien n'est enregistré dans la conversation."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.conversation import ConversationStore
+    from src.mirai.core.llm_client import LLMClient
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, StoppedSSEResponse, text_chunks
+
+    store = ConversationStore(str(tmp_path))
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    cancel = threading.Event()
+    relay = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Un ", "texte ", "court."), cancel)])
+    monkeypatch.setattr(presets, "_text_client",
+                        lambda _shell, max_tokens: LLMClient(relay))
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    palette._cancel = cancel
+    preset = next(p for p in presets.PRESETS if p.id == "shorten")
+    doc = FakeWriterDoc(selection_text="Un texte bien trop long à raccourcir.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+
+    palette._run_in_worker(preset, "", ctx, preset.label)
+
+    stop_line = "⏹ " + _t("run.stopped")
+    assert stop_line in palette._models["response"].Text
+    assert palette._journal_lines[-1] == stop_line
+    attrs = _run_spans(palette)[0]
+    assert attrs["assistant.ok"] is False
+    assert attrs["assistant.reason"] == "cancelled"
+    assert store.load_for("writer") == []
+    assert doc.replaced is None
+
+
 def test_document_rewrite_reports_why_it_did_nothing(palette_module):
     """Les sorties anticipées doivent nommer leur cause dans le résumé."""
     palette = _build(palette_module)
