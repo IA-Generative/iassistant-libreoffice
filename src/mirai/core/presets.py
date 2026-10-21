@@ -389,7 +389,9 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                             on_text_delta=sink.stream_delta,
                             cancel_event=cancel_event)
             if step.error:
-                target_cell.setString("#ERREUR: " + step.error)
+                # Un arrêt efface le début de réponse déjà streamé, sans marquer d'erreur.
+                target_cell.setString("" if step.error == "cancelled"
+                                      else "#ERREUR: " + step.error)
                 return error_message(step.error)
             sink.finish(step.text, step.streamed)
             transformed += 1
