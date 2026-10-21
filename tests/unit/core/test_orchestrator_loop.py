@@ -2,16 +2,18 @@
 conversation, observer (journal d'actions), erreurs HTTP."""
 
 import tempfile
+import threading
 
 import pytest
 
 from src.mirai.core.conversation import ConversationStore
-from src.mirai.core.llm_client import StepResult
+from src.mirai.core.llm_client import LLMClient, StepResult
 from src.mirai.core.orchestrator import Orchestrator, RunObserver
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
-from tests.stubs.fake_shell import FakeShell
+from src.mirai.i18n import t as _t
+from tests.stubs.fake_shell import FakeShell, StoppedSSEResponse, text_chunks
 
 
 class FakeLLM:
@@ -156,6 +158,29 @@ def test_step_error_stops_run_with_message():
     assert not result.ok and result.reason == "http_429"
     assert "Quota" in result.text
     assert ("error", "http_429") in observer.events
+
+
+def test_stop_during_the_stream_ends_the_run_as_stopped():
+    """Un flux coupé par « Arrêter » n'est pas une panne réseau."""
+    cancel = threading.Event()
+    shell = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Une ", "réponse ", "coupée."), cancel)])
+    observer = _RecordingObserver()
+    orchestrator = Orchestrator(LLMClient(shell), _registry(), _Ctx(shell),
+                                observer=observer, cancel_event=cancel)
+    result = orchestrator.run_agentic("x", PaletteSink())
+    assert not result.ok and result.reason == "cancelled"
+    assert result.text == _t("run.stopped")
+    assert not [e for e in observer.events if e[0] == "error"]
+
+
+def test_network_failure_is_reported_as_unreachable():
+    shell = FakeShell(responses=[OSError("connexion refusée")])
+    orchestrator = Orchestrator(LLMClient(shell), _registry(), _Ctx(shell),
+                                cancel_event=threading.Event())
+    result = orchestrator.run_agentic("x", PaletteSink())
+    assert not result.ok and result.reason == "network_error"
+    assert result.text == _t("run.err_network")
 
 
 def test_conversation_recorded_and_injected():

@@ -49,6 +49,8 @@ ERROR_KEYS = {
     "http_403": "run.err_403",
     "http_429": "run.err_429",
     "network_error": "run.err_network",
+    # Flux coupé par « Arrêter » : un arrêt voulu, pas une panne.
+    "cancelled": "run.stopped",
     # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
     "empty_response": "run.err_empty",
 }
@@ -118,15 +120,15 @@ class Orchestrator:
                                      on_text_delta=sink.stream_delta,
                                      cancel_event=self.cancel_event,
                                      progress=self.progress)
+                if self.cancelled:
+                    return RunResult(ok=False, iterations=iteration + 1,
+                                     reason="cancelled", text=_t("run.stopped"))
                 if step.error:
                     message = error_message(step.error)
                     self.observer.on_error(step.error, message)
                     result = RunResult(ok=False, iterations=iteration + 1,
                                        reason=step.error, text=message)
                     return result
-                if self.cancelled:
-                    return RunResult(ok=False, iterations=iteration + 1,
-                                     reason="cancelled", text=_t("run.stopped"))
                 if step.tool_calls:
                     self.progress.set_phase(_t("progress.action"))
                     self.observer.on_tool_calls(step.tool_calls)
