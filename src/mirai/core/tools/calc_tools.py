@@ -374,14 +374,15 @@ def set_formula(ctx, args):
 
 
 def fill_formula_down(ctx, args):
-    """Recopie la formule vers le bas en décalant les références de ligne,
-    arrêt à la première ligne vide."""
+    """Recopie la cellule vers le bas comme un copier-coller, qui laisse Calc
+    décaler les références relatives, arrêt à la première ligne vide."""
     sheet = _active_sheet(ctx)
     from_ref = str(args["from_ref"]).strip()
     to_row = int(args["to_row"])  # 1-based inclus
     source = sheet.getCellRangeByName(from_ref).getRangeAddress()
     out_col, start_row = source.StartColumn, source.StartRow
-    formula = sheet.getCellByPosition(out_col, start_row).getFormula()
+    source_cell = sheet.getCellByPosition(out_col, start_row)
+    formula = source_cell.getFormula()
     if not formula.startswith("="):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"{from_ref} ne contient pas de formule.")
@@ -397,17 +398,9 @@ def fill_formula_down(ctx, args):
         check = left if out_col > 0 else right
         if not any(sheet.getCellByPosition(c, row_idx).getString() for c in check):
             break
-        delta = row_idx - start_row
-
-        def _shift(match, d=delta):
-            return match.group(1) + str(int(match.group(2)) + d)
-
-        adjusted = re.sub(r"(\$?[A-Z]+\$?)(\d+)", _shift, formula)
-        try:
-            sheet.getCellByPosition(out_col, row_idx).setFormula(adjusted)
-            filled += 1
-        except Exception:
-            pass
+        target = sheet.getCellByPosition(out_col, row_idx)
+        sheet.copyRange(target.getCellAddress(), source_cell.getRangeAddress())
+        filled += 1
     return ToolResult(call_id="", ok=True,
                       content=f"Formule recopiée sur {filled} ligne(s).")
 
@@ -474,8 +467,9 @@ def register(registry):
     registry.register(ToolSpec(
         name="calc_fill_formula_down",
         description=("Recopie la formule d'une cellule vers le bas jusqu'à la ligne "
-                     "donnée (1-based, exclue), en décalant les références ; "
-                     "s'arrête à la première ligne sans données."),
+                     "donnée (1-based, incluse), comme un copier-coller : les "
+                     "références relatives sont décalées, celles ancrées par $ "
+                     "restent fixes ; s'arrête à la première ligne sans données."),
         parameters={"type": "object", "properties": {
             "from_ref": {"type": "string"},
             "to_row": {"type": "integer", "minimum": 2},

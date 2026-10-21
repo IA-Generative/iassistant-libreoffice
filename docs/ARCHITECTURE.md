@@ -97,7 +97,9 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
    `FILTERXML`, `INDIRECT`, `HYPERLINK` et `DDE`, et refuse références
    externes, chemins UNC et URL. Tout texte écrit dans une cellule passe par
    `calc_tools.safe_set_string`, qui applique la même garde à ce qui commence
-   par `=`, `+`, `-` ou `@`. Tests : `tests/unit/core/test_formula_guard.py`.
+   par `=`, `+`, `-` ou `@`. La recopie vers le bas vérifie la formule source
+   avant `copyRange`, qui n'en décale que les références.
+   Tests : `tests/unit/core/test_formula_guard.py`.
 
 ## Les tools (miroir MCP interne)
 

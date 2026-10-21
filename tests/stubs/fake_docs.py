@@ -188,6 +188,13 @@ class FakeCell:
     def getError(self):
         return self._sheet.formula_errors.get(self.getFormula(), 0)
 
+    def getCellAddress(self):
+        return UnoStruct(Sheet=0, Column=self._col, Row=self._row)
+
+    def getRangeAddress(self):
+        return UnoStruct(Sheet=0, StartColumn=self._col, StartRow=self._row,
+                         EndColumn=self._col, EndRow=self._row)
+
     def setPropertyValue(self, name, value):
         self.properties[name] = value
 
@@ -261,11 +268,23 @@ class FakeCalcSheet:
         self.formula_results = {}             # formule → valeur affichée simulée
         self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
+        self.copies = []                      # ((col, row) source, (col, row) cible)
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
 
     def getCellByPosition(self, col, row):
         return FakeCell(self, col, row)
+
+    def copyRange(self, destination, source):
+        """Calc décale les références relatives de la copie ; le faux recopie
+        la formule telle quelle."""
+        for d_row in range(source.EndRow - source.StartRow + 1):
+            for d_col in range(source.EndColumn - source.StartColumn + 1):
+                src = (source.StartColumn + d_col, source.StartRow + d_row)
+                dst = (destination.Column + d_col, destination.Row + d_row)
+                self.copies.append((src, dst))
+                self.grid[dst] = self.grid.get(src, "")
+                self.formulas[dst] = self.formulas.get(src, "")
 
     def getCellRangeByName(self, ref):
         return _FakeRange(self, _parse_ref(ref))

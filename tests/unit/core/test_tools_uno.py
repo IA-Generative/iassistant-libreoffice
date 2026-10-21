@@ -161,18 +161,47 @@ def test_calc_set_formula_accepts_a_text_result_that_looks_like_an_error(formula
     assert shown in result.content
 
 
+def _fill_down(sheet, to_row):
+    return _registry().call_tool(
+        "calc_fill_formula_down", {"from_ref": "C2", "to_row": to_row},
+        _calc_ctx(FakeCalcDoc(sheet)))
+
+
 def test_calc_fill_formula_down_stops_at_empty_row():
     sheet = FakeCalcSheet(grid={(0, 1): "10", (0, 2): "20", (0, 3): "30"})
     sheet.formulas[(2, 1)] = "=A2*2"
-    doc = FakeCalcDoc(sheet)
-    result = _registry().call_tool(
-        "calc_fill_formula_down", {"from_ref": "C2", "to_row": 10},
-        _calc_ctx(doc))
+    result = _fill_down(sheet, 10)
     assert result.ok
-    assert sheet.formulas[(2, 2)] == "=A3*2"
-    assert sheet.formulas[(2, 3)] == "=A4*2"
-    assert (2, 4) not in sheet.formulas       # ligne 5 vide → arrêt
+    assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3)]   # ligne 5 vide
     assert "2 ligne(s)" in result.content
+
+
+def test_calc_fill_formula_down_includes_to_row():
+    sheet = FakeCalcSheet(grid={(0, r): str(r) for r in range(1, 9)})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 4)
+    assert result.ok
+    assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3)]   # jusqu'à C4
+
+
+@pytest.mark.parametrize("formula", [
+    "=LOG10(A2)",
+    "=DAYS360(A2;B2)",
+    "=ATAN2(A2;B2)",
+    "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETDEC2HEX(A2)",
+    '=IF(A2="Q1";1;0)',
+    "=A2*$B$1",
+])
+def test_calc_fill_formula_down_lets_calc_adjust_the_copy(formula):
+    # Calc décale les références relatives de la cellule copiée et laisse
+    # noms de fonction, littéraux et lignes ancrées par $ intacts. Le tool
+    # n'écrit donc aucune formule de son cru.
+    sheet = FakeCalcSheet(grid={(0, 1): "1", (0, 2): "2"})
+    sheet.formulas[(2, 1)] = formula
+    result = _fill_down(sheet, 3)
+    assert result.ok
+    assert set(sheet.formulas.values()) == {formula}
+    assert sheet.copies == [((2, 1), (2, 2))]
 
 
 def test_calc_get_selection_overview():
