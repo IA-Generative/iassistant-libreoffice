@@ -459,8 +459,9 @@ def register(registry):
     ))
     registry.register(ToolSpec(
         name="calc_set_formula",
-        description=("Applique une formule Calc dans une cellule (séparateur ';', "
-                     "plages 'A1:A10'). Seules les fonctions de calcul sont "
+        description=("Applique une formule Calc dans une cellule, avec les noms "
+                     "anglais des fonctions (SUM, IF…), le séparateur ';' et des "
+                     "plages 'A1:A10'. Seules les fonctions de calcul sont "
                      "permises : ni réseau, ni fichier, ni référence externe. "
                      "Retourne l'erreur affichée (#…, Err:…) le cas échéant pour "
                      "te permettre de corriger."),
