@@ -47,14 +47,16 @@ def _settings_locked(monkeypatch, refusals):
 
 def _windows_sharing(monkeypatch):
     """Sémantique Windows : un fichier ouvert en lecture ne peut pas être
-    remplacé. Rend la liste des remplacements refusés."""
+    remplacé. Rend les chemins lus et les remplacements refusés."""
     real_open, real_replace = open, os.replace
     reading = []
     refused = []
+    opened = []
 
     @contextlib.contextmanager
     def tracked_open(path, *args, **kwargs):
         with real_open(path, *args, **kwargs) as handle:
+            opened.append(path)
             reading.append(path)
             try:
                 yield handle
@@ -69,7 +71,7 @@ def _windows_sharing(monkeypatch):
 
     monkeypatch.setattr(local_config, "open", tracked_open, raising=False)
     monkeypatch.setattr(os, "replace", replace)
-    return refused
+    return opened, refused
 
 
 def _settings_held_without_sharing(monkeypatch, refusals):
@@ -183,7 +185,7 @@ def test_lasting_lock_keeps_the_previous_settings_and_no_leftover(tmp_path, monk
 def test_reads_in_the_process_never_hold_up_a_settings_write(tmp_path, monkeypatch, fast_clock):
     job, config_dir = _job(tmp_path)
     job.set_config("payload", "initial")
-    refused = _windows_sharing(monkeypatch)
+    opened, refused = _windows_sharing(monkeypatch)
     reader = local_config.LocalConfig(config_dir, [])
     stop = threading.Event()
 
@@ -198,6 +200,7 @@ def test_reads_in_the_process_never_hold_up_a_settings_write(tmp_path, monkeypat
     stop.set()
     thread.join(timeout=5)
 
+    assert opened, "aucune lecture interceptée : le patch de open ne porte plus"
     assert refused == []
     assert read_user_config(config_dir)["payload"] == "199"
 
