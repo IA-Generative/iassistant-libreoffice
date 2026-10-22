@@ -97,8 +97,9 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
    `FILTERXML`, `INDIRECT`, `HYPERLINK` et `DDE`, et refuse références
    externes, chemins UNC et URL. Tout texte écrit dans une cellule passe par
    `calc_tools.safe_set_string`, qui applique la même garde à ce qui commence
-   par `=`, `+`, `-` ou `@`. La recopie vers le bas vérifie la formule source
-   avant `copyRange`, qui n'en décale que les références.
+   par `=`, `+`, `-` ou `@`. La recopie vers le bas vérifie la formule source,
+   puis laisse le `FormulaParser` de Calc en décaler les références avant
+   chaque `setFormula`.
    Tests : `tests/unit/core/test_formula_guard.py`.
 
 ## Les tools (miroir MCP interne)
@@ -117,7 +118,7 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
 | calc_write_cells | C | ✔ | écrit des cellules |
 | calc_write_result_column | C | ✔ | colonne « Résultat IA » non destructive |
 | calc_set_formula | C | ✔ | formule + relecture d'erreur (Err:…) |
-| calc_fill_formula_down | C | ✔ | recopie avec décalage de lignes |
+| calc_fill_formula_down | C | ✔ | recopie, Calc décale les références relatives |
 
 Un run d'orchestrateur = **un seul contexte undo** (ouvert par le premier tool
 mutant, fermé en finally) → l'action complète s'annule d'un Ctrl+Z.
