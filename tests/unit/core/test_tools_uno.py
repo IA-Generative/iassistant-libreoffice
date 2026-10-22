@@ -167,14 +167,16 @@ def _fill_down(sheet, to_row):
         _calc_ctx(FakeCalcDoc(sheet)))
 
 
-def test_calc_fill_formula_down_stops_at_empty_row():
-    sheet = FakeCalcSheet(grid={(0, 1): "10", (0, 2): "20", (0, 3): "30"})
+def test_calc_fill_formula_down_fills_rows_without_data_too():
+    """Les colonnes voisines encore vides ne retiennent pas la recopie :
+    l'utilisateur a demandé la formule jusqu'à to_row."""
+    sheet = FakeCalcSheet(grid={(0, 1): "10"})
     sheet.formulas[(2, 1)] = "=A2*2"
-    result = _fill_down(sheet, 10)
+    result = _fill_down(sheet, 5)
     assert result.ok
-    assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3)]   # ligne 5 vide
-    assert sheet.formulas[(2, 3)] == "=A4*2"
-    assert "2 ligne(s)" in result.content
+    assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3), (2, 4)]
+    assert sheet.formulas[(2, 4)] == "=A5*2"
+    assert "3 ligne(s)" in result.content
 
 
 def test_calc_fill_formula_down_includes_to_row():
@@ -205,13 +207,12 @@ def test_calc_fill_formula_down_shifts_only_relative_rows(formula, copied):
     assert sheet.formulas[(2, 2)] == copied
 
 
-@pytest.mark.parametrize("to_row, grid, protected, cause", [
-    (2, {(0, 1): "1", (0, 2): "2"}, False, "dépasser"),      # to_row = ligne source
-    (5, {(0, 1): "1"}, False, "ligne 3"),                     # ligne 3 sans données
-    (5, {(0, 1): "1", (0, 2): "2"}, True, "protégée"),
+@pytest.mark.parametrize("to_row, protected, cause", [
+    (2, False, "dépasser"),      # to_row = ligne source
+    (5, True, "protégée"),
 ])
-def test_calc_fill_formula_down_refuses_and_names_the_cause(to_row, grid, protected, cause):
-    sheet = FakeCalcSheet(grid=grid)
+def test_calc_fill_formula_down_refuses_and_names_the_cause(to_row, protected, cause):
+    sheet = FakeCalcSheet(grid={(0, 1): "1", (0, 2): "2"})
     sheet.formulas[(2, 1)] = "=A2*2"
     sheet.protected = protected
     result = _fill_down(sheet, to_row)

@@ -374,9 +374,9 @@ def set_formula(ctx, args):
 
 
 def fill_formula_down(ctx, args):
-    """Recopie la formule vers le bas : le FormulaParser de Calc décale les
-    références relatives comme à la copie, et setFormula laisse formats et
-    notes des cibles intacts ; arrêt à la première ligne vide."""
+    """Recopie la formule vers le bas jusqu'à to_row, lignes vides comprises :
+    le FormulaParser de Calc décale les références relatives comme à la copie,
+    et setFormula laisse formats et notes des cibles intacts."""
     sheet = _active_sheet(ctx)
     from_ref = str(args["from_ref"]).strip()
     to_row = int(args["to_row"])  # 1-based inclus
@@ -401,23 +401,11 @@ def fill_formula_down(ctx, args):
     parser = ctx.model.createInstance("com.sun.star.sheet.FormulaParser")
     parser.CompileEnglish = True
     tokens = parser.parseFormula(formula, source_cell.getCellAddress())
-    num_cols = sheet.getColumns().Count
-    filled = 0
     for row_idx in range(start_row + 1, to_row):
-        left = range(min(out_col, num_cols))
-        right = range(out_col + 1, min(num_cols, out_col + 5))
-        check = left if out_col > 0 else right
-        if not any(sheet.getCellByPosition(c, row_idx).getString() for c in check):
-            break
         target = sheet.getCellByPosition(out_col, row_idx)
         target.setFormula("=" + parser.printFormula(tokens, target.getCellAddress()))
-        filled += 1
-    if not filled:
-        return ToolResult(call_id="", ok=False, content="",
-                          error=(f"Formule de {from_ref} recopiée sur aucune ligne : "
-                                 f"la ligne {start_row + 2} est sans données."))
     return ToolResult(call_id="", ok=True,
-                      content=f"Formule recopiée sur {filled} ligne(s).")
+                      content=f"Formule recopiée sur {to_row - start_row - 1} ligne(s).")
 
 
 def register(registry):
@@ -482,9 +470,10 @@ def register(registry):
     registry.register(ToolSpec(
         name="calc_fill_formula_down",
         description=("Recopie la formule d'une cellule vers le bas jusqu'à la ligne "
-                     "donnée (1-based, incluse), comme un copier-coller : les "
-                     "références relatives sont décalées, celles ancrées par $ "
-                     "restent fixes ; s'arrête à la première ligne sans données."),
+                     "donnée (1-based, incluse), lignes vides comprises, comme un "
+                     "copier-coller : les références relatives sont décalées, celles "
+                     "ancrées par $ restent fixes. to_row vient de la demande ou de "
+                     "l'étendue des données (calc_get_sheet_overview)."),
         parameters={"type": "object", "properties": {
             "from_ref": {"type": "string"},
             "to_row": {"type": "integer", "minimum": 2},
