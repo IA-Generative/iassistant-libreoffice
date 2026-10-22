@@ -52,16 +52,19 @@ def unfreeze_for_tests():
     _frozen = False
 
 
-# Sous Windows, remplacer un fichier ouvert ailleurs échoue (WinError 5). Les
-# lectures et remplacements de ce processus passent donc sous un même verrou,
-# réentrant car LocalConfig.update le tient de la lecture à l'écriture ; un
-# handle extérieur (antivirus, indexeur) est attendu par quelques reprises.
-_file_lock = threading.RLock()
-_REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
+# Sous Windows, remplacer ou supprimer un fichier ouvert ailleurs échoue
+# (WinError 5) : chaque lecture, remplacement ou suppression de ce processus
+# s'exécute seule sous _file_lock, et un handle extérieur (antivirus, indexeur)
+# est attendu par quelques reprises, verrou relâché. _write_lock sérialise les
+# lecture-modification-écriture de settings.json sans retenir les lecteurs
+# pendant l'écriture du fichier temporaire.
+_file_lock = threading.Lock()
+_write_lock = threading.Lock()
+_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
 
 
 def _retried(action):
-    for delay in _REPLACE_RETRY_DELAYS:
+    for delay in _RETRY_DELAYS:
         try:
             return action()
         except PermissionError:
@@ -70,7 +73,13 @@ def _retried(action):
 
 
 def _replace(source, target):
-    _retried(lambda: os.replace(source, target))
+    with _file_lock:
+        os.replace(source, target)
+
+
+def _remove(path):
+    with _file_lock:
+        os.remove(path)
 
 
 def write_json_atomic(path, data):
@@ -87,8 +96,7 @@ def write_json_atomic(path, data):
             json.dump(data, handle, ensure_ascii=False, indent=1)
             handle.flush()
             os.fsync(handle.fileno())
-        with _file_lock:
-            _replace(tmp_path, path)
+        _retried(lambda: _replace(tmp_path, path))
     except BaseException:
         try:
             os.remove(tmp_path)
@@ -238,7 +246,7 @@ class LocalConfig:
         path = self._path(SETTINGS_FILE)
         if not path:
             return
-        with _file_lock:
+        with _write_lock:
             # Un fichier présent mais refusé n'est pas un fichier vide : le
             # fusionner dans {} effacerait les réglages à la reprise suivante.
             try:
@@ -268,8 +276,8 @@ class LocalConfig:
     def delete_snapshot(self):
         path = self._path(SNAPSHOT_FILE)
         if path:
-            with _file_lock, contextlib.suppress(FileNotFoundError):
-                _retried(lambda: os.remove(path))
+            with contextlib.suppress(FileNotFoundError):
+                _retried(lambda: _remove(path))
 
     def record_install(self, version, package, apply):
         """Compare l'installation courante à la précédente, fait appliquer les
