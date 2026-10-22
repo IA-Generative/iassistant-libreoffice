@@ -4,25 +4,12 @@ un nouvel environnement (transport) oblige à se ré-enrôler."""
 import os
 
 from src.mirai import local_config
+from tests.stubs.helpers import refuse_settings_writes
 from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
 
 install()
 
 from src.mirai.shell import runtime
-
-
-def _first_settings_write_refused(monkeypatch):
-    real = local_config.write_json_atomic
-    calls = []
-
-    def write(path, data):
-        if os.path.basename(path) == local_config.SETTINGS_FILE:
-            calls.append(path)
-            if len(calls) == 1:
-                raise PermissionError("[WinError 5] Accès refusé")
-        return real(path, data)
-
-    monkeypatch.setattr(local_config, "write_json_atomic", write)
 
 
 def _snapshot_removal_refused(monkeypatch):
@@ -90,7 +77,7 @@ def test_refused_purge_after_an_environment_change_is_retried(tmp_path, monkeypa
     # Nouveau processus visant un autre DM : sa première purge est refusée.
     runtime.reset_for_tests()
     local_config.LocalConfig(str(tmp_path), []).set("bootstrap_url", "https://dm-b.example")
-    _first_settings_write_refused(monkeypatch)
+    refuse_settings_writes(monkeypatch, refusals=1)
     make_job(config_dir=str(tmp_path))
     make_job(config_dir=str(tmp_path))
     assert "enrolled" not in read_user_config(str(tmp_path))
