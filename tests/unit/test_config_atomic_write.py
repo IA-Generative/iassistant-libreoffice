@@ -11,6 +11,8 @@ import json
 import os
 import threading
 
+import pytest
+
 from tests.stubs.uno_stubs import install, make_job, read_user_config
 
 install()
@@ -222,3 +224,23 @@ def test_lasting_hold_without_sharing_keeps_the_previous_settings(tmp_path, monk
     assert data["plugin_uuid"] == "u-1"
     assert "assistant_active_tab" not in data
     assert _leftovers(config_dir) == []
+
+
+def test_write_retried_while_the_data_is_wiped_does_not_recreate_the_file(tmp_path, monkeypatch,
+                                                                          fast_clock):
+    """L'effacement de la désinstallation survient pendant l'attente d'une
+    reprise : le fichier n'est pas réécrit après coup, sans temporaire oublié."""
+    path = os.path.join(str(tmp_path), "config.json")
+    real = os.replace
+
+    def replace(source, target):
+        if target == path and not local_config.is_frozen():
+            raise PermissionError(13, "[WinError 5] Accès refusé")
+        return real(source, target)
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(fast_clock, "sleep", lambda seconds: local_config.wipe(str(tmp_path)))
+    with pytest.raises(PermissionError):
+        local_config.write_json_atomic(path, {"plugin_uuid": "u-1"})
+    assert not os.path.exists(path)
+    assert [n for n in os.listdir(str(tmp_path)) if n.startswith(".tmp-")] == []

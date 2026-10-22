@@ -69,6 +69,8 @@ def _retried(action):
             return action()
         except PermissionError:
             time.sleep(delay)
+            if _frozen:
+                raise
     return action()
 
 
