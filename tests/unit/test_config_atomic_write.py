@@ -70,6 +70,37 @@ def _windows_sharing(monkeypatch):
     return refused
 
 
+def _settings_held_without_sharing(monkeypatch, refusals):
+    """Un programme extérieur tient settings.json sans aucun partage : lecture
+    et remplacement refusés `refusals` fois, puis il relâche le fichier."""
+    real_open, real_replace = open, os.replace
+    attempts = []
+
+    def refused(target):
+        if os.path.basename(str(target)) != local_config.SETTINGS_FILE:
+            return False
+        attempts.append(target)
+        return len(attempts) <= refusals
+
+    def tracked_open(path, *args, **kwargs):
+        if refused(path):
+            raise PermissionError(13, "[WinError 5] Accès refusé")
+        return real_open(path, *args, **kwargs)
+
+    def replace(source, target):
+        if refused(target):
+            raise PermissionError(13, "[WinError 5] Accès refusé")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(local_config, "open", tracked_open, raising=False)
+    monkeypatch.setattr(os, "replace", replace)
+
+
+def _settings_on_disk(config_dir):
+    with open(os.path.join(config_dir, "mirai", "settings.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def test_value_is_persisted(tmp_path):
     job, config_dir = _job(tmp_path)
     job.set_config("device_name", "poste-a")
@@ -167,3 +198,27 @@ def test_reads_in_the_process_never_hold_up_a_settings_write(tmp_path, monkeypat
 
     assert refused == []
     assert read_user_config(config_dir)["payload"] == "199"
+
+
+def test_setting_survives_a_settings_file_briefly_held_without_sharing(tmp_path, monkeypatch,
+                                                                       fast_clock):
+    job, config_dir = _job(tmp_path)
+    job.set_config("plugin_uuid", "u-1")
+    _settings_held_without_sharing(monkeypatch, refusals=2)
+    job.set_config("assistant_active_tab", "actions")
+    data = _settings_on_disk(config_dir)
+    assert data["plugin_uuid"] == "u-1"
+    assert data["assistant_active_tab"] == "actions"
+    assert _leftovers(config_dir) == []
+
+
+def test_lasting_hold_without_sharing_keeps_the_previous_settings(tmp_path, monkeypatch,
+                                                                  fast_clock):
+    job, config_dir = _job(tmp_path)
+    job.set_config("plugin_uuid", "u-1")
+    _settings_held_without_sharing(monkeypatch, refusals=float("inf"))
+    job.set_config("assistant_active_tab", "actions")
+    data = _settings_on_disk(config_dir)
+    assert data["plugin_uuid"] == "u-1"
+    assert "assistant_active_tab" not in data
+    assert _leftovers(config_dir) == []

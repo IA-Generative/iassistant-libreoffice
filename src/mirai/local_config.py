@@ -59,14 +59,17 @@ _file_lock = threading.RLock()
 _REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
 
 
-def _replace(source, target):
+def _retried(action):
     for delay in _REPLACE_RETRY_DELAYS:
         try:
-            os.replace(source, target)
-            return
+            return action()
         except PermissionError:
             time.sleep(delay)
-    os.replace(source, target)
+    return action()
+
+
+def _replace(source, target):
+    _retried(lambda: os.replace(source, target))
 
 
 def write_json_atomic(path, data):
@@ -93,14 +96,18 @@ def write_json_atomic(path, data):
         raise
 
 
+def _load_json(path):
+    with _file_lock, open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data if isinstance(data, dict) else {}
+
+
 def read_json(path):
     """Objet JSON de `path`, ou {} (absent, illisible, autre type)."""
     try:
-        with _file_lock, open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
+        return _load_json(path)
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
 
 
 DATA_DIR_NAME = "mirai"
@@ -231,7 +238,12 @@ class LocalConfig:
         if not path:
             return
         with _file_lock:
-            data = self.settings()
+            # Un fichier présent mais refusé n'est pas un fichier vide : le
+            # fusionner dans {} effacerait les réglages à la reprise suivante.
+            try:
+                data = _retried(lambda: _load_json(path))
+            except (FileNotFoundError, ValueError):
+                data = {}
             data.update(values or {})
             for key in remove:
                 data.pop(key, None)
