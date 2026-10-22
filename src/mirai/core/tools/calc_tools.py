@@ -73,9 +73,8 @@ def cell_by_ref(sheet, ref):
 
 def get_cell_error(cell):
     try:
-        value = cell.getString()
-        if value and value.startswith("#"):
-            return value
+        if cell.getError():
+            return cell.getString()
     except Exception:
         pass
     return ""
@@ -375,14 +374,16 @@ def set_formula(ctx, args):
 
 
 def fill_formula_down(ctx, args):
-    """Recopie la formule vers le bas en décalant les références de ligne,
-    arrêt à la première ligne vide."""
+    """Recopie la formule vers le bas jusqu'à to_row, lignes vides comprises :
+    le FormulaParser de Calc décale les références relatives comme à la copie,
+    et setFormula laisse formats et notes des cibles intacts."""
     sheet = _active_sheet(ctx)
     from_ref = str(args["from_ref"]).strip()
     to_row = int(args["to_row"])  # 1-based inclus
     source = sheet.getCellRangeByName(from_ref).getRangeAddress()
     out_col, start_row = source.StartColumn, source.StartRow
-    formula = sheet.getCellByPosition(out_col, start_row).getFormula()
+    source_cell = sheet.getCellByPosition(out_col, start_row)
+    formula = source_cell.getFormula()
     if not formula.startswith("="):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"{from_ref} ne contient pas de formule.")
@@ -390,27 +391,21 @@ def fill_formula_down(ctx, args):
     if refusal:
         return ToolResult(call_id="", ok=False, content="",
                           error=f"Formule de {from_ref} non recopiée, {refusal}.")
-    num_cols = sheet.getColumns().Count
-    filled = 0
+    # setFormula écrit même sur une feuille protégée : le refus est explicite.
+    if sheet.isProtected():
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"Formule de {from_ref} non recopiée : la feuille est protégée.")
+    if to_row <= start_row + 1:
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"to_row ({to_row}) doit dépasser la ligne de {from_ref}.")
+    parser = ctx.model.createInstance("com.sun.star.sheet.FormulaParser")
+    parser.CompileEnglish = True
+    tokens = parser.parseFormula(formula, source_cell.getCellAddress())
     for row_idx in range(start_row + 1, to_row):
-        left = range(min(out_col, num_cols))
-        right = range(out_col + 1, min(num_cols, out_col + 5))
-        check = left if out_col > 0 else right
-        if not any(sheet.getCellByPosition(c, row_idx).getString() for c in check):
-            break
-        delta = row_idx - start_row
-
-        def _shift(match, d=delta):
-            return match.group(1) + str(int(match.group(2)) + d)
-
-        adjusted = re.sub(r"(\$?[A-Z]+\$?)(\d+)", _shift, formula)
-        try:
-            sheet.getCellByPosition(out_col, row_idx).setFormula(adjusted)
-            filled += 1
-        except Exception:
-            pass
+        target = sheet.getCellByPosition(out_col, row_idx)
+        target.setFormula("=" + parser.printFormula(tokens, target.getCellAddress()))
     return ToolResult(call_id="", ok=True,
-                      content=f"Formule recopiée sur {filled} ligne(s).")
+                      content=f"Formule recopiée sur {to_row - start_row - 1} ligne(s).")
 
 
 def register(registry):
@@ -460,8 +455,9 @@ def register(registry):
     ))
     registry.register(ToolSpec(
         name="calc_set_formula",
-        description=("Applique une formule Calc dans une cellule (séparateur ';', "
-                     "plages 'A1:A10'). Seules les fonctions de calcul sont "
+        description=("Applique une formule Calc dans une cellule, avec les noms "
+                     "anglais des fonctions (SUM, IF…), le séparateur ';' et des "
+                     "plages 'A1:A10'. Seules les fonctions de calcul sont "
                      "permises : ni réseau, ni fichier, ni référence externe. "
                      "Retourne l'erreur affichée (#…, Err:…) le cas échéant pour "
                      "te permettre de corriger."),
@@ -474,8 +470,10 @@ def register(registry):
     registry.register(ToolSpec(
         name="calc_fill_formula_down",
         description=("Recopie la formule d'une cellule vers le bas jusqu'à la ligne "
-                     "donnée (1-based, exclue), en décalant les références ; "
-                     "s'arrête à la première ligne sans données."),
+                     "donnée (1-based, incluse), lignes vides comprises, comme un "
+                     "copier-coller : les références relatives sont décalées, celles "
+                     "ancrées par $ restent fixes. to_row vient de la demande ou de "
+                     "l'étendue des données (calc_get_sheet_overview)."),
         parameters={"type": "object", "properties": {
             "from_ref": {"type": "string"},
             "to_row": {"type": "integer", "minimum": 2},
