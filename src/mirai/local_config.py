@@ -4,6 +4,7 @@ Module sans dépendance UNO, partagé par la coquille (entrypoint.py) et l'add-i
 =PROMPT().
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -267,10 +268,8 @@ class LocalConfig:
     def delete_snapshot(self):
         path = self._path(SNAPSHOT_FILE)
         if path:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+            with _file_lock, contextlib.suppress(FileNotFoundError):
+                _retried(lambda: os.remove(path))
 
     def record_install(self, version, package, apply):
         """Compare l'installation courante à la précédente, fait appliquer les

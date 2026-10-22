@@ -25,6 +25,21 @@ def _first_settings_write_refused(monkeypatch):
     monkeypatch.setattr(local_config, "write_json_atomic", write)
 
 
+def _snapshot_removal_refused(monkeypatch):
+    """Suppression de dm_snapshot.json refusée tant que `held[0]` est vrai,
+    comme sous Windows quand un autre programme tient le fichier."""
+    real = os.remove
+    held = [True]
+
+    def remove(path):
+        if held[0] and os.path.basename(path) == local_config.SNAPSHOT_FILE:
+            raise PermissionError("[WinError 5] Accès refusé")
+        return real(path)
+
+    monkeypatch.setattr(os, "remove", remove)
+    return held
+
+
 def _record(cfg, version, package):
     applied = []
     cfg.record_install(version, package, applied.append)
@@ -79,6 +94,21 @@ def test_refused_purge_after_an_environment_change_is_retried(tmp_path, monkeypa
     make_job(config_dir=str(tmp_path))
     make_job(config_dir=str(tmp_path))
     assert "enrolled" not in read_user_config(str(tmp_path))
+
+
+def test_refused_snapshot_removal_after_an_environment_change_is_retried(tmp_path, monkeypatch,
+                                                                         fast_clock):
+    seed_user_config(str(tmp_path), {"plugin_uuid": "u-1", "bootstrap_url": "https://dm-a.example"})
+    make_job(config_dir=str(tmp_path))
+    local_config.LocalConfig(str(tmp_path), []).save_dm_snapshot({"config": {"doc_url": "a"}})
+    # Nouveau processus visant un autre DM : l'instantané ne peut pas être supprimé.
+    runtime.reset_for_tests()
+    local_config.LocalConfig(str(tmp_path), []).set("bootstrap_url", "https://dm-b.example")
+    held = _snapshot_removal_refused(monkeypatch)
+    make_job(config_dir=str(tmp_path))
+    held[0] = False
+    make_job(config_dir=str(tmp_path))
+    assert local_config.LocalConfig(str(tmp_path), []).snapshot() == {}
 
 
 def test_first_run_changes_nothing(tmp_path):
