@@ -185,6 +185,12 @@ class FakeCell:
     def getFormula(self):
         return self._sheet.formulas.get((self._col, self._row), "")
 
+    def getError(self):
+        return self._sheet.formula_errors.get(self.getFormula(), 0)
+
+    def getCellAddress(self):
+        return UnoStruct(Sheet=0, Column=self._col, Row=self._row)
+
     def setPropertyValue(self, name, value):
         self.properties[name] = value
 
@@ -256,12 +262,17 @@ class FakeCalcSheet:
         self.grid = dict(grid or {})          # (col, row) → str
         self.formulas = {}
         self.formula_results = {}             # formule → valeur affichée simulée
+        self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
+        self.protected = False
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
 
     def getCellByPosition(self, col, row):
         return FakeCell(self, col, row)
+
+    def isProtected(self):
+        return self.protected
 
     def getCellRangeByName(self, ref):
         return _FakeRange(self, _parse_ref(ref))
@@ -276,6 +287,31 @@ class FakeCalcSheet:
 
     def getRows(self):
         return self._rows
+
+
+_REL_REF = re.compile(r"(?<![A-Za-z_.$])(\$?[A-Z]{1,3})(\$?)(\d+)(?![\w(])")
+_STRING = re.compile(r'("(?:[^"]|"")*")')
+
+
+class _FakeFormulaParser:
+    """Comme Calc à la copie : décale les lignes relatives, laisse les lignes
+    ancrées par $, les littéraux "…" et les noms de fonction (LOG10) intacts.
+    Comme Calc, printFormula rend la formule sans le « = » initial."""
+
+    def parseFormula(self, formula, address):
+        return formula.lstrip("="), address.Row
+
+    def printFormula(self, tokens, address):
+        text, src_row = tokens
+        delta = address.Row - src_row
+
+        def shift(match):
+            if match.group(2) == "$":
+                return match.group(0)
+            return f"{match.group(1)}{int(match.group(3)) + delta}"
+
+        return "".join(part if part.startswith('"') else _REL_REF.sub(shift, part)
+                       for part in _STRING.split(text))
 
 
 class FakeCalcDoc:
@@ -295,3 +331,7 @@ class FakeCalcDoc:
 
     def getUndoManager(self):
         return self.undo
+
+    def createInstance(self, name):
+        assert name == "com.sun.star.sheet.FormulaParser", name
+        return _FakeFormulaParser()

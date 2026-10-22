@@ -129,6 +129,7 @@ def test_calc_write_cells():
 def test_calc_set_formula_reports_error_token():
     sheet = FakeCalcSheet()
     sheet.formula_results["=VLOOKUP(Z1;A1:B2;2;0)"] = "#N/A"
+    sheet.formula_errors["=VLOOKUP(Z1;A1:B2;2;0)"] = 32767
     doc = FakeCalcDoc(sheet)
     result = _registry().call_tool(
         "calc_set_formula", {"ref": "C1", "formula": "```\n=VLOOKUP(Z1;A1:B2;2;0)\n```"},
@@ -138,18 +139,87 @@ def test_calc_set_formula_reports_error_token():
     assert sheet.formulas[(2, 0)] == "=VLOOKUP(Z1;A1:B2;2;0)"   # fences nettoyées
 
 
-def test_calc_fill_formula_down_stops_at_empty_row():
-    sheet = FakeCalcSheet(grid={(0, 1): "10", (0, 2): "20", (0, 3): "30"})
-    sheet.formulas[(2, 1)] = "=A2*2"
+def test_calc_set_formula_reports_calc_error_code():
+    sheet = FakeCalcSheet()
+    sheet.formula_results["=SQRT(-1)"] = "Err:502"
+    sheet.formula_errors["=SQRT(-1)"] = 502
     doc = FakeCalcDoc(sheet)
     result = _registry().call_tool(
-        "calc_fill_formula_down", {"from_ref": "C2", "to_row": 10},
-        _calc_ctx(doc))
+        "calc_set_formula", {"ref": "C1", "formula": "=SQRT(-1)"}, _calc_ctx(doc))
+    assert not result.ok
+    assert result.error == "Err:502"
+
+
+@pytest.mark.parametrize("formula, shown", [('="#tag"', "#tag"), ('="Err:1"', "Err:1")])
+def test_calc_set_formula_accepts_a_text_result_that_looks_like_an_error(formula, shown):
+    sheet = FakeCalcSheet()
+    sheet.formula_results[formula] = shown
+    doc = FakeCalcDoc(sheet)
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": formula}, _calc_ctx(doc))
     assert result.ok
-    assert sheet.formulas[(2, 2)] == "=A3*2"
-    assert sheet.formulas[(2, 3)] == "=A4*2"
-    assert (2, 4) not in sheet.formulas       # ligne 5 vide → arrêt
-    assert "2 ligne(s)" in result.content
+    assert shown in result.content
+
+
+def _fill_down(sheet, to_row):
+    return _registry().call_tool(
+        "calc_fill_formula_down", {"from_ref": "C2", "to_row": to_row},
+        _calc_ctx(FakeCalcDoc(sheet)))
+
+
+def test_calc_fill_formula_down_fills_rows_without_data_too():
+    """Les colonnes voisines encore vides ne retiennent pas la recopie :
+    l'utilisateur a demandé la formule jusqu'à to_row."""
+    sheet = FakeCalcSheet(grid={(0, 1): "10"})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 5)
+    assert result.ok
+    assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3), (2, 4)]
+    assert sheet.formulas[(2, 4)] == "=A5*2"
+    assert "3 ligne(s)" in result.content
+
+
+def test_calc_fill_formula_down_includes_to_row():
+    sheet = FakeCalcSheet(grid={(0, r): str(r) for r in range(1, 9)})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 4)
+    assert result.ok
+    assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3)]   # jusqu'à C4
+
+
+@pytest.mark.parametrize("formula, copied", [
+    ("=LOG10(A2)", "=LOG10(A3)"),
+    ("=DAYS360(A2;B2)", "=DAYS360(A3;B3)"),
+    ("=ATAN2(A2;B2)", "=ATAN2(A3;B3)"),
+    ("=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETDEC2HEX(A2)",
+     "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETDEC2HEX(A3)"),
+    ('=IF(A2="Q1";1;0)', '=IF(A3="Q1";1;0)'),
+    ("=A2*$B$1", "=A3*$B$1"),
+    ("=SUM(A$1:A2)", "=SUM(A$1:A3)"),
+])
+def test_calc_fill_formula_down_shifts_only_relative_rows(formula, copied):
+    """La ligne suivante reçoit la formule telle que Calc la décale : noms de
+    fonction, littéraux et lignes ancrées par $ intacts."""
+    sheet = FakeCalcSheet(grid={(0, 1): "1", (0, 2): "2"})
+    sheet.formulas[(2, 1)] = formula
+    result = _fill_down(sheet, 3)
+    assert result.ok
+    assert sheet.formulas[(2, 2)] == copied
+
+
+@pytest.mark.parametrize("to_row, protected, cause", [
+    (2, False, "dépasser"),      # to_row = ligne source
+    (5, True, "protégée"),
+])
+def test_calc_fill_formula_down_refuses_and_names_the_cause(to_row, protected, cause):
+    sheet = FakeCalcSheet(grid={(0, 1): "1", (0, 2): "2"})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    sheet.protected = protected
+    result = _fill_down(sheet, to_row)
+    assert not result.ok
+    assert "C2" in result.error
+    assert cause in result.error
+    assert list(sheet.formulas) == [(2, 1)]
 
 
 def test_calc_get_selection_overview():
