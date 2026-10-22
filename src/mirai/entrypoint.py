@@ -955,8 +955,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
                     log_to_file(f"[stockage] {action}")
                 self._move_secrets_out_of_settings()
-                self._apply_install_changes(self._local_config().record_install(
-                    self._get_extension_version(), self._package_root_dir() or ""))
+                self._local_config().record_install(
+                    self._get_extension_version(), self._package_root_dir() or "",
+                    self._apply_install_changes)
                 self.runtime.storage_ready = True
         try:
             self._register_uninstall_listener()

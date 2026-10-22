@@ -4,6 +4,7 @@ Module sans dépendance UNO, partagé par la coquille (entrypoint.py) et l'add-i
 =PROMPT().
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -51,6 +52,38 @@ def unfreeze_for_tests():
     _frozen = False
 
 
+# Sous Windows, remplacer ou supprimer un fichier ouvert ailleurs échoue
+# (WinError 5) : chaque lecture, remplacement ou suppression de ce processus
+# s'exécute seule sous _file_lock, et un handle extérieur (antivirus, indexeur)
+# est attendu par quelques reprises, verrou relâché. _write_lock sérialise les
+# lecture-modification-écriture de settings.json sans retenir les lecteurs
+# pendant l'écriture du fichier temporaire.
+_file_lock = threading.Lock()
+_write_lock = threading.Lock()
+_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
+
+
+def _retried(action):
+    for delay in _RETRY_DELAYS:
+        try:
+            return action()
+        except PermissionError:
+            time.sleep(delay)
+            if _frozen:
+                raise
+    return action()
+
+
+def _replace(source, target):
+    with _file_lock:
+        os.replace(source, target)
+
+
+def _remove(path):
+    with _file_lock:
+        os.remove(path)
+
+
 def write_json_atomic(path, data):
     """Écrit `data` en JSON sans jamais exposer de fichier tronqué : fichier
     temporaire du même dossier (0600 via mkstemp), fsync, puis os.replace,
@@ -65,7 +98,7 @@ def write_json_atomic(path, data):
             json.dump(data, handle, ensure_ascii=False, indent=1)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        _retried(lambda: _replace(tmp_path, path))
     except BaseException:
         try:
             os.remove(tmp_path)
@@ -74,14 +107,18 @@ def write_json_atomic(path, data):
         raise
 
 
+def _load_json(path):
+    with _file_lock, open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data if isinstance(data, dict) else {}
+
+
 def read_json(path):
     """Objet JSON de `path`, ou {} (absent, illisible, autre type)."""
     try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
+        return _load_json(path)
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
 
 
 DATA_DIR_NAME = "mirai"
@@ -100,8 +137,6 @@ LOCAL_ONLY_KEYS = frozenset({
     "proxy_allow_insecure_ssl", "ca_bundle_path",
 })
 _SETTINGS_SECTIONS = ("config", "settings", "parameters", "mirai", "mirai_config", "miraiConfig")
-
-_write_lock = threading.Lock()
 
 
 def data_dir(user_config_dir):
@@ -214,7 +249,12 @@ class LocalConfig:
         if not path:
             return
         with _write_lock:
-            data = self.settings()
+            # Un fichier présent mais refusé n'est pas un fichier vide : le
+            # fusionner dans {} effacerait les réglages à la reprise suivante.
+            try:
+                data = _retried(lambda: _load_json(path))
+            except (FileNotFoundError, ValueError):
+                data = {}
             data.update(values or {})
             for key in remove:
                 data.pop(key, None)
@@ -238,23 +278,24 @@ class LocalConfig:
     def delete_snapshot(self):
         path = self._path(SNAPSHOT_FILE)
         if path:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+            with contextlib.suppress(FileNotFoundError):
+                _retried(lambda: _remove(path))
 
-    def record_install(self, version, package):
-        """Compare l'installation courante à la précédente et l'enregistre."""
+    def record_install(self, version, package, apply):
+        """Compare l'installation courante à la précédente, fait appliquer les
+        changements par `apply`, puis l'enregistre : si `apply` échoue, la
+        reprise suivante retrouve les mêmes changements."""
         path = self._path(INSTALL_STATE_FILE)
         if not path:
-            return set()
+            return
         current = {"version": str(version or ""), "package": str(package or ""),
                    "transport": self.transport_scope()}
         previous = read_json(path)
+        if previous:
+            apply({key for key, value in current.items() if previous.get(key) != value})
+        else:
+            apply({"first_run"})
         write_json_atomic(path, current)
-        if not previous:
-            return {"first_run"}
-        return {key for key, value in current.items() if previous.get(key) != value}
 
     def migrate_legacy(self, home_dir):
         """Range l'ancienne disposition dans le dossier de l'extension.

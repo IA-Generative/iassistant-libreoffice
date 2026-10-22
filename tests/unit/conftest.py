@@ -88,10 +88,12 @@ class _FastClock:
 
 @pytest.fixture
 def fast_clock(monkeypatch):
-    """Les attentes de la coquille ne coûtent plus de temps réel."""
-    from src.mirai import entrypoint
+    """Les attentes de la coquille et des fichiers locaux ne coûtent plus de
+    temps réel."""
+    from src.mirai import entrypoint, local_config
     clock = _FastClock()
     monkeypatch.setattr(entrypoint, "time", clock)
+    monkeypatch.setattr(local_config, "time", clock)
     return clock
 
 
