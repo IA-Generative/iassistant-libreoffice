@@ -173,6 +173,7 @@ def test_calc_fill_formula_down_stops_at_empty_row():
     result = _fill_down(sheet, 10)
     assert result.ok
     assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3)]   # ligne 5 vide
+    assert sheet.formulas[(2, 3)] == "=A4*2"
     assert "2 ligne(s)" in result.content
 
 
@@ -184,38 +185,39 @@ def test_calc_fill_formula_down_includes_to_row():
     assert sorted(sheet.formulas) == [(2, 1), (2, 2), (2, 3)]   # jusqu'à C4
 
 
-@pytest.mark.parametrize("formula", [
-    "=LOG10(A2)",
-    "=DAYS360(A2;B2)",
-    "=ATAN2(A2;B2)",
-    "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETDEC2HEX(A2)",
-    '=IF(A2="Q1";1;0)',
-    "=A2*$B$1",
+@pytest.mark.parametrize("formula, copied", [
+    ("=LOG10(A2)", "=LOG10(A3)"),
+    ("=DAYS360(A2;B2)", "=DAYS360(A3;B3)"),
+    ("=ATAN2(A2;B2)", "=ATAN2(A3;B3)"),
+    ("=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETDEC2HEX(A2)",
+     "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETDEC2HEX(A3)"),
+    ('=IF(A2="Q1";1;0)', '=IF(A3="Q1";1;0)'),
+    ("=A2*$B$1", "=A3*$B$1"),
+    ("=SUM(A$1:A2)", "=SUM(A$1:A3)"),
 ])
-def test_calc_fill_formula_down_lets_calc_adjust_the_copy(formula):
-    # Calc décale les références relatives de la cellule copiée et laisse
-    # noms de fonction, littéraux et lignes ancrées par $ intacts. Le tool
-    # n'écrit donc aucune formule de son cru.
+def test_calc_fill_formula_down_shifts_only_relative_rows(formula, copied):
+    """La ligne suivante reçoit la formule telle que Calc la décale : noms de
+    fonction, littéraux et lignes ancrées par $ intacts."""
     sheet = FakeCalcSheet(grid={(0, 1): "1", (0, 2): "2"})
     sheet.formulas[(2, 1)] = formula
     result = _fill_down(sheet, 3)
     assert result.ok
-    assert set(sheet.formulas.values()) == {formula}
-    assert sheet.copies == [((2, 1), (2, 2))]
+    assert sheet.formulas[(2, 2)] == copied
 
 
-@pytest.mark.parametrize("to_row, grid, protected", [
-    (2, {(0, 1): "1", (0, 2): "2"}, False),     # to_row = ligne source
-    (5, {(0, 1): "1"}, False),                  # ligne 3 sans données
-    (5, {(0, 1): "1", (0, 2): "2"}, True),      # Calc refuse la copie
+@pytest.mark.parametrize("to_row, grid, protected, cause", [
+    (2, {(0, 1): "1", (0, 2): "2"}, False, "dépasser"),      # to_row = ligne source
+    (5, {(0, 1): "1"}, False, "ligne 3"),                     # ligne 3 sans données
+    (5, {(0, 1): "1", (0, 2): "2"}, True, "protégée"),
 ])
-def test_calc_fill_formula_down_fails_when_no_row_is_copied(to_row, grid, protected):
+def test_calc_fill_formula_down_refuses_and_names_the_cause(to_row, grid, protected, cause):
     sheet = FakeCalcSheet(grid=grid)
     sheet.formulas[(2, 1)] = "=A2*2"
     sheet.protected = protected
     result = _fill_down(sheet, to_row)
     assert not result.ok
     assert "C2" in result.error
+    assert cause in result.error
     assert list(sheet.formulas) == [(2, 1)]
 
 

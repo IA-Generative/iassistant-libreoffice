@@ -374,8 +374,9 @@ def set_formula(ctx, args):
 
 
 def fill_formula_down(ctx, args):
-    """Recopie la cellule vers le bas comme un copier-coller, qui laisse Calc
-    décaler les références relatives, arrêt à la première ligne vide."""
+    """Recopie la formule vers le bas : le FormulaParser de Calc décale les
+    références relatives comme à la copie, et setFormula laisse formats et
+    notes des cibles intacts ; arrêt à la première ligne vide."""
     sheet = _active_sheet(ctx)
     from_ref = str(args["from_ref"]).strip()
     to_row = int(args["to_row"])  # 1-based inclus
@@ -390,6 +391,16 @@ def fill_formula_down(ctx, args):
     if refusal:
         return ToolResult(call_id="", ok=False, content="",
                           error=f"Formule de {from_ref} non recopiée, {refusal}.")
+    # setFormula écrit même sur une feuille protégée : le refus est explicite.
+    if sheet.isProtected():
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"Formule de {from_ref} non recopiée : la feuille est protégée.")
+    if to_row <= start_row + 1:
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"to_row ({to_row}) doit dépasser la ligne de {from_ref}.")
+    parser = ctx.model.createInstance("com.sun.star.sheet.FormulaParser")
+    parser.CompileEnglish = True
+    tokens = parser.parseFormula(formula, source_cell.getCellAddress())
     num_cols = sheet.getColumns().Count
     filled = 0
     for row_idx in range(start_row + 1, to_row):
@@ -399,16 +410,12 @@ def fill_formula_down(ctx, args):
         if not any(sheet.getCellByPosition(c, row_idx).getString() for c in check):
             break
         target = sheet.getCellByPosition(out_col, row_idx)
-        sheet.copyRange(target.getCellAddress(), source_cell.getRangeAddress())
-        # Sur une feuille protégée, Calc ignore la copie sans lever d'erreur.
-        if target.getFormula().startswith("="):
-            filled += 1
+        target.setFormula("=" + parser.printFormula(tokens, target.getCellAddress()))
+        filled += 1
     if not filled:
-        return ToolResult(
-            call_id="", ok=False, content="",
-            error=(f"Formule de {from_ref} recopiée sur aucune ligne : la ligne "
-                   f"{start_row + 2} est sans données ou au-delà de to_row, ou la "
-                   "feuille est protégée."))
+        return ToolResult(call_id="", ok=False, content="",
+                          error=(f"Formule de {from_ref} recopiée sur aucune ligne : "
+                                 f"la ligne {start_row + 2} est sans données."))
     return ToolResult(call_id="", ok=True,
                       content=f"Formule recopiée sur {filled} ligne(s).")
 

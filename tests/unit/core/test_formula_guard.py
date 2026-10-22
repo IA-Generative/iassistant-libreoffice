@@ -92,7 +92,7 @@ def test_fill_down_copies_an_addin_function_as_calc_reads_it_back():
     sheet.formulas[(2, 1)] = "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETEOMONTH(A2;0)"
     result = _call(sheet, "calc_fill_formula_down", {"from_ref": "C2", "to_row": 4})
     assert result.ok
-    assert (2, 2) in sheet.formulas
+    assert sheet.formulas[(2, 2)] == "=COM.SUN.STAR.SHEET.ADDIN.ANALYSIS.GETEOMONTH(A3;0)"
 
 
 def test_every_example_the_formula_preset_shows_is_accepted():

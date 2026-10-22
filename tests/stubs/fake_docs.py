@@ -191,10 +191,6 @@ class FakeCell:
     def getCellAddress(self):
         return UnoStruct(Sheet=0, Column=self._col, Row=self._row)
 
-    def getRangeAddress(self):
-        return UnoStruct(Sheet=0, StartColumn=self._col, StartRow=self._row,
-                         EndColumn=self._col, EndRow=self._row)
-
     def setPropertyValue(self, name, value):
         self.properties[name] = value
 
@@ -268,7 +264,6 @@ class FakeCalcSheet:
         self.formula_results = {}             # formule → valeur affichée simulée
         self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
-        self.copies = []                      # ((col, row) source, (col, row) cible)
         self.protected = False
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
@@ -276,19 +271,8 @@ class FakeCalcSheet:
     def getCellByPosition(self, col, row):
         return FakeCell(self, col, row)
 
-    def copyRange(self, destination, source):
-        """Calc décale les références relatives de la copie ; le faux recopie
-        la formule telle quelle. Sur une feuille protégée, Calc ignore la
-        copie sans lever d'erreur."""
-        if self.protected:
-            return
-        for d_row in range(source.EndRow - source.StartRow + 1):
-            for d_col in range(source.EndColumn - source.StartColumn + 1):
-                src = (source.StartColumn + d_col, source.StartRow + d_row)
-                dst = (destination.Column + d_col, destination.Row + d_row)
-                self.copies.append((src, dst))
-                self.grid[dst] = self.grid.get(src, "")
-                self.formulas[dst] = self.formulas.get(src, "")
+    def isProtected(self):
+        return self.protected
 
     def getCellRangeByName(self, ref):
         return _FakeRange(self, _parse_ref(ref))
@@ -303,6 +287,31 @@ class FakeCalcSheet:
 
     def getRows(self):
         return self._rows
+
+
+_REL_REF = re.compile(r"(?<![A-Za-z_.$])(\$?[A-Z]{1,3})(\$?)(\d+)(?![\w(])")
+_STRING = re.compile(r'("(?:[^"]|"")*")')
+
+
+class _FakeFormulaParser:
+    """Comme Calc à la copie : décale les lignes relatives, laisse les lignes
+    ancrées par $, les littéraux "…" et les noms de fonction (LOG10) intacts.
+    Comme Calc, printFormula rend la formule sans le « = » initial."""
+
+    def parseFormula(self, formula, address):
+        return formula.lstrip("="), address.Row
+
+    def printFormula(self, tokens, address):
+        text, src_row = tokens
+        delta = address.Row - src_row
+
+        def shift(match):
+            if match.group(2) == "$":
+                return match.group(0)
+            return f"{match.group(1)}{int(match.group(3)) + delta}"
+
+        return "".join(part if part.startswith('"') else _REL_REF.sub(shift, part)
+                       for part in _STRING.split(text))
 
 
 class FakeCalcDoc:
@@ -322,3 +331,7 @@ class FakeCalcDoc:
 
     def getUndoManager(self):
         return self.undo
+
+    def createInstance(self, name):
+        assert name == "com.sun.star.sheet.FormulaParser", name
+        return _FakeFormulaParser()
