@@ -83,7 +83,17 @@ def _registry():
         handler=lambda ctx, args: ToolResult(call_id="", ok=True, content="vu"),
         apps=("writer",),
     ))
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=lambda ctx, args: ToolResult(call_id="", ok=True, content="écrit"),
+        apps=("writer",), mutates=True,
+    ))
     return registry
+
+
+def _calls(name, turn=0):
+    return StepResult(tool_calls=[ToolCall(id=f"c{turn}", name=name, arguments={})])
 
 
 def test_text_only_run():
@@ -144,8 +154,60 @@ def test_max_iterations_terminates():
                                 observer=observer, max_iterations=3)
     result = orchestrator.run_agentic("boucle", PaletteSink())
     assert not result.ok and result.reason == "max_iterations"
+    assert result.text == _t("run.not_converged")
+    assert result.iterations == 3
     assert ("error", "max_iterations") in observer.events
     assert ctx.undo_ended == 1
+
+
+def test_turn_limit_after_a_write_says_the_changes_were_applied():
+    """Le plafond tombe après une écriture : le document a changé. Annoncer un
+    échec pousserait à relancer, donc à réécrire le document."""
+    observer = _RecordingObserver()
+    llm = FakeLLM([_calls("writer_write", 0), _calls("writer_probe", 1),
+                   _calls("writer_probe", 2)])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()),
+                                observer=observer, max_iterations=3)
+    result = orchestrator.run_agentic("écris puis relis", PaletteSink())
+    assert not result.ok
+    assert result.reason == "max_iterations_after_changes"
+    assert result.text == _t("run.applied_not_concluded")
+    assert result.iterations == 3
+    assert ("error", "max_iterations_after_changes") in observer.events
+
+
+def test_stop_during_the_tools_of_the_last_turn_ends_the_run_as_stopped():
+    """« Arrêter » pendant les outils du dernier tour : un arrêt voulu, pas un
+    plafond de tours atteint."""
+    cancel = threading.Event()
+
+    def _write_then_stop(ctx, args):
+        cancel.set()
+        return ToolResult(call_id="", ok=True, content="écrit")
+
+    registry = _registry()
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=_write_then_stop, apps=("writer",), mutates=True,
+    ))
+    observer = _RecordingObserver()
+    orchestrator = Orchestrator(FakeLLM([_calls("writer_write")]), registry,
+                                _Ctx(FakeShell()), observer=observer,
+                                max_iterations=1, cancel_event=cancel)
+    result = orchestrator.run_agentic("écris", PaletteSink())
+    assert not result.ok and result.reason == "cancelled"
+    assert result.text == _t("run.stopped")
+    assert not [e for e in observer.events if e[0] == "error"]
+
+
+def test_a_write_concluded_on_the_last_turn_stays_a_success():
+    llm = FakeLLM([_calls("writer_write"), StepResult(text="Fait.")])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()),
+                                max_iterations=2)
+    result = orchestrator.run_agentic("écris", PaletteSink())
+    assert result.ok and result.reason == ""
+    assert result.text == "Fait." and result.iterations == 2
 
 
 def test_step_error_stops_run_with_message():
@@ -290,7 +352,7 @@ def test_empty_final_after_tool_stays_a_success():
     shell = FakeShell()
     ctx = _Ctx(shell)
     llm = FakeLLM([
-        StepResult(tool_calls=[ToolCall(id="c1", name="writer_probe", arguments={})]),
+        StepResult(tool_calls=[ToolCall(id="c1", name="writer_write", arguments={})]),
         StepResult(text=""),
     ])
     orchestrator = Orchestrator(llm, _registry(), ctx)
@@ -298,6 +360,14 @@ def test_empty_final_after_tool_stays_a_success():
     assert result.ok
     assert result.iterations == 2
     assert result.reason == ""
+
+
+def test_empty_final_after_reads_only_is_a_failure():
+    """Lire n'a rien changé : sans texte, le run n'a rien produit du tout."""
+    llm = FakeLLM([_calls("writer_probe"), StepResult(text="")])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()))
+    result = orchestrator.run_agentic("résume le document", PaletteSink())
+    assert not result.ok and result.reason == "empty_response"
 
 
 def test_undo_is_closed_even_on_sterile_run():

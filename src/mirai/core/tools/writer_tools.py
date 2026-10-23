@@ -284,7 +284,7 @@ def register(registry):
             "text": {"type": "string",
                      "description": "Texte de remplacement ; « \\n » sépare les paragraphes."},
         }, "required": ["start", "text"]},
-        handler=replace_paragraphs, apps=("writer",),
+        handler=replace_paragraphs, apps=("writer",), mutates=True,
     ))
     registry.register(ToolSpec(
         name="writer_replace_selection",

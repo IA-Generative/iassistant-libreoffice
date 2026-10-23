@@ -351,6 +351,7 @@
   "run.err_generic": "AI 服务错误（{code}）。请重试。",
   "run.stopped": "已停止。",
   "run.not_converged": "助手未能收敛 — 请更明确地描述请求后重试。",
+  "run.applied_not_concluded": "操作已应用到文档，但助手未给出结论 — 重试前请先检查结果。",
   "analysis.phase": "文档分析",
   "analysis.too_short": "文档太短，无法进行结构分析。\n请写几段文字后重新打开此标签页。",
   "analysis.unavailable": "分析暂不可用。",

@@ -53,6 +53,10 @@ ERROR_KEYS = {
     "cancelled": "run.stopped",
     # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
     "empty_response": "run.err_empty",
+    "max_iterations": "run.not_converged",
+    # Plafond atteint après un outil mutant : le document a changé, et
+    # relancer la demande le réécrirait.
+    "max_iterations_after_changes": "run.applied_not_concluded",
 }
 
 
@@ -107,10 +111,11 @@ class Orchestrator:
         messages.append({"role": "user",
                          "content": self._with_scope(user_prompt)})
         tools = self.registry.openai_tools(self.ctx.app)
+        mutating = {spec.name for spec in self.registry.list_tools(self.ctx.app)
+                    if spec.mutates}
 
         self.observer.on_run_start(self.llm.effective_mode())
-        result = RunResult(ok=False, reason="max_iterations")
-        acted = False    # un outil a-t-il déjà agi sur le document ?
+        acted = False    # un outil mutant a-t-il déjà agi sur le document ?
         try:
             for iteration in range(self.max_iterations):
                 if self.cancelled:
@@ -134,7 +139,8 @@ class Orchestrator:
                     self.observer.on_tool_calls(step.tool_calls)
                     results = self._execute_tool_calls(step.tool_calls)
                     messages.extend(self.llm.encode_tool_exchange(step, results))
-                    acted = True
+                    acted = acted or any(call.name in mutating
+                                         for call in step.tool_calls)
                     continue
 
                 final_text = step.text.strip()
@@ -157,8 +163,14 @@ class Orchestrator:
                                    text=final_text)
                 return result
 
-            self.observer.on_error("max_iterations", _t("run.not_converged"))
-            return result
+            if self.cancelled:
+                return RunResult(ok=False, iterations=self.max_iterations,
+                                 reason="cancelled", text=_t("run.stopped"))
+            reason = "max_iterations_after_changes" if acted else "max_iterations"
+            message = error_message(reason)
+            self.observer.on_error(reason, message)
+            return RunResult(ok=False, iterations=self.max_iterations,
+                             reason=reason, text=message)
         finally:
             # Le span AssistantRun est émis par le worker de la palette — point
             # unique couvrant les QUATRE chemins d'exécution. Le RunResult
