@@ -176,6 +176,31 @@ def test_turn_limit_after_a_write_says_the_changes_were_applied():
     assert ("error", "max_iterations_after_changes") in observer.events
 
 
+def test_stop_during_the_tools_of_the_last_turn_ends_the_run_as_stopped():
+    """« Arrêter » pendant les outils du dernier tour : un arrêt voulu, pas un
+    plafond de tours atteint."""
+    cancel = threading.Event()
+
+    def _write_then_stop(ctx, args):
+        cancel.set()
+        return ToolResult(call_id="", ok=True, content="écrit")
+
+    registry = _registry()
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=_write_then_stop, apps=("writer",), mutates=True,
+    ))
+    observer = _RecordingObserver()
+    orchestrator = Orchestrator(FakeLLM([_calls("writer_write")]), registry,
+                                _Ctx(FakeShell()), observer=observer,
+                                max_iterations=1, cancel_event=cancel)
+    result = orchestrator.run_agentic("écris", PaletteSink())
+    assert not result.ok and result.reason == "cancelled"
+    assert result.text == _t("run.stopped")
+    assert not [e for e in observer.events if e[0] == "error"]
+
+
 def test_a_write_concluded_on_the_last_turn_stays_a_success():
     llm = FakeLLM([_calls("writer_write"), StepResult(text="Fait.")])
     orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()),

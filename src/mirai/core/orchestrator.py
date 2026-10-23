@@ -163,6 +163,9 @@ class Orchestrator:
                                    text=final_text)
                 return result
 
+            if self.cancelled:
+                return RunResult(ok=False, iterations=self.max_iterations,
+                                 reason="cancelled", text=_t("run.stopped"))
             reason = "max_iterations_after_changes" if acted else "max_iterations"
             message = error_message(reason)
             self.observer.on_error(reason, message)
