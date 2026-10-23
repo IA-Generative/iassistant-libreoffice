@@ -351,6 +351,7 @@
   "run.err_generic": "AI service error ({code}). Try again.",
   "run.stopped": "Stopped.",
   "run.not_converged": "The assistant did not converge — try again with a more specific request.",
+  "run.applied_not_concluded": "The actions were applied to the document, but the assistant did not conclude — check the result before trying again.",
   "analysis.phase": "Document analysis",
   "analysis.too_short": "Document too short for a structural analysis.\nWrite a few paragraphs, then reopen this tab.",
   "analysis.unavailable": "Analysis unavailable at the moment.",

@@ -351,6 +351,7 @@
   "run.err_generic": "Erreur du service IA ({code}). Réessayez.",
   "run.stopped": "Arrêté.",
   "run.not_converged": "L'assistant n'a pas convergé — réessayez en précisant la demande.",
+  "run.applied_not_concluded": "Les actions ont été appliquées au document, mais l'assistant n'a pas conclu — vérifiez le résultat avant de relancer.",
   "analysis.phase": "Analyse du document",
   "analysis.too_short": "Document trop court pour une analyse de structure.\nÉcrivez quelques paragraphes, puis rouvrez cet onglet.",
   "analysis.unavailable": "Analyse indisponible pour le moment.",
