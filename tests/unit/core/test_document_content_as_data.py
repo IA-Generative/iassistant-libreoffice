@@ -1,11 +1,12 @@
 """Le contenu des documents arrive au modèle comme une donnée, jamais comme une
 consigne : la règle accompagne chaque prompt système (runs agentiques Writer et
-Calc, presets en pipeline), le contexte de feuille est encadré, et un texte
-formulé comme une consigne est transmis tel quel, sans filtrage."""
+Calc, presets en pipeline, analyse du document), le contexte de feuille est
+encadré, et un texte formulé comme une consigne est transmis tel quel, sans
+filtrage."""
 
 import pytest
 
-from src.mirai.core import presets, prompts
+from src.mirai.core import doc_analysis, presets, prompts
 from src.mirai.core.context import ToolContext
 from src.mirai.core.llm_client import LLMClient
 from src.mirai.core.orchestrator import Orchestrator
@@ -79,6 +80,15 @@ def test_pipeline_presets_state_the_rule_and_hand_over_the_content_as_is(preset)
                   "traduire en anglais", None)
 
     messages = shell.requests[0]["messages"]
+    assert prompts.DOCUMENT_DATA_RULE in messages[0]["content"]
+    assert INJECTION in messages[-1]["content"]
+
+
+def test_document_analysis_states_the_rule_and_hands_over_the_content_as_is():
+    document = "Rapport annuel de la direction. " * 10 + "\n" + INJECTION
+
+    messages = doc_analysis.build_messages(document)
+
     assert prompts.DOCUMENT_DATA_RULE in messages[0]["content"]
     assert INJECTION in messages[-1]["content"]
 
