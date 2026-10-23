@@ -32,7 +32,7 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_feed_rewrite.py": 17,
     "tests/unit/test_i18n.py": 1,
     "tests/unit/test_install_changes.py": 4,
-    "tests/unit/test_llm_relay_error.py": 10,
+    "tests/unit/test_llm_relay_error.py": 8,
     "tests/unit/test_llm_token_auth.py": 19,
     "tests/unit/test_log_hygiene.py": 18,
     "tests/unit/test_models_fetch.py": 4,

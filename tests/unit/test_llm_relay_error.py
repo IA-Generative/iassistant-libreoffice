@@ -7,14 +7,19 @@ relais (429/401/403/5xx) avec corrélation X-Request-Id, retry_after, anti-temp�
 No LibreOffice required — UNO modules are stubbed.
 """
 import io
-import time
 import unittest
 import urllib.error
 from email.message import Message
 
+import pytest
+
 from tests.stubs.uno_stubs import install, make_job
 
 install()
+
+from src.mirai.core.shell_facade import MainJobShell  # install() doit précéder l'import
+
+_RATE_LIMITED = '{"error": {"code": "rate_limit_exceeded"}, "retry_after": 30}'
 
 
 def _http_error(code, body=b"", headers=None):
@@ -84,12 +89,46 @@ class TestSendLlmRelayError(unittest.TestCase):
         self.job._send_llm_relay_error(401, "invalid_api_key")
         self.assertEqual(len(self.sent), 2)
 
-    def test_emits_again_after_window(self):
-        self.job._send_llm_relay_error(429, "rate_limit_exceeded")
-        self.job._llm_error_last_sent["rate_limit_exceeded"] = (
-            time.time() - self.job._LLM_ERROR_DEDUP_SECONDS - 1)
-        self.job._send_llm_relay_error(429, "rate_limit_exceeded")
-        self.assertEqual(len(self.sent), 2)
+
+@pytest.fixture
+def relay_error_codes(monkeypatch):
+    """Codes des LlmRelayError émis, toutes instances de MainJob confondues."""
+    from src.mirai import entrypoint
+    codes = []
+
+    def capture(job, span_name, attributes=None):
+        if span_name == "LlmRelayError":
+            codes.append(attributes["llm.error_code"])
+
+    monkeypatch.setattr(entrypoint, "send_telemetry_trace_async", capture)
+    return codes
+
+
+def _new_action():
+    """LibreOffice crée un MainJob par action : réouverture de la palette,
+    clic sur « Tester le modèle »…"""
+    return MainJobShell(make_job())
+
+
+def test_dedup_holds_across_mainjob_instances(relay_error_codes, fast_clock):
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    fast_clock.sleep(59)
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    assert relay_error_codes == ["rate_limit_exceeded"]
+
+
+def test_emits_again_once_the_window_is_over(relay_error_codes, fast_clock):
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    fast_clock.sleep(60)
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    assert relay_error_codes == ["rate_limit_exceeded", "rate_limit_exceeded"]
+
+
+def test_each_error_code_keeps_its_own_window(relay_error_codes):
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    _new_action().report_llm_network_error("timed out")
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    assert relay_error_codes == ["rate_limit_exceeded", "timeout"]
 
 
 class TestStreamRequest429(unittest.TestCase):
