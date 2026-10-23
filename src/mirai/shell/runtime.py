@@ -51,6 +51,8 @@ class ShellRuntime:
         # un utilisateur qui reclique sur une entrée de menu morte ne doit pas
         # produire une rafale de traces.
         self.unhandled_reported = set()
+        # Anti-tempête LlmRelayError : heure du dernier envoi par code d'erreur.
+        self.llm_error_last_sent = {}
 
 
 _current = ShellRuntime()

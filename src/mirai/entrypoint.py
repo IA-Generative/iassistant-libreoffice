@@ -856,12 +856,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """
         try:
             now = time.time()
-            if not hasattr(self, "_llm_error_last_sent"):
-                self._llm_error_last_sent = {}
             key = str(error_code or "unknown")
-            if now - self._llm_error_last_sent.get(key, 0) < self._LLM_ERROR_DEDUP_SECONDS:
+            if now - self.runtime.llm_error_last_sent.get(key, 0) < self._LLM_ERROR_DEDUP_SECONDS:
                 return
-            self._llm_error_last_sent[key] = now
+            self.runtime.llm_error_last_sent[key] = now
             attrs = {
                 "llm.status_code": int(status_code or 0),
                 "llm.error_code": key,
