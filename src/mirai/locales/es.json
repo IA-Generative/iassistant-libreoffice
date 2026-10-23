@@ -351,6 +351,7 @@
   "run.err_generic": "Error del servicio de IA ({code}). Reintente.",
   "run.stopped": "Detenido.",
   "run.not_converged": "El asistente no convergió — reintente precisando la solicitud.",
+  "run.applied_not_concluded": "Las acciones se aplicaron al documento, pero el asistente no concluyó — verifique el resultado antes de reintentar.",
   "analysis.phase": "Análisis del documento",
   "analysis.too_short": "Documento demasiado corto para un análisis de estructura.\nEscriba algunos párrafos y vuelva a abrir esta pestaña.",
   "analysis.unavailable": "Análisis no disponible por el momento.",

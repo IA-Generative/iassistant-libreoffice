@@ -253,3 +253,26 @@ def test_document_map_exposes_styles_and_total():
     assert "Standard" not in result.content, "le style par défaut reste implicite"
     assert "FIN DU DOCUMENT — 2 paragraphes" in result.content
     assert result.data["paragraph_count"] == 2
+
+
+def test_a_run_out_of_turns_after_rewriting_paragraphs_says_they_were_applied():
+    """Réécrire des paragraphes modifie le document : si les tours s'épuisent
+    ensuite, le run ne doit pas s'annoncer comme un échec à relancer."""
+    from src.mirai.core.llm_client import LLMClient
+    from src.mirai.core.orchestrator import Orchestrator
+    from src.mirai.core.registry import ToolRegistry
+    from src.mirai.core.sinks import PaletteSink
+    from src.mirai.core.tools import register_all
+    from tests.stubs.fake_shell import FakeSSEResponse, native_tool_call_chunks
+
+    shell = FakeShell(config={"llm_tool_mode": "native"}, responses=[
+        FakeSSEResponse(native_tool_call_chunks(
+            "writer_replace_paragraphs", '{"start": 1, "text": "Nouveau."}'))])
+    doc = FakeDoc(["Ancien."])
+    ctx = ToolContext(doc, object(), "writer", shell)
+
+    result = Orchestrator(LLMClient(shell), register_all(ToolRegistry()), ctx,
+                          max_iterations=1).run_agentic("réécris", PaletteSink())
+
+    assert doc.paragraphs == ["Nouveau."]
+    assert result.reason == "max_iterations_after_changes"
