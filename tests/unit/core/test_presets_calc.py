@@ -458,3 +458,20 @@ def test_analyze_touches_the_sheet_only_on_the_main_thread(thread_guard):
     assert sheet.grid[(0, 3)] == "Paris domine."
     assert sheet.merged
     assert message == _t("preset.done_analyze")
+
+
+def test_formula_preparation_reads_the_sheet_on_the_main_thread(thread_guard):
+    dispatcher = ThreadPinnedDispatcher()
+    sheet = FakeCalcSheet(grid={(0, 0): "Prix", (1, 0): "Qté",
+                                (0, 1): "10", (1, 1): "3"})
+    doc = FakeCalcDoc(sheet, selection_ref="C2:C2")
+    shell = FakeShell()
+    ctx = _guarded_ctx(thread_guard, doc, shell, dispatcher)
+    formula = next(p for p in presets.PRESETS if p.id == "formula")
+    try:
+        extra = _in_worker(lambda: formula.build_extra(ctx, shell, "prix fois quantité"))
+    finally:
+        dispatcher.close()
+
+    assert "Target cell: C2" in extra
+    assert "A='Prix', B='Qté'" in extra

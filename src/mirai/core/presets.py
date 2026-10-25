@@ -597,10 +597,9 @@ def relevant_functions(user_text, limit=8):
 
 
 def _formula_extra(ctx, shell, user_text):
-    sheet = ctx.controller.ActiveSheet
-    area = ctx.controller.getSelection().getRangeAddress()
-    extra = FORMULA_RULES + "\n\nCONTEXTE DE LA FEUILLE :\n" \
-        + calc_tools.build_schema_context(sheet, area)
+    sheet_context = ctx.on_main(lambda: calc_tools.build_schema_context(
+        ctx.controller.ActiveSheet, ctx.controller.getSelection().getRangeAddress()))
+    extra = FORMULA_RULES + "\n\nCONTEXTE DE LA FEUILLE :\n" + sheet_context
     functions = relevant_functions(user_text)
     if functions:
         extra += "\n\nFONCTIONS PERTINENTES :\n" + functions
