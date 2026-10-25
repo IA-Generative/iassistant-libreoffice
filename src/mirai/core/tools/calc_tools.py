@@ -195,9 +195,41 @@ def apply_dominant_header_style(target_cell, sheet, col_range):
                 break
 
 
+def used_area_end(sheet):
+    """(colonne, ligne) de la dernière cellule de la zone utilisée, ou None.
+
+    Calc la tient à jour à chaque modification. Elle couvre tout contenu et
+    toute note ; la mise en forme ne l'étend que d'un bloc court juste sous
+    les données, jamais d'une colonne entière mise en forme."""
+    try:
+        cursor = sheet.createCursor()
+        cursor.gotoEndOfUsedArea(False)
+        end = cursor.getRangeAddress()
+        return end.EndColumn, end.EndRow
+    except Exception:
+        return None
+
+
+def used_part(sheet, area):
+    """Colonnes et lignes de la plage, bornées à la zone utilisée : une colonne
+    entière sélectionnée ne fait lire que les lignes remplies de la feuille."""
+    end = used_area_end(sheet)
+    last_col, last_row = end if end is not None else (area.EndColumn, area.EndRow)
+    cols = range(area.StartColumn, min(area.EndColumn, last_col) + 1)
+    rows = range(area.StartRow, min(area.EndRow, last_row) + 1)
+    if not cols or not rows:
+        # Rien d'utilisé : aucune ligne à lire, la sélection garde ses colonnes.
+        return range(area.StartColumn, area.EndColumn + 1), range(area.StartRow, area.StartRow)
+    return cols, rows
+
+
 def find_free_output_column(sheet, col_range, row_range):
     """(index_colonne, besoin_en_tête) : première colonne libre à droite."""
     first = col_range.stop
+    end = used_area_end(sheet)
+    if end is not None:
+        # Sous la zone utilisée, aucune ligne ne peut occuper une colonne.
+        row_range = range(row_range.start, min(row_range.stop, end[1] + 1))
     check_rows = list(row_range) + [0]
     for offset in range(50):
         candidate = first + offset

@@ -352,9 +352,8 @@ class _TransformPlan:
 def _read_transform(ctx):
     """Feuille, lignes sources et colonne de sortie. Thread principal exclusivement."""
     sheet = ctx.controller.ActiveSheet
-    area = ctx.controller.getSelection().getRangeAddress()
-    col_range = range(area.StartColumn, area.EndColumn + 1)
-    row_range = range(area.StartRow, area.EndRow + 1)
+    col_range, row_range = calc_tools.used_part(
+        sheet, ctx.controller.getSelection().getRangeAddress())
     sources = []
     for row in row_range:
         parts = [sheet.getCellByPosition(col, row).getString()
@@ -469,28 +468,28 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
 
 
 def _read_table(ctx):
-    """Feuille, plage sélectionnée, texte du tableau et présence de données.
-    Thread principal exclusivement."""
+    """Feuille, colonnes et lignes utilisées de la sélection, texte du tableau
+    et présence de données. Thread principal exclusivement."""
     sheet = ctx.controller.ActiveSheet
-    area = ctx.controller.getSelection().getRangeAddress()
-    rows = []
+    cols, rows = calc_tools.used_part(
+        sheet, ctx.controller.getSelection().getRangeAddress())
+    lines = []
     has_data = False
-    for r in range(area.StartRow, area.EndRow + 1):
-        cells = [sheet.getCellByPosition(c, r).getString()
-                 for c in range(area.StartColumn, area.EndColumn + 1)]
+    for r in rows:
+        cells = [sheet.getCellByPosition(c, r).getString() for c in cols]
         has_data = has_data or any(cells)
-        rows.append(" | ".join(cells))
-    return sheet, area, "\n".join(rows).strip(), has_data
+        lines.append(" | ".join(cells))
+    return sheet, cols, rows, "\n".join(lines).strip(), has_data
 
 
-def _write_analysis(sheet, area, text):
-    """Écrit l'analyse dans une cellule fusionnée deux lignes sous la
-    sélection et rend la raison d'un refus. Thread principal exclusivement."""
-    out_row = area.EndRow + 2
-    target_cell = sheet.getCellByPosition(area.StartColumn, out_row)
+def _write_analysis(sheet, cols, rows, text):
+    """Écrit l'analyse dans une cellule fusionnée deux lignes sous le tableau
+    et rend la raison d'un refus. Thread principal exclusivement."""
+    out_row = rows.stop + 1
+    target_cell = sheet.getCellByPosition(cols.start, out_row)
     try:
         merged = sheet.getCellRangeByPosition(
-            area.StartColumn, out_row, area.EndColumn, out_row)
+            cols.start, out_row, cols.stop - 1, out_row)
         merged.merge(True)
     except Exception:
         pass
@@ -508,7 +507,7 @@ def _write_analysis(sheet, area, text):
 
 def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
                 dispatcher=None, append_mode=True):
-    sheet, area, table_text, has_data = ctx.on_main(lambda: _read_table(ctx))
+    sheet, cols, rows, table_text, has_data = ctx.on_main(lambda: _read_table(ctx))
     _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
     if not has_data:
         return _t("preset.need_range")
@@ -526,7 +525,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     max_tokens = int(shell.get_config("analyze_range_max_tokens", 4000))
     llm = _text_client(shell, max_tokens)
 
-    sink = CalcCellSink(ctx, partial(_write_analysis, sheet, area), tee=tee)
+    sink = CalcCellSink(ctx, partial(_write_analysis, sheet, cols, rows), tee=tee)
     step = llm.step([{"role": "system", "content": system_prompt},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,

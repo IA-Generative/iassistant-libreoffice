@@ -222,6 +222,16 @@ def test_calc_fill_formula_down_refuses_and_names_the_cause(to_row, protected, c
     assert list(sheet.formulas) == [(2, 1)]
 
 
+def test_calc_result_column_of_a_whole_column_scans_only_the_used_rows():
+    sheet = FakeCalcSheet(grid={(0, 0): "a", (0, 1): "b"}, num_rows=1048576)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1048576")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B"]}, _calc_ctx(doc))
+    assert result.ok
+    assert (sheet.grid[(1, 0)], sheet.grid[(1, 1)]) == ("A", "B")
+    assert sheet.cells_asked < 30
+
+
 def test_calc_get_selection_overview():
     sheet = FakeCalcSheet(grid={(0, 0): "Nom", (0, 1): "Alice"})
     doc = FakeCalcDoc(sheet, selection_ref="A1:A2")

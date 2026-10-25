@@ -370,6 +370,79 @@ def test_an_empty_analysis_is_not_announced_as_written():
     assert sheet.merged == []
 
 
+# Une sélection de colonnes ou de lignes entières est lue sur le thread
+# principal, d'un seul appel : seule sa partie utilisée doit l'être.
+
+def _full_size_sheet(grid):
+    """Feuille aux dimensions de Calc : 16 384 colonnes, 1 048 576 lignes."""
+    return FakeCalcSheet(grid=grid, num_cols=16384, num_rows=1048576)
+
+
+def test_a_whole_column_transform_reads_only_the_used_rows():
+    sheet = _full_size_sheet({(0, 0): "pomme", (0, 1): "poire", (0, 2): "prune"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1048576")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR", "PLUM")])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=3, col="B")
+    assert [sheet.grid[(1, row)] for row in range(3)] == ["APPLE", "PEAR", "PLUM"]
+    assert dict(shell.telemetry_events)["TransformToColumn"]["rows"] == "3"
+    assert sheet.cells_asked < 30
+
+
+def test_a_whole_row_transform_reads_only_the_used_columns():
+    sheet = _full_size_sheet({(0, 1): "pomme", (1, 1): "rouge"})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:XFD2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("RED APPLE"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=1, col="C")
+    assert "VALEUR SOURCE :\npomme | rouge\n" in shell.requests[0]["messages"][-1]["content"]
+    assert sheet.grid[(2, 1)] == "RED APPLE"
+    assert sheet.cells_asked < 30
+
+
+def test_a_whole_column_analysis_reads_only_the_used_rows():
+    sheet = _full_size_sheet({(0, 0): "Ville", (1, 0): "Ventes",
+                            (0, 1): "Paris", (1, 1): "100",
+                            (0, 2): "Lyon", (1, 2): "60"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B1048576")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert message == _t("preset.done_analyze")
+    prompt = shell.requests[0]["messages"][-1]["content"]
+    assert "DONNÉES :\nVille | Ventes\nParis | 100\nLyon | 60\n\n" in prompt
+    assert sheet.grid[(0, 4)] == "Paris domine."
+    merged_area = sheet.merged[0][0]
+    assert (merged_area.StartRow, merged_area.EndColumn) == (4, 1)
+    assert sheet.cells_asked < 30
+
+
+def test_a_selection_inside_the_used_area_is_read_whole():
+    """Les lignes vides de la sélection restent lues tant qu'une autre
+    colonne de la feuille descend plus bas : l'analyse garde sa place."""
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
+                                (0, 1): "Paris", (1, 1): "100", (3, 9): "note"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B5")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    prompt = shell.requests[0]["messages"][-1]["content"]
+    assert "DONNÉES :\nVille | Ventes\nParis | 100\n | \n | \n |\n\n" in prompt
+    assert sheet.grid[(0, 6)] == "Paris domine."
+
+
+@pytest.mark.parametrize("selection,col", [("A10:A1048576", "B"), ("C1:C1048576", "D")],
+                         ids=["below", "right"])
+def test_a_selection_outside_the_used_area_keeps_the_usual_messages(selection, col):
+    sheet = _full_size_sheet({(0, 0): "pomme", (0, 1): "poire"})
+    doc = FakeCalcDoc(sheet, selection_ref=selection)
+    shell = FakeShell()
+    assert presets.run_transform(_ctx(doc, shell), shell, "majuscules", None) \
+        == _t("preset.done_transform", count=0, col=col)
+    assert presets.run_analyze(_ctx(doc, shell), shell, "", None) == _t("preset.need_range")
+    assert shell.requests == []
+    assert sheet.cells_asked < 30
+
+
 # Les presets Calc lancés comme par la palette, dans un worker : la feuille
 # n'est touchée que depuis le thread principal simulé.
 
