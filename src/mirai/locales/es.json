@@ -239,6 +239,7 @@
   "preset.undo_edit_selection": "Modificar la selección",
   "preset.need_range": "Seleccione primero el rango de datos que desea analizar.",
   "preset.need_transform_input": "Escriba primero la instrucción de transformación en el campo.",
+  "preset.need_transform_values": "No hay valores que transformar: seleccione celdas no vacías.",
   "preset.resized": "Texto ajustado (~{target} palabras). Vuelva a pulsar para iterar.",
   "preset.done_extend": "Continuación generada en el documento.",
   "preset.done_summarize": "Resumen insertado tras la selección.",

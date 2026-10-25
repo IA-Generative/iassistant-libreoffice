@@ -239,6 +239,7 @@
   "preset.undo_edit_selection": "修改选区",
   "preset.need_range": "请先选择要分析的数据区域。",
   "preset.need_transform_input": "请先在输入框中输入转换指令。",
+  "preset.need_transform_values": "没有可转换的值：请选择非空单元格。",
   "preset.resized": "文本已调整（约 {target} 词）。可再次点击迭代。",
   "preset.done_extend": "续写已生成到文档中。",
   "preset.done_summarize": "摘要已插入到选区之后。",

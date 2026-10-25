@@ -417,6 +417,8 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                       {"context": "calc", "rows": str(plan.row_count)})
     if not user_text.strip():
         return _t("preset.need_transform_input")
+    if not plan.sources:
+        return _t("preset.need_transform_values")
 
     system_prompt = _system(
         "Tu es un assistant de transformation de données. "

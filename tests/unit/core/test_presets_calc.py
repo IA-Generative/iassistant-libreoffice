@@ -430,16 +430,18 @@ def test_a_selection_inside_the_used_area_is_read_whole():
     assert sheet.grid[(0, 6)] == "Paris domine."
 
 
-@pytest.mark.parametrize("selection,col", [("A10:A1048576", "B"), ("C1:C1048576", "D")],
-                         ids=["below", "right"])
-def test_a_selection_outside_the_used_area_keeps_the_usual_messages(selection, col):
-    sheet = _full_size_sheet({(0, 0): "pomme", (0, 1): "poire"})
+@pytest.mark.parametrize("selection", ["A10:A1048576", "C1:C1048576", "A3:A3"],
+                         ids=["below", "right", "empty_cells"])
+def test_a_selection_without_values_asks_for_filled_cells(selection):
+    original = {(0, 0): "pomme", (0, 1): "poire", (0, 3): "prune"}
+    sheet = _full_size_sheet(original)
     doc = FakeCalcDoc(sheet, selection_ref=selection)
     shell = FakeShell()
     assert presets.run_transform(_ctx(doc, shell), shell, "majuscules", None) \
-        == _t("preset.done_transform", count=0, col=col)
+        == _t("preset.need_transform_values")
     assert presets.run_analyze(_ctx(doc, shell), shell, "", None) == _t("preset.need_range")
     assert shell.requests == []
+    assert sheet.grid == original
     assert sheet.cells_asked < 30
 
 

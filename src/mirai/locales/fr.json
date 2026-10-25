@@ -239,6 +239,7 @@
   "preset.undo_edit_selection": "Modifier la sélection",
   "preset.need_range": "Sélectionnez d'abord la plage de données à analyser.",
   "preset.need_transform_input": "Tapez d'abord l'instruction de transformation dans le prompt.",
+  "preset.need_transform_values": "Aucune valeur à transformer : sélectionnez des cellules non vides.",
   "preset.resized": "Texte ajusté (~{target} mots). Recliquez pour itérer.",
   "preset.done_extend": "Suite générée dans le document.",
   "preset.done_summarize": "Résumé inséré après la sélection.",
