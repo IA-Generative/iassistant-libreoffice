@@ -1537,3 +1537,48 @@ def test_new_conversation_clears_the_displayed_reply(palette_module):
         if hasattr(listener, "mousePressed"):
             listener.mousePressed(None)
     assert response.shown_text == ""
+
+
+def _run_writer_preset(palette_module, monkeypatch, response, doc):
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.llm_client import LLMClient
+    from tests.stubs.fake_shell import FakeShell
+
+    relay = FakeShell(responses=[response])
+    monkeypatch.setattr(presets, "_text_client",
+                        lambda _shell, max_tokens: LLMClient(relay))
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    preset = next(p for p in presets.PRESETS if p.id == "summarize")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    palette._run_in_worker(preset, "", ctx, preset.label)
+    return palette._models["response"].Text
+
+
+def test_a_writer_preset_streams_its_reply_to_the_palette(palette_module, monkeypatch):
+    """Comme pour une demande libre, le texte du modèle s'affiche dans la zone
+    de réponse au fil du flux."""
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeSSEResponse, text_chunks
+
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shown = _run_writer_preset(palette_module, monkeypatch,
+                               FakeSSEResponse(text_chunks("Résumé ", "concis.")), doc)
+
+    assert "Résumé concis.\n" + _t("preset.done_summarize_replaced") in shown
+    assert doc.replaced == "Résumé concis."
+
+
+def test_a_target_edited_during_the_run_keeps_the_result_in_the_palette(
+        palette_module, monkeypatch):
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import ProbedSSEResponse, text_chunks
+
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    response = ProbedSSEResponse(text_chunks("Résumé ", "concis."),
+                                 lambda: doc.selection_range.setString("Retouché."))
+    shown = _run_writer_preset(palette_module, monkeypatch, response, doc)
+
+    assert "Résumé concis.\n" + _t("preset.target_changed") in shown
+    assert doc.replaced == "Retouché."

@@ -8,6 +8,9 @@ n'est jamais immobilisé.
 import queue
 import threading
 
+import pytest
+
+from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.orchestrator import Orchestrator, RunObserver
 from src.mirai.core.registry import ToolRegistry
@@ -15,7 +18,7 @@ from src.mirai.core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSin
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
 from src.mirai.core.ui_thread import DirectDispatcher
 from tests.stubs.fake_docs import FakeWriterDoc
-from tests.stubs.fake_shell import FakeShell
+from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
 
 class RecordingDispatcher(DirectDispatcher):
@@ -221,6 +224,75 @@ def test_undo_context_is_opened_on_the_main_thread(thread_guard):
 
     assert fake.undo.entered == ["Test"]
     assert fake.undo.left == 1
+
+
+# Presets Writer : lancés comme par la palette, dans un worker
+
+def _in_worker(fn):
+    """Exécute fn dans un thread « mirai-run » et rend son résultat."""
+    outcome = {}
+
+    def target():
+        try:
+            outcome["value"] = fn()
+        except Exception as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=target, name="mirai-run")
+    thread.start()
+    thread.join(timeout=10)
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+def _run_guarded(thread_guard, fake, shell, run):
+    """Lance run(ctx) dans un worker ; document et contrôleur n'acceptent que
+    le thread principal simulé."""
+    dispatcher = ThreadPinnedDispatcher()
+    ctx = ToolContext(thread_guard(fake, dispatcher.thread),
+                      thread_guard(fake.controller, dispatcher.thread, "controller"),
+                      "writer", shell, dispatcher=dispatcher)
+    try:
+        return _in_worker(lambda: run(ctx))
+    finally:
+        dispatcher.close()
+
+
+TARGETS = pytest.mark.parametrize("selection,paragraph", [
+    ("Un texte administratif sélectionné.", ""),
+    ("", "Le paragraphe sous le curseur."),
+], ids=["selection", "current_paragraph"])
+
+
+@pytest.mark.parametrize("runner", ["run_summarize", "run_simplify",
+                                    "run_shorten", "run_lengthen"])
+@pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
+@TARGETS
+def test_writer_presets_touch_the_document_only_on_the_main_thread(
+        thread_guard, runner, append_mode, selection, paragraph):
+    fake = FakeWriterDoc(selection_text=selection, current_paragraph=paragraph)
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
+
+    _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
+        ctx, shell, "", None, append_mode=append_mode))
+
+    assert (selection or paragraph) in shell.requests[0]["messages"][-1]["content"]
+    assert "Texte produit." in (fake.inserted if append_mode else fake.replaced)
+    assert fake.undo.entered and fake.undo.left == 1
+
+
+@TARGETS
+def test_extend_touches_the_document_only_on_the_main_thread(
+        thread_guard, selection, paragraph):
+    fake = FakeWriterDoc(selection_text=selection, current_paragraph=paragraph)
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(" et la suite."))])
+
+    _run_guarded(thread_guard, fake, shell,
+                 lambda ctx: presets.run_extend(ctx, shell, "", None))
+
+    assert shell.requests[0]["messages"][-1]["content"] == (selection or paragraph)
+    assert " et la suite." in fake.inserted
 
 
 # Annulation
