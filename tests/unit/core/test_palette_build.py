@@ -902,6 +902,37 @@ def test_a_stopped_pipeline_preset_reports_the_stop(palette_module, monkeypatch,
     assert doc.replaced is None
 
 
+def test_a_calc_preset_shows_the_model_text_in_the_palette(palette_module, monkeypatch,
+                                                           tmp_path):
+    """Le texte du modèle s'affiche dans la palette, puis le bilan du preset,
+    sur sa propre ligne."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.conversation import ConversationStore
+    from src.mirai.core.llm_client import LLMClient
+    from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    store = ConversationStore(str(tmp_path))
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    relay = FakeShell(responses=[FakeSSEResponse(text_chunks("APP", "LE"))])
+    monkeypatch.setattr(presets, "_text_client",
+                        lambda _shell, max_tokens: LLMClient(relay))
+    palette = _build(palette_module, "calc")
+    palette._progress = palette_module.RunProgress()
+    preset = next(p for p in presets.PRESETS if p.id == "transform")
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1")
+    ctx = ToolContext(doc, doc.controller, "calc", palette.shell)
+
+    palette._run_in_worker(preset, "traduire en anglais", ctx, preset.label)
+
+    done = _t("preset.done_transform", count=1, col="B")
+    assert (_t("palette.assistant_prefix") + "APPLE\n" + done
+            in palette._models["response"].Text)
+    assert sheet.grid[(1, 0)] == "APPLE"
+
+
 def test_document_rewrite_reports_why_it_did_nothing(palette_module):
     """Les sorties anticipées doivent nommer leur cause dans le résumé."""
     palette = _build(palette_module)
