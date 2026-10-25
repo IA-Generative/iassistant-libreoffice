@@ -7,6 +7,7 @@ from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.tools import register_all
+from src.mirai.i18n import t as _t
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
@@ -174,3 +175,26 @@ def test_transform_does_not_write_a_refused_formula_as_text():
     presets.run_transform(ToolContext(doc, doc.controller, "calc", shell),
                           shell, "fabrique une formule", None)
     assert sheet.grid[(1, 0)].startswith("#ERREUR")
+
+
+def test_a_refused_transform_row_is_not_counted_as_transformed():
+    sheet = FakeCalcSheet(grid={(0, 0): "x", (0, 1): "y"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("X")),
+                                 FakeSSEResponse(text_chunks(EXFILTRATION))])
+    message = presets.run_transform(ToolContext(doc, doc.controller, "calc", shell),
+                                    shell, "majuscules", None)
+    assert sheet.grid[(1, 0)] == "X"
+    assert sheet.grid[(1, 1)].startswith("#ERREUR")
+    assert _t("preset.done_transform", count=1, col="B") in message
+    assert _t("preset.refused_transform", count=1) in message
+
+
+def test_analyze_does_not_announce_an_analysis_it_could_not_write():
+    sheet = FakeCalcSheet(grid={(0, 0): "x"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(EXFILTRATION))])
+    message = presets.run_analyze(ToolContext(doc, doc.controller, "calc", shell),
+                                  shell, "", None)
+    assert sheet.grid[(0, 2)].startswith("#ERREUR")
+    assert message == _t("preset.refused_analyze")

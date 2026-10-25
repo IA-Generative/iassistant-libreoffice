@@ -248,6 +248,8 @@
   "preset.question_asked": "Le modèle a posé une question au lieu de répondre. Réessayez.",
   "preset.done_transform": "{count} ligne(s) transformée(s) en colonne {col}.",
   "preset.done_analyze": "Analyse écrite sous la sélection.",
+  "preset.refused_transform": "{count} ligne(s) non écrite(s) : le résultat serait une formule refusée (voir #ERREUR dans la colonne).",
+  "preset.refused_analyze": "Analyse non écrite : le texte produit serait une formule refusée (voir #ERREUR sous la sélection).",
   "sel.writer_selection": "Sélection : « {excerpt} »",
   "sel.no_selection": "Document entier — les actions rapides portent sur le paragraphe courant",
   "sel.no_target": "Placez le curseur dans un paragraphe ou sélectionnez du texte.",

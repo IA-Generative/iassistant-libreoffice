@@ -194,9 +194,10 @@ class CalcCellSink:
     """Réponse destinée à une cellule Calc. Le flux part vers la palette
     (`tee`) ; la cellule n'est écrite qu'une fois la réponse complète, d'un
     seul appel sur le thread principal : `write(texte)` y écrit par
-    safe_set_string.
+    safe_set_string et rend la raison d'un refus.
 
-    Après `finish`, `written` dit si la cellule a été écrite. Une réponse vide
+    Après `finish`, `written` dit si le texte est dans la cellule et `refusal`
+    pourquoi la garde des formules l'a remplacé par #ERREUR. Une réponse vide
     n'écrit rien."""
 
     def __init__(self, ctx, write, tee=None):
@@ -204,6 +205,7 @@ class CalcCellSink:
         self.write = write
         self.tee = tee
         self.written = False
+        self.refusal = ""
 
     def stream_delta(self, chunk):
         if self.tee:
@@ -215,5 +217,5 @@ class CalcCellSink:
             self.tee("\n")       # chaque réponse finit sa ligne dans la palette
         if not final.strip():
             return
-        self.ctx.on_main(lambda: self.write(final))
-        self.written = True
+        self.refusal = self.ctx.on_main(lambda: self.write(final))
+        self.written = not self.refusal

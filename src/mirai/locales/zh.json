@@ -248,6 +248,8 @@
   "preset.question_asked": "模型提出了问题而没有作答。请重试。",
   "preset.done_transform": "已将 {count} 行转换为 {col} 列。",
   "preset.done_analyze": "分析结果已写入选区下方。",
+  "preset.refused_transform": "{count} 行未写入：结果会是被拒绝的公式（请查看该列中的 #ERREUR）。",
+  "preset.refused_analyze": "分析未写入：生成的文本会是被拒绝的公式（请查看选区下方的 #ERREUR）。",
   "sel.writer_selection": "选区：“{excerpt}”",
   "sel.no_selection": "整个文档 — 快速操作作用于当前段落",
   "sel.no_target": "请将光标置于段落中或选择文本。",

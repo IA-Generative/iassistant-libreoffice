@@ -248,6 +248,8 @@
   "preset.question_asked": "The model asked a question instead of answering. Try again.",
   "preset.done_transform": "{count} row(s) transformed into column {col}.",
   "preset.done_analyze": "Analysis written below the selection.",
+  "preset.refused_transform": "{count} row(s) not written: the result would be a refused formula (see #ERREUR in the column).",
+  "preset.refused_analyze": "Analysis not written: the generated text would be a refused formula (see #ERREUR below the selection).",
   "sel.writer_selection": "Selection: \"{excerpt}\"",
   "sel.no_selection": "Whole document — quick actions apply to the current paragraph",
   "sel.no_target": "Place the cursor in a paragraph or select some text.",

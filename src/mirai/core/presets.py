@@ -429,7 +429,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
 
     # Chaque ligne est écrite dès sa réponse complète, dans un seul contexte
     # d'annulation ouvert à la première écriture : un Ctrl+Z retire le run.
-    transformed = 0
+    transformed = refused = 0
     interrupted = ""
     try:
         for row, source_text in plan.sources:
@@ -452,15 +452,20 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
             sink.finish(step.text, step.streamed)
             if sink.written:
                 transformed += 1
-        if transformed:
+            elif sink.refusal:
+                refused += 1
+        if transformed or refused:
             ctx.on_main(lambda: _fit_result_column(plan))
     finally:
         ctx.undo_end()
 
     if interrupted:
         return error_message(interrupted)
-    return _t("preset.done_transform", count=transformed,
-              col=calc_tools.col_letter(plan.out_col))
+    message = _t("preset.done_transform", count=transformed,
+                 col=calc_tools.col_letter(plan.out_col))
+    if refused:
+        message += " " + _t("preset.refused_transform", count=refused)
+    return message
 
 
 def _read_table(ctx):
@@ -533,6 +538,8 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
         sink.finish(step.text, step.streamed)
     finally:
         ctx.undo_end()
+    if sink.refusal:
+        return _t("preset.refused_analyze")
     if not sink.written:
         return error_message("empty_response")
     return _t("preset.done_analyze")
