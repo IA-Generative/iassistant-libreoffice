@@ -14,7 +14,6 @@ from .text_filters import (
     stop_phrase_position,
     strip_markdown,
 )
-from .tools.calc_tools import safe_set_string
 
 
 class PaletteSink:
@@ -192,20 +191,29 @@ class WriterReplaceSink(_FilteredWriterSink):
 
 
 class CalcCellSink:
-    """Accumule et réécrit la cellule (markdown nettoyé) à chaque delta."""
+    """Réponse destinée à une cellule Calc. Le flux part vers la palette
+    (`tee`) ; la cellule n'est écrite qu'une fois la réponse complète, d'un
+    seul appel sur le thread principal : `write(texte)` y écrit par
+    safe_set_string.
 
-    def __init__(self, cell, tee=None):
-        self.cell = cell
+    Après `finish`, `written` dit si la cellule a été écrite. Une réponse vide
+    n'écrit rien."""
+
+    def __init__(self, ctx, write, tee=None):
+        self.ctx = ctx
+        self.write = write
         self.tee = tee
-        self.accumulated = ""
+        self.written = False
 
     def stream_delta(self, chunk):
-        self.accumulated += chunk
-        safe_set_string(self.cell, strip_markdown(self.accumulated))
         if self.tee:
             self.tee(chunk)
 
     def finish(self, text, streamed):
-        final = self.accumulated or text or ""
-        if final:
-            safe_set_string(self.cell, strip_markdown(final))
+        final = strip_markdown(text or "")
+        if self.tee:
+            self.tee("\n")       # chaque réponse finit sa ligne dans la palette
+        if not final.strip():
+            return
+        self.ctx.on_main(lambda: self.write(final))
+        self.written = True

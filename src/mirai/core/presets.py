@@ -14,6 +14,7 @@ import dataclasses
 import json
 import os
 import re
+from functools import partial
 
 from ..i18n import t as _t
 from .calc_functions import formula_refusal
@@ -337,14 +338,84 @@ def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
                        append_mode=append_mode)
 
 
-def run_transform(ctx, shell, user_text, tee, cancel_event=None,
-                  dispatcher=None, append_mode=True):
+@dataclasses.dataclass
+class _TransformPlan:
+    """Ce que Transformer lit de la feuille avant le premier appel au modèle."""
+    sheet: object
+    col_range: range
+    row_count: int
+    sources: list        # (ligne, texte source) des lignes non vides
+    out_col: int
+    header: str          # en-tête à poser avec la première écriture, puis ""
+
+
+def _read_transform(ctx):
+    """Feuille, lignes sources et colonne de sortie. Thread principal exclusivement."""
     sheet = ctx.controller.ActiveSheet
     area = ctx.controller.getSelection().getRangeAddress()
     col_range = range(area.StartColumn, area.EndColumn + 1)
     row_range = range(area.StartRow, area.EndRow + 1)
+    sources = []
+    for row in row_range:
+        parts = [sheet.getCellByPosition(col, row).getString()
+                 for col in col_range]
+        source_text = " | ".join(p for p in parts if p)
+        if source_text:
+            sources.append((row, source_text))
+    out_col, needs_header = calc_tools.find_free_output_column(
+        sheet, col_range, row_range)
+    header = calc_tools.next_result_header(sheet) if needs_header else ""
+    return _TransformPlan(sheet, col_range, len(row_range), sources, out_col, header)
+
+
+def _write_result_row(plan, row, text):
+    """Écrit le résultat d'une ligne, précédé de l'en-tête à la première
+    écriture du run, et rend la raison d'un refus. Thread principal
+    exclusivement."""
+    sheet = plan.sheet
+    if plan.header:
+        try:
+            header_cell = sheet.getCellByPosition(plan.out_col, 0)
+            header_cell.setString(plan.header)
+            calc_tools.apply_dominant_header_style(header_cell, sheet, plan.col_range)
+        except Exception:
+            pass
+        plan.header = ""
+    target_cell = sheet.getCellByPosition(plan.out_col, row)
+    try:
+        target_cell.setPropertyValue("IsTextWrapped", True)
+    except Exception:
+        pass
+    refusal = calc_tools.safe_set_string(target_cell, text)
+    try:
+        row_obj = sheet.getRows().getByIndex(row)
+        row_obj.OptimalHeight = True
+        if row_obj.Height > 2500:
+            row_obj.Height = 2500
+            row_obj.OptimalHeight = False
+    except Exception:
+        pass
+    return refusal
+
+
+def _fit_result_column(plan):
+    """Thread principal exclusivement."""
+    try:
+        col_obj = plan.sheet.getColumns().getByIndex(plan.out_col)
+        col_obj.OptimalWidth = True
+        if col_obj.Width < 8000:
+            col_obj.Width = 8000
+        elif col_obj.Width > 15000:
+            col_obj.Width = 15000
+    except Exception:
+        pass
+
+
+def run_transform(ctx, shell, user_text, tee, cancel_event=None,
+                  dispatcher=None, append_mode=True):
+    plan = ctx.on_main(lambda: _read_transform(ctx))
     _legacy_telemetry(ctx, "TransformToColumn",
-                      {"context": "calc", "rows": str(len(row_range))})
+                      {"context": "calc", "rows": str(plan.row_count)})
     if not user_text.strip():
         return _t("preset.need_transform_input")
 
@@ -356,75 +427,47 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
         "(pas de **, *, _, #, `, etc.).")
     llm = _text_client(shell, 2000)
 
-    out_col, needs_header = calc_tools.find_free_output_column(
-        sheet, col_range, row_range)
-    if needs_header:
-        try:
-            header_cell = sheet.getCellByPosition(out_col, 0)
-            header_cell.setString(calc_tools.next_result_header(sheet))
-            calc_tools.apply_dominant_header_style(header_cell, sheet, col_range)
-        except Exception:
-            pass
-
+    # Chaque ligne est écrite dès sa réponse complète, dans un seul contexte
+    # d'annulation ouvert à la première écriture : un Ctrl+Z retire le run.
     transformed = 0
-    ctx.undo_begin(_t("preset.undo_transform"))
+    interrupted = ""
     try:
-        for row in row_range:
-            parts = [sheet.getCellByPosition(col, row).getString()
-                     for col in col_range]
-            source_text = " | ".join(p for p in parts if p)
-            if not source_text:
-                continue
-            target_cell = sheet.getCellByPosition(out_col, row)
-            target_cell.setString("")
-            try:
-                target_cell.setPropertyValue("IsTextWrapped", True)
-            except Exception:
-                pass
+        for row, source_text in plan.sources:
             prompt = ("VALEUR SOURCE :\n" + source_text
                       + "\n\nINSTRUCTION : " + user_text + "\n\nRÉSULTAT :")
-            sink = CalcCellSink(target_cell, tee=tee)
+            sink = CalcCellSink(ctx, partial(_write_result_row, plan, row), tee=tee)
             step = llm.step([{"role": "system", "content": system_prompt},
                              {"role": "user", "content": prompt}],
                             on_text_delta=sink.stream_delta,
                             cancel_event=cancel_event)
             if step.error:
-                # Un arrêt efface le début de réponse déjà streamé, sans marquer d'erreur.
-                target_cell.setString("" if step.error == "cancelled"
-                                      else "#ERREUR: " + step.error)
-                return error_message(step.error)
+                interrupted = step.error
+                # Un arrêt n'écrit rien pour la ligne en cours ; une erreur la signale.
+                if step.error != "cancelled":
+                    ctx.undo_begin(_t("preset.undo_transform"))
+                    ctx.on_main(partial(_write_result_row, plan, row,
+                                        "#ERREUR: " + step.error))
+                break
+            ctx.undo_begin(_t("preset.undo_transform"))
             sink.finish(step.text, step.streamed)
-            transformed += 1
-            try:
-                row_obj = sheet.getRows().getByIndex(row)
-                row_obj.OptimalHeight = True
-                if row_obj.Height > 2500:
-                    row_obj.Height = 2500
-                    row_obj.OptimalHeight = False
-            except Exception:
-                pass
-
-        try:
-            col_obj = sheet.getColumns().getByIndex(out_col)
-            col_obj.OptimalWidth = True
-            if col_obj.Width < 8000:
-                col_obj.Width = 8000
-            elif col_obj.Width > 15000:
-                col_obj.Width = 15000
-        except Exception:
-            pass
-        return _t("preset.done_transform", count=transformed,
-                  col=calc_tools.col_letter(out_col))
+            if sink.written:
+                transformed += 1
+        if transformed:
+            ctx.on_main(lambda: _fit_result_column(plan))
     finally:
         ctx.undo_end()
 
+    if interrupted:
+        return error_message(interrupted)
+    return _t("preset.done_transform", count=transformed,
+              col=calc_tools.col_letter(plan.out_col))
 
-def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
-                dispatcher=None, append_mode=True):
+
+def _read_table(ctx):
+    """Feuille, plage sélectionnée, texte du tableau et présence de données.
+    Thread principal exclusivement."""
     sheet = ctx.controller.ActiveSheet
     area = ctx.controller.getSelection().getRangeAddress()
-    _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
-
     rows = []
     has_data = False
     for r in range(area.StartRow, area.EndRow + 1):
@@ -432,7 +475,36 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
                  for c in range(area.StartColumn, area.EndColumn + 1)]
         has_data = has_data or any(cells)
         rows.append(" | ".join(cells))
-    table_text = "\n".join(rows).strip()
+    return sheet, area, "\n".join(rows).strip(), has_data
+
+
+def _write_analysis(sheet, area, text):
+    """Écrit l'analyse dans une cellule fusionnée deux lignes sous la
+    sélection et rend la raison d'un refus. Thread principal exclusivement."""
+    out_row = area.EndRow + 2
+    target_cell = sheet.getCellByPosition(area.StartColumn, out_row)
+    try:
+        merged = sheet.getCellRangeByPosition(
+            area.StartColumn, out_row, area.EndColumn, out_row)
+        merged.merge(True)
+    except Exception:
+        pass
+    try:
+        target_cell.setPropertyValue("IsTextWrapped", True)
+    except Exception:
+        pass
+    refusal = calc_tools.safe_set_string(target_cell, text)
+    try:
+        sheet.getRows().getByIndex(out_row).OptimalHeight = True
+    except Exception:
+        pass
+    return refusal
+
+
+def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
+                dispatcher=None, append_mode=True):
+    sheet, area, table_text, has_data = ctx.on_main(lambda: _read_table(ctx))
+    _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
     if not has_data:
         return _t("preset.need_range")
 
@@ -449,35 +521,21 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     max_tokens = int(shell.get_config("analyze_range_max_tokens", 4000))
     llm = _text_client(shell, max_tokens)
 
-    out_row = area.EndRow + 2
-    target_cell = sheet.getCellByPosition(area.StartColumn, out_row)
+    sink = CalcCellSink(ctx, partial(_write_analysis, sheet, area), tee=tee)
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event)
+    if step.error:
+        return error_message(step.error)
     ctx.undo_begin(_t("preset.undo_analyze"))
     try:
-        try:
-            merged = sheet.getCellRangeByPosition(
-                area.StartColumn, out_row, area.EndColumn, out_row)
-            merged.merge(True)
-        except Exception:
-            pass
-        try:
-            target_cell.setPropertyValue("IsTextWrapped", True)
-        except Exception:
-            pass
-        sink = CalcCellSink(target_cell, tee=tee)
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        try:
-            sheet.getRows().getByIndex(out_row).OptimalHeight = True
-        except Exception:
-            pass
-        return _t("preset.done_analyze")
     finally:
         ctx.undo_end()
+    if not sink.written:
+        return error_message("empty_response")
+    return _t("preset.done_analyze")
 
 
 FORMULA_RULES = (

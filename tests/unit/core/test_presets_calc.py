@@ -4,10 +4,12 @@ Assertions portées de menu_actions/calc.py."""
 
 import threading
 
+import pytest
+
 from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.llm_client import LLMClient
-from src.mirai.core.orchestrator import Orchestrator
+from src.mirai.core.orchestrator import Orchestrator, error_message
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tools import register_all
@@ -20,6 +22,62 @@ from tests.stubs.fake_shell import (
     native_tool_call_chunks,
     text_chunks,
 )
+from tests.unit.core.test_worker_execution import ThreadPinnedDispatcher
+
+_ABSENT = object()
+
+
+class _CalcUndo:
+    """Annulation de Calc réduite à ce que les presets en attendent : chaque
+    contexte fermé devient UNE action, qu'un seul Ctrl+Z défait en entier.
+
+    La grille de la feuille lui signale chaque écriture : `writes` les garde
+    dans l'ordre, `outside` celles faites hors de tout contexte."""
+
+    def __init__(self, sheet):
+        self.sheet = sheet
+        self.actions = []
+        self.writes = []
+        self.outside = []
+        self._open = None
+        sheet.grid = _JournaledGrid(sheet.grid, self)
+
+    def enterUndoContext(self, label):
+        self._open = []
+
+    def leaveUndoContext(self):
+        self.actions.append(self._open)
+        self._open = None
+
+    def note(self, key, previous):
+        self.writes.append(key)
+        if self._open is None:
+            self.outside.append(key)
+        else:
+            self._open.append((key, previous))
+
+    def undo(self):
+        grid = self.sheet.grid
+        for key, previous in reversed(self.actions.pop()):
+            if previous is _ABSENT:
+                dict.pop(grid, key, None)
+            else:
+                dict.__setitem__(grid, key, previous)
+
+
+class _JournaledGrid(dict):
+    def __init__(self, cells, undo):
+        super().__init__(cells)
+        self._undo = undo
+
+    def __setitem__(self, key, value):
+        self._undo.note(key, self.get(key, _ABSENT))
+        super().__setitem__(key, value)
+
+
+def _undoable(doc):
+    doc.undo = _CalcUndo(doc.sheet)
+    return doc.undo
 
 
 def _ctx(doc, shell):
@@ -183,3 +241,220 @@ def test_formula_error_feedback_loop():
     result = orchestrator.run_agentic("somme", PaletteSink())
     assert result.ok and result.iterations == 3
     assert sheet.grid[(2, 1)] == "5"
+
+
+# Lire avant, écrire après : le modèle répond dans le worker, la feuille n'est
+# écrite qu'une fois chaque réponse complète.
+
+def test_transform_writes_each_row_once_its_reply_is_complete():
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    undo = _undoable(doc)
+    seen = []
+
+    class _Shell(FakeShell):
+        def urlopen(self, request, timeout=None):
+            seen.append(dict(sheet.grid))
+            return super().urlopen(request, timeout)
+
+    shell = _Shell(responses=[FakeSSEResponse(text_chunks("AP", "PLE")),
+                              FakeSSEResponse(text_chunks("PE", "AR"))])
+    teed = []
+    presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", teed.append)
+    assert undo.writes == [(1, 0), (1, 1)]
+    assert sheet.grid[(1, 0)] == "APPLE" and sheet.grid[(1, 1)] == "PEAR"
+    assert seen[1][(1, 0)] == "APPLE", "la ligne finie est écrite avant la suivante"
+    assert "".join(teed) == "APPLE\nPEAR\n"
+
+
+def test_one_undo_removes_the_whole_transform():
+    """L'en-tête et toutes les lignes forment une seule action."""
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris",
+                (0, 2): "poire"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    undo = _undoable(doc)
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 FakeSSEResponse(text_chunks("PEAR"))])
+    presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert sheet.grid[(2, 0)] == "Résultat IA"
+    assert sheet.grid[(2, 1)] == "APPLE" and sheet.grid[(2, 2)] == "PEAR"
+    assert len(undo.actions) == 1
+    undo.undo()
+    assert sheet.grid == original
+
+
+def test_stopped_transform_keeps_the_finished_rows():
+    """« Arrêter » pendant la deuxième ligne : la première reste, la deuxième
+    et la suivante ne reçoivent rien, et un Ctrl+Z retire le tout."""
+    cancel = threading.Event()
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris",
+                (0, 2): "poire", (0, 3): "prune"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A4")
+    undo = _undoable(doc)
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 StoppedSSEResponse(text_chunks("PE", "AR"), cancel),
+                                 FakeSSEResponse(text_chunks("PLUM"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    None, cancel_event=cancel)
+    assert message == _t("run.stopped")
+    assert sheet.grid[(2, 0)] == "Résultat IA"
+    assert sheet.grid[(2, 1)] == "APPLE"
+    assert (2, 2) not in undo.writes and (2, 3) not in undo.writes
+    assert shell.urlopen_calls == 2
+    undo.undo()
+    assert sheet.grid == original
+
+
+def test_transform_stopped_on_its_first_row_leaves_the_sheet_as_it_was():
+    cancel = threading.Event()
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A2")
+    undo = _undoable(doc)
+    shell = FakeShell(responses=[StoppedSSEResponse(text_chunks("APP", "LE"), cancel)])
+    presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None,
+                          cancel_event=cancel)
+    assert undo.writes == []
+    assert sheet.grid == original
+
+
+def test_an_empty_reply_is_not_counted_as_transformed():
+    sheet = FakeCalcSheet(grid={(0, 0): "x", (0, 1): "y"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("X")),
+                                 FakeSSEResponse(text_chunks())])
+    message = presets.run_transform(_ctx(doc, shell), shell, "majuscules", None)
+    assert message == _t("preset.done_transform", count=1, col="B")
+    assert (1, 1) not in sheet.grid
+
+
+def test_analysis_is_written_once_its_reply_is_complete():
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
+                                (0, 1): "Paris", (1, 1): "100"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    undo = _undoable(doc)
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris ", "domine."))])
+    teed = []
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", teed.append)
+    assert undo.writes == [(0, 3)]
+    assert undo.outside == []
+    assert sheet.grid[(0, 3)] == "Paris domine."
+    assert "".join(teed) == "Paris domine.\n"
+    assert message == _t("preset.done_analyze")
+
+
+def test_stopped_analysis_leaves_the_sheet_untouched():
+    cancel = threading.Event()
+    original = {(0, 0): "Ville", (1, 0): "Ventes", (0, 1): "Paris", (1, 1): "100"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    shell = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Paris ", "domine."), cancel)])
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None,
+                                  cancel_event=cancel)
+    assert sheet.grid == original
+    assert sheet.merged == []
+    assert message == _t("run.stopped")
+
+
+def test_an_empty_analysis_is_not_announced_as_written():
+    original = {(0, 0): "Ville", (0, 1): "Paris"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks())])
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert message == error_message("empty_response")
+    assert sheet.grid == original
+    assert sheet.merged == []
+
+
+# Les presets Calc lancés comme par la palette, dans un worker : la feuille
+# n'est touchée que depuis le thread principal simulé.
+
+def _in_worker(fn):
+    """Exécute fn dans un thread « mirai-run » et rend son résultat."""
+    outcome = {}
+
+    def target():
+        try:
+            outcome["value"] = fn()
+        except Exception as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=target, name="mirai-run")
+    thread.start()
+    thread.join(timeout=10)
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+def _guarded_ctx(thread_guard, doc, shell, dispatcher):
+    """Document et contrôleur n'acceptent que le thread principal simulé."""
+    return ToolContext(thread_guard(doc, dispatcher.thread),
+                       thread_guard(doc.controller, dispatcher.thread, "controller"),
+                       "calc", shell, dispatcher=dispatcher)
+
+
+def test_transform_touches_the_sheet_only_on_the_main_thread(thread_guard):
+    dispatcher = ThreadPinnedDispatcher()
+    # Colonne B occupée : le résultat va en C, sous un en-tête « Résultat IA ».
+    sheet = FakeCalcSheet(grid={(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme",
+                                (1, 1): "pris", (0, 3): "prune"})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A4")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APP", "LE")),
+                                 FakeSSEResponse(text_chunks("PLUM"))])
+    ctx = _guarded_ctx(thread_guard, doc, shell, dispatcher)
+    try:
+        message = _in_worker(lambda: presets.run_transform(
+            ctx, shell, "traduire en anglais", None, dispatcher=dispatcher))
+    finally:
+        dispatcher.close()
+
+    assert sheet.grid[(2, 0)] == "Résultat IA"
+    assert sheet.grid[(2, 1)] == "APPLE"
+    assert sheet.grid[(2, 3)] == "PLUM"
+    assert message == _t("preset.done_transform", count=2, col="C")
+
+
+@pytest.mark.parametrize("make_response,expected", [
+    (lambda cancel: OSError("connexion refusée"), "#ERREUR: network_error"),
+    (lambda cancel: StoppedSSEResponse(text_chunks("APP", "LE"), cancel), None),
+], ids=["error", "stopped"])
+def test_interrupted_transform_touches_the_sheet_only_on_the_main_thread(
+        thread_guard, make_response, expected):
+    cancel = threading.Event()
+    dispatcher = ThreadPinnedDispatcher()
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1")
+    shell = FakeShell(responses=[make_response(cancel)])
+    ctx = _guarded_ctx(thread_guard, doc, shell, dispatcher)
+    try:
+        _in_worker(lambda: presets.run_transform(
+            ctx, shell, "traduire en anglais", None, cancel_event=cancel,
+            dispatcher=dispatcher))
+    finally:
+        dispatcher.close()
+
+    assert sheet.grid.get((1, 0)) == expected
+
+
+def test_analyze_touches_the_sheet_only_on_the_main_thread(thread_guard):
+    dispatcher = ThreadPinnedDispatcher()
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
+                                (0, 1): "Paris", (1, 1): "100"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris ", "domine."))])
+    ctx = _guarded_ctx(thread_guard, doc, shell, dispatcher)
+    try:
+        message = _in_worker(lambda: presets.run_analyze(
+            ctx, shell, "", None, dispatcher=dispatcher))
+    finally:
+        dispatcher.close()
+
+    assert "Paris | 100" in shell.requests[0]["messages"][-1]["content"]
+    assert sheet.grid[(0, 3)] == "Paris domine."
+    assert sheet.merged
+    assert message == _t("preset.done_analyze")
