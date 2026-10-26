@@ -187,10 +187,6 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                         cancel_event=cancel_event)
         if step.error:
             return error_message(step.error)
-        if sink.question_detected:
-            sink.insert_message(
-                "\n[Le modèle n'a pas pu continuer le texte."
-                " Essayez de sélectionner plus de contexte.]")
     sink.finish(step.text, step.streamed)
     return _outcome(sink, _t("preset.done_extend"))
 

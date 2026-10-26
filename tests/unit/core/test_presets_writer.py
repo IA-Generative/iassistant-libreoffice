@@ -131,15 +131,18 @@ def test_extend_stopped_during_its_retry_writes_nothing():
     assert message == _t("run.stopped")
 
 
-def test_extend_double_question_shows_the_fallback_and_writes_nothing():
+def test_extend_double_question_is_reported_once_and_writes_nothing():
+    """Deux questions de suite : le bilan le dit, une seule fois, et la
+    palette ne montre aucun message de repli en plus."""
     doc = FakeWriterDoc(selection_text="Texte")
     shell = FakeShell(responses=[
         FakeSSEResponse(text_chunks("Voulez-vous que je continue ?")),
         FakeSSEResponse(text_chunks("Souhaitez-vous que je poursuive ?")),
     ])
     shown = []
-    presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
-    assert "[Le modèle n'a pas pu continuer le texte." in "".join(shown)
+    message = presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
+    assert "".join(shown) == ""
+    assert message == _t("preset.question_asked")
     assert doc.inserted == ""
 
 
