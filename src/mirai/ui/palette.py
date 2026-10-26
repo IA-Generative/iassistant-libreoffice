@@ -1904,12 +1904,15 @@ class AssistantPalette:
                           step=telemetry_steps.PRESET_DONE,
                           **{"preset.name": preset.id,
                              "result.chars": len(message or "")})
-        # Le bilan ouvre sa propre ligne quand le texte du modèle le précède.
+        # Le bilan ouvre sa propre ligne quand le texte du modèle le précède,
+        # et le fil garde les deux : le texte reste lisible après l'échange suivant.
+        prefix = _t("palette.assistant_prefix")
         line = self._current_exchange[-1]
-        new_line = "" if line.endswith(("\n", _t("palette.assistant_prefix"))) else "\n"
+        new_line = "" if line.endswith(("\n", prefix)) else "\n"
         self._stream_response(new_line + message)
         self.conversation.append("user", shown, ctx.app)
-        self.conversation.append("assistant", message, ctx.app)
+        self.conversation.append("assistant", line.removeprefix(prefix) + new_line + message,
+                                 ctx.app)
         return {"ok": True}
 
     def _run_agentic(self, preset, prompt_text, ctx):
