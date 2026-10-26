@@ -22,7 +22,7 @@ from tests.stubs.fake_shell import (
     native_tool_call_chunks,
     text_chunks,
 )
-from tests.unit.core.test_worker_execution import ThreadPinnedDispatcher
+from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
 
 _ABSENT = object()
 

@@ -5,7 +5,6 @@ run, **rien** ne touche UNO depuis le thread de fond, et le thread principal
 n'est jamais immobilisé.
 """
 
-import queue
 import threading
 
 from src.mirai.core.context import ToolContext
@@ -16,6 +15,7 @@ from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
 from src.mirai.core.ui_thread import DirectDispatcher
 from tests.stubs.fake_docs import FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell
+from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
 
 
 class RecordingDispatcher(DirectDispatcher):
@@ -120,55 +120,6 @@ def test_undo_context_is_closed_through_the_dispatcher():
 
     assert dispatcher.calls, "undo_end doit passer par le dispatcher"
 
-
-class ThreadPinnedDispatcher:
-    """Dispatcher qui exécute réellement sur UN thread désigné.
-
-    Il tient le rôle du thread principal de LibreOffice : une file, un thread
-    de service, et des appels qui attendent leur résultat. C'est ce qui permet
-    de prouver le marshalling au lieu de le supposer.
-    """
-
-    def __init__(self):
-        self._queue = queue.Queue()
-        self._closed = False
-        self.thread = threading.Thread(target=self._serve, name="main-uno",
-                                       daemon=True)
-        self.thread.start()
-
-    def _serve(self):
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            fn, result_queue = item
-            try:
-                value = fn()
-                if result_queue is not None:
-                    result_queue.put(("ok", value))
-            except Exception as exc:
-                if result_queue is not None:
-                    result_queue.put(("error", exc))
-
-    def post(self, fn):
-        if self._closed:
-            return False
-        self._queue.put((fn, None))
-        return True
-
-    def call(self, fn, timeout=30.0):
-        if self._closed:
-            raise RuntimeError("fermé")
-        result_queue = queue.Queue(maxsize=1)
-        self._queue.put((fn, result_queue))
-        status, payload = result_queue.get(timeout=timeout)
-        if status == "error":
-            raise payload
-        return payload
-
-    def close(self):
-        self._closed = True
-        self._queue.put(None)
 
 
 def test_writer_sink_never_touches_the_document_from_a_worker(thread_guard):
