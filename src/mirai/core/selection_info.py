@@ -53,7 +53,7 @@ def writer_label(selected_text: str, paragraph_text: str = "") -> str:
 
     Les deux cibles coexistent selon le chemin emprunté : une demande libre
     porte sur tout le document, un preset sur le paragraphe courant
-    (`presets._target_selection_text`). Le libellé nomme donc la portée large,
+    (`presets._read_target`). Le libellé nomme donc la portée large,
     la plus lourde de conséquences, et mentionne l'autre — plutôt que de citer
     un extrait qui n'engage rien.
     """

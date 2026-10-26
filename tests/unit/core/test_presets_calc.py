@@ -67,6 +67,16 @@ def test_transform_skips_empty_rows():
     assert (1, 1) not in sheet.grid and (1, 2) not in sheet.grid
 
 
+def test_transform_shows_each_row_on_its_own_line_in_the_palette():
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 FakeSSEResponse(text_chunks("PEAR"))])
+    shown = []
+    presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", shown.append)
+    assert "".join(shown) == "APPLE\nPEAR"
+
+
 def test_stopped_transform_leaves_the_cells_untouched():
     """« Arrêter » pendant la première ligne : ni texte tronqué ni #ERREUR, et
     aucune ligne suivante n'est demandée."""

@@ -1560,8 +1560,13 @@ class AssistantPalette:
             pass          # contrôle sans setText (FixedText) ou déjà disposé
 
     def _append_response(self, prefix, text=""):
-        """Ajoute une ligne à l'échange EN COURS, affiché en tête du fil."""
-        self._current_exchange.append((prefix + text) if text else prefix)
+        """Ajoute une ligne à l'échange EN COURS, affiché en tête du fil. Une
+        ligne ouverte restée vide (préfixe seul) reçoit le texte plutôt que
+        d'en précéder une seconde."""
+        if text and self._current_exchange and self._current_exchange[-1] == prefix:
+            self._current_exchange[-1] = prefix + text
+        else:
+            self._current_exchange.append((prefix + text) if text else prefix)
         self._render_conversation()
 
     def _stream_response(self, chunk):
@@ -1884,17 +1889,18 @@ class AssistantPalette:
         """Preset piloté par Python : le LLM n'est qu'une fonction texte.
 
         Le runner touche le document ; il le fait via ctx.on_main. Son appel LLM
-        reste dans ce worker.
+        reste dans ce worker, et le texte du modèle s'affiche dans la palette.
         """
         self.journal_line(_t("palette.journal_prepare", label=preset.label),
                           step=telemetry_steps.PRESET_START,
                           **{"preset.name": preset.id})
-        message = preset.runner(ctx, self.shell, prompt_text, None,
+        self._append_response(_t("palette.assistant_prefix"))
+        message = preset.runner(ctx, self.shell, prompt_text, self._stream_response,
                                 cancel_event=self._cancel,
                                 dispatcher=self.dispatcher,
                                 append_mode=self.append_mode)
+        self._delta_buffer.flush()
         if self._cancelled():
-            self._append_response(_t("palette.assistant_prefix"))
             self._report_stop()
             return {"ok": False, "reason": "cancelled"}
         # Le texte du message vient du modèle : l'onglet Actions le montre, le
@@ -1903,7 +1909,10 @@ class AssistantPalette:
                           step=telemetry_steps.PRESET_DONE,
                           **{"preset.name": preset.id,
                              "result.chars": len(message or "")})
-        self._append_response(_t("palette.assistant_prefix"), message)
+        # Le bilan ouvre sa propre ligne quand le texte du modèle le précède.
+        line = self._current_exchange[-1]
+        new_line = "" if line.endswith(("\n", _t("palette.assistant_prefix"))) else "\n"
+        self._stream_response(new_line + message)
         self.conversation.append("user", shown, ctx.app)
         self.conversation.append("assistant", message, ctx.app)
         return {"ok": True}

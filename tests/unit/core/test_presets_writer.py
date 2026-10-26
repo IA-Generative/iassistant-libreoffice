@@ -5,20 +5,36 @@ comportements de menu_actions/writer.py."""
 
 import threading
 
+import pytest
+
 from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
+from src.mirai.core.orchestrator import error_message
 from src.mirai.i18n import t as _t
 from tests.stubs.fake_docs import FakeWriterDoc
 from tests.stubs.fake_shell import (
     FakeShell,
     FakeSSEResponse,
+    ProbedSSEResponse,
     StoppedSSEResponse,
     text_chunks,
 )
 
+SUMMARY_HEADER = "\n\n---début-du-résumé---\n"
+SUMMARY_FOOTER = "\n---fin-du-résumé---\n"
+MODES = pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
+
 
 def _ctx(doc, shell):
     return ToolContext(doc, doc.controller, "writer", shell)
+
+
+class _BrokenSSEResponse(FakeSSEResponse):
+    """Flux coupé par le réseau juste après le premier chunk."""
+
+    def __iter__(self):
+        yield self._lines[0]
+        raise ConnectionResetError("connexion interrompue")
 
 
 def test_extend_inserts_between_legacy_markers():
@@ -46,7 +62,7 @@ def test_extend_no_selection_no_paragraph_returns_hint():
 
 def test_extend_targets_current_paragraph_without_selection():
     # Action directe : pas de sélection → le paragraphe sous le curseur est
-    # identifié, sélectionné et utilisé comme cible.
+    # identifié et utilisé comme cible, sans être sélectionné.
     doc = FakeWriterDoc(selection_text="",
                         current_paragraph="Le paragraphe en cours de rédaction")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks(" continue ici."))])
@@ -103,14 +119,46 @@ def test_extend_question_triggers_single_retry():
     assert "INTERDIT" in retry_system
 
 
-def test_extend_double_question_inserts_fallback():
+def test_extend_stopped_during_its_retry_writes_nothing():
+    cancel = threading.Event()
+    doc = FakeWriterDoc(selection_text="Texte de départ")
+    shell = FakeShell(responses=[
+        FakeSSEResponse(text_chunks("Comment puis-je vous aider ?")),
+        StoppedSSEResponse(text_chunks("la suite ", "réelle."), cancel),
+    ])
+    message = presets.run_extend(_ctx(doc, shell), shell, "", None, cancel_event=cancel)
+    assert doc.inserted == ""
+    assert message == _t("run.stopped")
+
+
+def test_extend_retry_starts_its_own_line_after_text_already_shown():
+    """Le premier essai a affiché un début de texte avant de poser sa question :
+    le second essai commence sur une nouvelle ligne de la palette."""
+    doc = FakeWriterDoc(selection_text="Il était une fois")
+    shell = FakeShell(responses=[
+        FakeSSEResponse(text_chunks("Voici la suite. ", "Pouvez-vous préciser ?")),
+        FakeSSEResponse(text_chunks(" un roi", " généreux.")),
+    ])
+    shown = []
+    presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
+    assert "".join(shown) == "Voici la suite. \n un roi généreux."
+    assert " un roi généreux." in doc.inserted
+    assert "Voici la suite." not in doc.inserted
+
+
+def test_extend_double_question_is_reported_once_and_writes_nothing():
+    """Deux questions de suite : le bilan le dit, une seule fois, et la
+    palette ne montre aucun message de repli en plus."""
     doc = FakeWriterDoc(selection_text="Texte")
     shell = FakeShell(responses=[
         FakeSSEResponse(text_chunks("Voulez-vous que je continue ?")),
         FakeSSEResponse(text_chunks("Souhaitez-vous que je poursuive ?")),
     ])
-    presets.run_extend(_ctx(doc, shell), shell, "", None)
-    assert "[Le modèle n'a pas pu continuer le texte." in doc.inserted
+    shown = []
+    message = presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
+    assert "".join(shown) == ""
+    assert message == _t("preset.question_asked")
+    assert doc.inserted == ""
 
 
 def test_summarize_markers_and_stop_phrase():
@@ -137,14 +185,13 @@ def test_summarize_prompt_matches_legacy_template():
     assert "résumeur professionnel" in system
 
 
-def test_simplify_question_shows_legacy_message():
+def test_simplify_question_in_append_mode_writes_nothing():
     doc = FakeWriterDoc(selection_text="Texte complexe.")
     shell = FakeShell(responses=[FakeSSEResponse(
         text_chunks("Voulez-vous une version simplifiée ?"))])
     presets.run_simplify(_ctx(doc, shell), shell, "", None)
-    assert "[Le modèle a posé une question. Veuillez réessayer.]" in doc.inserted
-    assert "Voulez-vous" not in doc.inserted.replace(
-        "[Le modèle a posé une question. Veuillez réessayer.]", "")
+    assert doc.inserted == ""
+    assert doc.undo.entered == []
 
 
 def test_a_sink_without_deltas_writes_the_final_reply_in_append_mode():
@@ -253,8 +300,7 @@ def test_summarize_question_in_append_mode_is_reported():
     shell = FakeShell(responses=[FakeSSEResponse(
         text_chunks("Pouvez-vous préciser le contexte ?"))])
     message = presets.run_summarize(_ctx(doc, shell), shell, "", None)
-    assert "[Le modèle a posé une question. Veuillez réessayer.]" in doc.inserted
-    assert "préciser" not in doc.inserted
+    assert doc.inserted == ""
     assert message == presets._t("preset.question_asked")
 
 
@@ -298,4 +344,142 @@ def test_http_error_returns_user_message_writer():
     shell = FakeShell(responses=[error])
     message = presets.run_summarize(_ctx(doc, shell), shell, "", None)
     assert "Quota" in message
-    assert doc.undo.left == 1                  # undo refermé malgré l'erreur
+    assert doc.undo.entered == []              # rien d'écrit, rien à annuler
+
+
+# Lire avant, écrire après : le document ne reçoit que la réponse complète
+
+@MODES
+def test_the_document_is_untouched_while_the_model_writes(append_mode):
+    """Le texte du modèle s'affiche dans la palette au fil du flux ; le
+    document n'est écrit, et l'annulation ouverte, qu'une fois la réponse
+    complète."""
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    during = []
+    shown = []
+    shell = FakeShell(responses=[ProbedSSEResponse(
+        text_chunks("Résumé ", "concis."),
+        lambda: during.append((doc.inserted, doc.replaced, list(doc.undo.entered),
+                               "".join(shown))))])
+
+    presets.run_summarize(_ctx(doc, shell), shell, "", shown.append,
+                          append_mode=append_mode)
+
+    assert during == [("", None, [], "Résumé ")]
+    assert "".join(shown) == "Résumé concis."
+    assert "Résumé concis." in (doc.inserted if append_mode else doc.replaced)
+
+
+@MODES
+def test_the_final_write_is_a_single_undo_action(append_mode):
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    events = []
+    doc.undo.enterUndoContext = lambda label: events.append(
+        ("enter", label, doc.inserted, doc.replaced))
+    doc.undo.leaveUndoContext = lambda: events.append(
+        ("leave", doc.inserted, doc.replaced))
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Résumé ", "concis."))])
+
+    presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=append_mode)
+
+    written = ((SUMMARY_HEADER + "Résumé concis." + SUMMARY_FOOTER, None) if append_mode
+               else ("", "Résumé concis."))
+    assert events == [("enter", "Résumer", "", None), ("leave", *written)]
+
+
+def test_a_stop_leaves_nothing_in_the_document_in_append_mode():
+    cancel = threading.Event()
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Un ", "résumé."), cancel)])
+
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None,
+                                    cancel_event=cancel)
+
+    assert doc.inserted == ""
+    assert doc.undo.entered == []
+    assert message == _t("run.stopped")
+
+
+class _StopBetweenStreamAndWrite:
+    """Le clic « Arrêter » est traité par le thread principal entre la fin du
+    flux et l'exécution de la tâche d'écriture filée."""
+
+    def __init__(self, cancel_event):
+        self._cancel_event = cancel_event
+        self._calls = 0
+
+    def call(self, fn, timeout=30.0):
+        self._calls += 1
+        if self._calls == 2:          # 1 : lecture de la cible ; 2 : l'écriture
+            self._cancel_event.set()
+        return fn()
+
+
+@MODES
+def test_a_stop_during_the_final_write_leaves_the_document_untouched(append_mode):
+    cancel = threading.Event()
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Résumé ", "concis."))])
+    ctx = ToolContext(doc, doc.controller, "writer", shell,
+                      dispatcher=_StopBetweenStreamAndWrite(cancel))
+    shown = []
+
+    message = presets.run_summarize(ctx, shell, "", shown.append, cancel_event=cancel,
+                                    append_mode=append_mode)
+
+    assert "".join(shown) == "Résumé concis."       # le flux est allé au bout
+    assert (doc.inserted, doc.replaced) == ("", None)
+    assert doc.undo.entered == []
+    assert message == _t("run.stopped")
+
+
+@MODES
+def test_an_interrupted_reply_leaves_nothing_in_the_document(append_mode):
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[_BrokenSSEResponse(text_chunks("Un ", "résumé."))])
+
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None,
+                                    append_mode=append_mode)
+
+    assert (doc.inserted, doc.replaced) == ("", None)
+    assert message == error_message("network_error")
+
+
+@MODES
+def test_nothing_is_written_when_the_target_changed_during_the_run(append_mode):
+    """L'utilisateur retouche le texte visé pendant la génération : rien n'est
+    écrit, le résultat reste dans la palette et le message dit pourquoi."""
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    edited = "Un long texte administratif, retouché."
+    shell = FakeShell(responses=[ProbedSSEResponse(
+        text_chunks("Résumé ", "concis."),
+        lambda: doc.selection_range.setString(edited))])
+    shown = []
+
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", shown.append,
+                                    append_mode=append_mode)
+
+    assert (doc.inserted, doc.replaced) == ("", edited)
+    assert doc.undo.entered == []
+    assert "".join(shown) == "Résumé concis."
+    assert message == _t("preset.target_changed")
+
+
+@MODES
+def test_the_outcome_reads_the_legacy_sinks_too(append_mode):
+    """Sans cible lue d'avance, `text_sink` rend un ancien sink : le bilan du
+    runner le lit sans erreur."""
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), append_mode, "", "")
+    sink.stream_delta("Résumé.")
+    assert presets._outcome(sink, "fait") == "fait"
+
+
+def test_a_reply_received_in_one_block_is_filtered_before_the_final_write():
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "",
+                             target=doc.selection_range, original="Texte.",
+                             stop_phrases=["[END]"])
+    sink.finish("Résumé. [END] reste", streamed=False)
+    assert doc.replaced == "Résumé."
