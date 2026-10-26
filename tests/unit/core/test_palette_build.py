@@ -1605,6 +1605,9 @@ def test_an_error_before_any_reply_fills_the_open_assistant_line(palette_module,
 
 def test_a_target_edited_during_the_run_keeps_the_result_in_the_palette(
         palette_module, monkeypatch):
+    """L'utilisateur retouche le texte visé pendant la génération : le document
+    garde sa retouche, rien n'y est ajouté, et la palette montre le résultat
+    suivi de la raison."""
     from tests.stubs.fake_docs import FakeWriterDoc
     from tests.stubs.fake_shell import ProbedSSEResponse, text_chunks
 
@@ -1614,4 +1617,4 @@ def test_a_target_edited_during_the_run_keeps_the_result_in_the_palette(
     shown = _run_writer_preset(palette_module, monkeypatch, response, doc)
 
     assert "Résumé concis.\n" + _t("preset.target_changed") in shown
-    assert doc.replaced == "Retouché."
+    assert (doc.inserted, doc.replaced) == ("", "Retouché.")
