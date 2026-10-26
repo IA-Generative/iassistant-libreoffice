@@ -211,10 +211,17 @@ def used_area_end(sheet):
 
 
 def used_part(sheet, area):
-    """Colonnes et lignes de la plage, bornées à la zone utilisée : une colonne
-    entière sélectionnée ne fait lire que les lignes remplies de la feuille."""
+    """Colonnes et lignes de la plage, bornées à la zone utilisée sur chaque
+    axe où la sélection atteint le bord de la feuille : une colonne entière ne
+    fait lire que les lignes remplies, une plage qui déborde des données de
+    quelques cellules est lue telle quelle, et son résultat se place à droite
+    ou sous la sélection."""
     end = used_area_end(sheet)
     last_col, last_row = end if end is not None else (area.EndColumn, area.EndRow)
+    if area.EndColumn < sheet.getColumns().Count - 1:
+        last_col = area.EndColumn
+    if area.EndRow < sheet.getRows().Count - 1:
+        last_row = area.EndRow
     cols = range(area.StartColumn, min(area.EndColumn, last_col) + 1)
     rows = range(area.StartRow, min(area.EndRow, last_row) + 1)
     if not cols or not rows:

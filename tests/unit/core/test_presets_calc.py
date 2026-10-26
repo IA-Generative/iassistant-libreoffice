@@ -430,6 +430,42 @@ def test_a_selection_inside_the_used_area_is_read_whole():
     assert sheet.grid[(0, 6)] == "Paris domine."
 
 
+def test_a_selection_wider_than_its_data_writes_right_of_the_selection():
+    """Les colonnes vides sélectionnées à droite des données font partie de la
+    sélection : le résultat va après elles, jamais entre les données et le
+    bord de la sélection."""
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (1, 0): "rouge",
+                                (0, 1): "poire", (1, 1): "verte"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:E2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR")])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=2, col="F")
+    assert [sheet.grid[(5, row)] for row in range(2)] == ["APPLE", "PEAR"]
+    assert shell.requests[0]["messages"][-1]["content"].startswith(
+        "VALEUR SOURCE :\npomme | rouge\n")
+
+
+def test_a_second_transform_of_the_same_selection_ignores_its_first_result():
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (1, 0): "rouge"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:E1")
+    first = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE"))])
+    presets.run_transform(_ctx(doc, first), first, "traduire en anglais", None)
+    second = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE"))])
+    presets.run_transform(_ctx(doc, second), second, "traduire en anglais", None)
+    assert "APPLE" not in second.requests[0]["messages"][-1]["content"]
+
+
+def test_a_selection_taller_than_its_data_writes_the_analysis_below_the_selection():
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
+                                (0, 1): "Paris", (1, 1): "100"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B10")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert sheet.grid[(0, 11)] == "Paris domine."
+    assert not [key for key, value in sheet.grid.items() if value and key[1] in range(2, 10)]
+
+
 @pytest.mark.parametrize("selection", ["A10:A1048576", "C1:C1048576", "A3:A3"],
                          ids=["below", "right", "empty_cells"])
 def test_a_selection_without_values_asks_for_filled_cells(selection):
