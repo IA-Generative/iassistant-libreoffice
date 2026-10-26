@@ -359,9 +359,11 @@ def _read_transform(ctx):
         source_text = _row_text(sheet, col_range, row)
         if source_text:
             sources.append((row, source_text))
-    out_col, needs_header = calc_tools.find_free_output_column(
-        sheet, col_range, row_range)
-    header = calc_tools.next_result_header(sheet) if needs_header else ""
+    out_col, header = col_range.stop, ""
+    if sources:
+        out_col, needs_header = calc_tools.find_free_output_column(
+            sheet, col_range, row_range)
+        header = calc_tools.next_result_header(sheet) if needs_header else ""
     return _TransformPlan(sheet, col_range, len(row_range), sources, out_col, header)
 
 
@@ -431,11 +433,11 @@ def _transform_message(out_col, transformed, refused, skipped):
 
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True):
+    if not user_text.strip():
+        return _t("preset.need_transform_input")
     plan = ctx.on_main(lambda: _read_transform(ctx))
     _legacy_telemetry(ctx, "TransformToColumn",
                       {"context": "calc", "rows": str(plan.row_count)})
-    if not user_text.strip():
-        return _t("preset.need_transform_input")
     if not plan.sources:
         return _t("preset.need_transform_values")
 

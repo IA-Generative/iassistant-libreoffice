@@ -162,6 +162,22 @@ def test_transform_without_instruction():
     assert "instruction" in message.lower()
 
 
+def test_an_empty_instruction_is_refused_before_the_sheet_is_read():
+    sheet = FakeCalcSheet(grid={(0, 0): "x"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1")
+    shell = FakeShell()
+    presets.run_transform(_ctx(doc, shell), shell, "  ", None)
+    assert sheet.cells_asked == 0
+
+
+def test_a_selection_without_values_does_not_look_for_an_output_column():
+    sheet = FakeCalcSheet(grid={(0, 0): "Nom", (1, 0): "Autre", (1, 1): "pris"})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    shell = FakeShell()
+    presets.run_transform(_ctx(doc, shell), shell, "majuscules", None)
+    assert sheet.cells_asked == 2       # A2 et A3, rien d'autre
+
+
 def test_analyze_writes_merged_cell_below_selection():
     sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
                                 (0, 1): "Paris", (1, 1): "100",
