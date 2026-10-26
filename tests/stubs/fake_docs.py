@@ -264,6 +264,26 @@ class _FakeRange:
         self._sheet.merged.append((self._area, value))
 
 
+class _FakeSheetCursor:
+    """Curseur de feuille. Seule la fin de la zone utilisée est simulée, telle
+    que Calc la donne pour une feuille sans mise en forme : la dernière colonne
+    et la dernière ligne qui portent un contenu, A1 sur une feuille vide."""
+
+    def __init__(self, sheet):
+        self._sheet = sheet
+        self._address = UnoStruct(StartColumn=0, StartRow=0, EndColumn=0, EndRow=0)
+
+    def gotoEndOfUsedArea(self, expand):
+        filled = [key for key, value in self._sheet.grid.items() if value]
+        filled += list(self._sheet.formulas)
+        col = max((c for c, _ in filled), default=0)
+        row = max((r for _, r in filled), default=0)
+        self._address = UnoStruct(StartColumn=col, StartRow=row, EndColumn=col, EndRow=row)
+
+    def getRangeAddress(self):
+        return self._address
+
+
 class FakeCalcSheet:
     def __init__(self, grid=None, num_cols=50, num_rows=200):
         self.grid = dict(grid or {})          # (col, row) → str
@@ -272,10 +292,12 @@ class FakeCalcSheet:
         self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
         self.protected = False
+        self.cells_asked = 0                  # cellules demandées, lues ou écrites
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
 
     def getCellByPosition(self, col, row):
+        self.cells_asked += 1
         return FakeCell(self, col, row)
 
     def isProtected(self):
@@ -291,6 +313,9 @@ class FakeCalcSheet:
 
     def getColumns(self):
         return self._columns
+
+    def createCursor(self):
+        return _FakeSheetCursor(self)
 
     def getRows(self):
         return self._rows

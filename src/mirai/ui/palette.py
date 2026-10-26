@@ -1909,12 +1909,15 @@ class AssistantPalette:
                           step=telemetry_steps.PRESET_DONE,
                           **{"preset.name": preset.id,
                              "result.chars": len(message or "")})
-        # Le bilan ouvre sa propre ligne quand le texte du modèle le précède.
+        # Le bilan ouvre sa propre ligne quand le texte du modèle le précède,
+        # et le fil garde les deux : le texte reste lisible après l'échange suivant.
+        prefix = _t("palette.assistant_prefix")
         line = self._current_exchange[-1]
-        new_line = "" if line.endswith(("\n", _t("palette.assistant_prefix"))) else "\n"
+        new_line = "" if line.endswith(("\n", prefix)) else "\n"
         self._stream_response(new_line + message)
         self.conversation.append("user", shown, ctx.app)
-        self.conversation.append("assistant", message, ctx.app)
+        self.conversation.append("assistant", line.removeprefix(prefix) + new_line + message,
+                                 ctx.app)
         return {"ok": True}
 
     def _run_agentic(self, preset, prompt_text, ctx):
@@ -2158,7 +2161,10 @@ class AssistantPalette:
             self.journal_line(_stop_line())
         else:
             observer.on_stop()
-        self._stream_response(_stop_line())
+        # La ligne d'arrêt ne s'accroche pas au texte déjà streamé.
+        line = self._current_exchange[-1] if self._current_exchange else ""
+        ends_line = not line or line.endswith(("\n", _t("palette.assistant_prefix")))
+        self._stream_response(("" if ends_line else "\n") + _stop_line())
 
     def _finish_run(self):
         """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""
