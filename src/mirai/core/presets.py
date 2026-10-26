@@ -389,6 +389,8 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                 pass
             prompt = ("VALEUR SOURCE :\n" + source_text
                       + "\n\nINSTRUCTION : " + user_text + "\n\nRÉSULTAT :")
+            if tee and transformed:
+                tee("\n")              # chaque ligne sur la sienne dans la palette
             sink = CalcCellSink(target_cell, tee=tee)
             step = llm.step([{"role": "system", "content": system_prompt},
                              {"role": "user", "content": prompt}],
