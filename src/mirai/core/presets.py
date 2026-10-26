@@ -169,7 +169,10 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
         return error_message(step.error)
 
     if sink.question_detected:
-        # Retry unique avec directive renforcée.
+        # Retry unique avec directive renforcée ; son texte ne se colle pas à
+        # ce que le premier essai avait déjà affiché.
+        if sink.shown:
+            sink.insert_message("\n")
         sink.done = False
         sink.question_detected = False
         sink.accumulated = ""

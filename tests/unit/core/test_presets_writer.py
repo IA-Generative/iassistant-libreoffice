@@ -131,6 +131,21 @@ def test_extend_stopped_during_its_retry_writes_nothing():
     assert message == _t("run.stopped")
 
 
+def test_extend_retry_starts_its_own_line_after_text_already_shown():
+    """Le premier essai a affiché un début de texte avant de poser sa question :
+    le second essai commence sur une nouvelle ligne de la palette."""
+    doc = FakeWriterDoc(selection_text="Il était une fois")
+    shell = FakeShell(responses=[
+        FakeSSEResponse(text_chunks("Voici la suite. ", "Pouvez-vous préciser ?")),
+        FakeSSEResponse(text_chunks(" un roi", " généreux.")),
+    ])
+    shown = []
+    presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
+    assert "".join(shown) == "Voici la suite. \n un roi généreux."
+    assert " un roi généreux." in doc.inserted
+    assert "Voici la suite." not in doc.inserted
+
+
 def test_extend_double_question_is_reported_once_and_writes_nothing():
     """Deux questions de suite : le bilan le dit, une seule fois, et la
     palette ne montre aucun message de repli en plus."""

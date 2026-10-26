@@ -219,10 +219,12 @@ class WriterTargetSink(_FilteredWriterSink):
         self.cancel_event = cancel_event
         self.target_changed = False
         self.stopped = False
+        self.shown = False            # du texte retenu a atteint la palette
 
     def _emit(self, text):
         if text and self.tee:
             self.tee(text)
+            self.shown = True
 
     def insert_message(self, message):
         """Message de repli : dans la palette, jamais dans le document."""
