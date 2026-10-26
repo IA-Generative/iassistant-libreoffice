@@ -356,15 +356,16 @@ def test_the_document_is_untouched_while_the_model_writes(append_mode):
     complète."""
     doc = FakeWriterDoc(selection_text="Un long texte administratif.")
     during = []
+    shown = []
     shell = FakeShell(responses=[ProbedSSEResponse(
         text_chunks("Résumé ", "concis."),
-        lambda: during.append((doc.inserted, doc.replaced, list(doc.undo.entered))))])
-    shown = []
+        lambda: during.append((doc.inserted, doc.replaced, list(doc.undo.entered),
+                               "".join(shown))))])
 
     presets.run_summarize(_ctx(doc, shell), shell, "", shown.append,
                           append_mode=append_mode)
 
-    assert during == [("", None, [])]
+    assert during == [("", None, [], "Résumé ")]
     assert "".join(shown) == "Résumé concis."
     assert "Résumé concis." in (doc.inserted if append_mode else doc.replaced)
 

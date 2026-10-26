@@ -1540,16 +1540,20 @@ def test_new_conversation_clears_the_displayed_reply(palette_module):
 
 
 def _run_writer_preset(palette_module, monkeypatch, response, doc):
+    """Joue le preset Résumer dans la palette et rend le texte affiché.
+
+    `response` : réponse SSE scriptée, ou fabrique recevant la palette, pour
+    une sonde qui la lit pendant le flux."""
     from src.mirai.core import presets
     from src.mirai.core.context import ToolContext
     from src.mirai.core.llm_client import LLMClient
     from tests.stubs.fake_shell import FakeShell
 
-    relay = FakeShell(responses=[response])
-    monkeypatch.setattr(presets, "_text_client",
-                        lambda _shell, max_tokens: LLMClient(relay))
     palette = _build(palette_module)
     palette._progress = palette_module.RunProgress()
+    relay = FakeShell(responses=[response(palette) if callable(response) else response])
+    monkeypatch.setattr(presets, "_text_client",
+                        lambda _shell, max_tokens: LLMClient(relay))
     preset = next(p for p in presets.PRESETS if p.id == "summarize")
     ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
     palette._run_in_worker(preset, "", ctx, preset.label)
@@ -1558,14 +1562,20 @@ def _run_writer_preset(palette_module, monkeypatch, response, doc):
 
 def test_a_writer_preset_streams_its_reply_to_the_palette(palette_module, monkeypatch):
     """Comme pour une demande libre, le texte du modèle s'affiche dans la zone
-    de réponse au fil du flux."""
+    de réponse au fil du flux, avant la fin du run."""
     from tests.stubs.fake_docs import FakeWriterDoc
-    from tests.stubs.fake_shell import FakeSSEResponse, text_chunks
+    from tests.stubs.fake_shell import ProbedSSEResponse, text_chunks
 
     doc = FakeWriterDoc(selection_text="Un long texte administratif.")
-    shown = _run_writer_preset(palette_module, monkeypatch,
-                               FakeSSEResponse(text_chunks("Résumé ", "concis.")), doc)
+    mid_stream = []
+    shown = _run_writer_preset(
+        palette_module, monkeypatch,
+        lambda palette: ProbedSSEResponse(
+            text_chunks("Résumé ", "concis."),
+            lambda: mid_stream.append(palette._models["response"].Text)),
+        doc)
 
+    assert _t("palette.assistant_prefix") + "Résumé " in mid_stream[0]
     assert "Résumé concis.\n" + _t("preset.done_summarize_replaced") in shown
     assert doc.replaced == "Résumé concis."
 
