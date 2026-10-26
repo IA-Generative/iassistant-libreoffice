@@ -209,6 +209,14 @@ comme « la demande porte sur le document entier ».
 - **pipeline** (Python pilote, iso-fonctionnalité stricte avec l'historique,
   marqueurs `---début-du-…---` conservés) : Résumer, Simplifier,
   Raccourcir/Allonger, Transformer (Calc), Analyser (Calc).
+  Les presets Calc lisent la partie utile de la sélection en un seul `on_main`
+  avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
+  zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis
+  l'écrivent en un seul passage sur le thread principal (`CalcCellSink`).
+  Transformer écrit chaque ligne dès que sa réponse est complète, dans une
+  seule action d'annulation qui comprend l'en-tête ; un arrêt garde les lignes
+  finies ; une ligne dont la source a changé pendant le run n'est pas écrite,
+  et une réponse refusée par la garde des formules est comptée et signalée.
 - **agentique** (le LLM pilote les tools) : Formule (Calc — contexte de feuille
   + retrieval `config/calc-functions.json`) et le **prompt libre**, qui couvre
   désormais les demandes documentaires (« restructure en deux paragraphes »)

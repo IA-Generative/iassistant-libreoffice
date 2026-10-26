@@ -5,8 +5,8 @@ streame en direct) ; finish(text, streamed) clôt le run — un sink qui n'a re�
 aucun delta écrit alors le texte complet. Jamais de perte.
 
 Les sinks sont appelés depuis le thread worker du run (stream_delta à chaque
-delta, puis finish). Les sinks Writer reportent chaque accès UNO sur le thread
-principal via ctx.on_main.
+delta, puis finish). Les sinks Writer et Calc reportent chaque accès UNO sur
+le thread principal via ctx.on_main.
 """
 
 from .text_filters import (
@@ -192,13 +192,14 @@ class WriterReplaceSink(_FilteredWriterSink):
 
 class CalcCellSink:
     """Réponse destinée à une cellule Calc. Le flux part vers la palette
-    (`tee`) ; la cellule n'est écrite qu'une fois la réponse complète, d'un
+    (`tee`) delta par delta, ou d'un bloc à `finish` quand le client n'a pas
+    streamé ; la cellule n'est écrite qu'une fois la réponse complète, d'un
     seul appel sur le thread principal : `write(texte)` y écrit par
     safe_set_string et rend la raison d'un refus.
 
     Après `finish`, `written` dit si le texte est dans la cellule et `refusal`
     pourquoi la garde des formules l'a remplacé par #ERREUR. Une réponse vide
-    n'écrit rien."""
+    n'écrit rien et ne laisse pas de ligne blanche dans la palette."""
 
     def __init__(self, ctx, write, tee=None):
         self.ctx = ctx
@@ -212,9 +213,11 @@ class CalcCellSink:
             self.tee(chunk)
 
     def finish(self, text, streamed):
-        final = strip_markdown(text or "")
-        if self.tee:
+        if self.tee and text:
+            if not streamed:
+                self.tee(text)   # rien n'est passé par stream_delta
             self.tee("\n")       # chaque réponse finit sa ligne dans la palette
+        final = strip_markdown(text or "")
         if not final.strip():
             return
         self.refusal = self.ctx.on_main(lambda: self.write(final))
