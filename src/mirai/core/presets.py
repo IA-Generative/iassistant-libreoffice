@@ -90,7 +90,8 @@ def _text_client(shell, max_tokens):
     return LLMClient(shell, max_tokens=max_tokens)
 
 
-def text_sink(ctx, append_mode, header, footer, tee=None, target=None, **kwargs):
+def text_sink(ctx, append_mode, header, footer, tee=None, target=None,
+              cancel_event=None, **kwargs):
     """Où va le texte produit : à la suite entre marqueurs, ou en remplacement.
 
     Les deux usages sont légitimes et les utilisateurs ne s'accordent pas :
@@ -104,7 +105,7 @@ def text_sink(ctx, append_mode, header, footer, tee=None, target=None, **kwargs)
     """
     if target is not None:
         return WriterTargetSink(ctx, target, append_mode, header, footer,
-                                tee=tee, **kwargs)
+                                tee=tee, cancel_event=cancel_event, **kwargs)
     if append_mode:
         return WriterInsertSink(ctx, header, footer, tee=tee, **kwargs)
     return WriterReplaceSink(ctx, tee=tee, **kwargs)
@@ -123,6 +124,8 @@ def _outcome(sink, done_message):
         return _t("preset.question_asked")
     if not sink.accumulated.strip():
         return error_message("empty_response")
+    if sink.stopped:
+        return error_message("cancelled")
     if sink.target_changed:
         return _t("preset.target_changed")
     return done_message
@@ -154,7 +157,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
 
     sink = text_sink(
         ctx, True, "\n\n---début-du-texte-généré---\n", "\n---fin-du-texte-généré---\n",
-        tee=tee, target=target, original=base_text,
+        tee=tee, target=target, original=base_text, cancel_event=cancel_event,
         undo_label=_t("preset.undo_extend"),
         question_patterns=EXTEND_QUESTION_PATTERNS)
 
@@ -221,6 +224,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-résumé---\n", "\n---fin-du-résumé---\n",
                      tee=tee, target=target, original=original,
+                     cancel_event=cancel_event,
                      undo_label=_t("preset.undo_summarize"),
                      stop_phrases=STOP_PHRASES,
                      question_patterns=patterns_absent_from(
@@ -270,7 +274,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---reformulation-du-texte---\n",
                      "\n---fin-de-reformulation---\n", tee=tee,
-                     target=target, original=original,
+                     target=target, original=original, cancel_event=cancel_event,
                      undo_label=_t("preset.undo_simplify"),
                      question_patterns=patterns_absent_from(
                          original, SIMPLIFY_QUESTION_PATTERNS),
@@ -314,7 +318,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                      "\n\n---début-du-texte-ajusté---\n",
                      "\n---fin-du-texte-ajusté---\n", tee=tee,
                      target=target_range, original=original,
-                     undo_label=undo_label,
+                     cancel_event=cancel_event, undo_label=undo_label,
                      question_patterns=patterns_absent_from(
                          original, EXTEND_QUESTION_PATTERNS))
     step = llm.step([{"role": "system", "content": system_prompt},

@@ -198,13 +198,15 @@ class WriterTargetSink(_FilteredWriterSink):
     l'écrit ensuite en un seul passage sur le thread principal, dans une seule
     action d'annulation : après la cible entre les marqueurs, ou à sa place,
     resélectionnée pour permettre l'itération. Rien n'est écrit sur une
-    question du modèle, ni si la cible ne contient plus le texte lu avant le
-    run (`target_changed`) : le résultat reste alors dans la palette.
+    question du modèle, après un arrêt (`stopped`), ni si la cible ne contient
+    plus le texte lu avant le run (`target_changed`) : le résultat reste alors
+    dans la palette.
     """
 
     def __init__(self, ctx, target, append, header_marker, footer_marker,
-                 original="", undo_label="", question_patterns=None,
-                 on_question=None, stop_phrases=None, tee=None):
+                 original="", undo_label="", cancel_event=None,
+                 question_patterns=None, on_question=None, stop_phrases=None,
+                 tee=None):
         super().__init__(ctx, question_patterns=question_patterns,
                          on_question=on_question, stop_phrases=stop_phrases,
                          tee=tee)
@@ -214,7 +216,9 @@ class WriterTargetSink(_FilteredWriterSink):
         self.footer_marker = footer_marker
         self.original = original
         self.undo_label = undo_label
+        self.cancel_event = cancel_event
         self.target_changed = False
+        self.stopped = False
 
     def _emit(self, text):
         if text and self.tee:
@@ -230,13 +234,18 @@ class WriterTargetSink(_FilteredWriterSink):
         if self.question_detected or not self.accumulated.strip():
             return
         final = self.accumulated if self.append else self.accumulated.strip()
-        self.target_changed = not self.ctx.on_main(lambda: self._write_on_main(final))
+        self.ctx.on_main(lambda: self._write_on_main(final))
 
     def _write_on_main(self, final):
-        """Thread principal exclusivement. Rend False sans rien écrire si la
-        cible a été modifiée pendant le run."""
+        """Thread principal exclusivement, celui du bouton Arrêter : un arrêt
+        demandé avant cette écriture est donc toujours vu. Rien n'est écrit
+        après un arrêt, ni si la cible a été modifiée pendant le run."""
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            self.stopped = True
+            return
         if self.target.getString() != self.original:
-            return False
+            self.target_changed = True
+            return
         undo = self.ctx.model.getUndoManager()
         undo.enterUndoContext(self.undo_label)
         try:
@@ -246,7 +255,6 @@ class WriterTargetSink(_FilteredWriterSink):
                 self._replace_target(final)
         finally:
             undo.leaveUndoContext()
-        return True
 
     def _insert_after_target(self, final):
         text_obj = self.target.getText()

@@ -382,6 +382,39 @@ def test_a_stop_leaves_nothing_in_the_document_in_append_mode():
     assert message == _t("run.stopped")
 
 
+class _StopBetweenStreamAndWrite:
+    """Le clic « Arrêter » est traité par le thread principal entre la fin du
+    flux et l'exécution de la tâche d'écriture filée."""
+
+    def __init__(self, cancel_event):
+        self._cancel_event = cancel_event
+        self._calls = 0
+
+    def call(self, fn, timeout=30.0):
+        self._calls += 1
+        if self._calls == 2:          # 1 : lecture de la cible ; 2 : l'écriture
+            self._cancel_event.set()
+        return fn()
+
+
+@MODES
+def test_a_stop_during_the_final_write_leaves_the_document_untouched(append_mode):
+    cancel = threading.Event()
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Résumé ", "concis."))])
+    ctx = ToolContext(doc, doc.controller, "writer", shell,
+                      dispatcher=_StopBetweenStreamAndWrite(cancel))
+    shown = []
+
+    message = presets.run_summarize(ctx, shell, "", shown.append, cancel_event=cancel,
+                                    append_mode=append_mode)
+
+    assert "".join(shown) == "Résumé concis."       # le flux est allé au bout
+    assert (doc.inserted, doc.replaced) == ("", None)
+    assert doc.undo.entered == []
+    assert message == _t("run.stopped")
+
+
 @MODES
 def test_an_interrupted_reply_leaves_nothing_in_the_document(append_mode):
     doc = FakeWriterDoc(selection_text="Un long texte administratif.")
