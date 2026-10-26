@@ -62,7 +62,7 @@ def test_extend_no_selection_no_paragraph_returns_hint():
 
 def test_extend_targets_current_paragraph_without_selection():
     # Action directe : pas de sélection → le paragraphe sous le curseur est
-    # identifié, sélectionné et utilisé comme cible.
+    # identifié et utilisé comme cible, sans être sélectionné.
     doc = FakeWriterDoc(selection_text="",
                         current_paragraph="Le paragraphe en cours de rédaction")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks(" continue ici."))])
