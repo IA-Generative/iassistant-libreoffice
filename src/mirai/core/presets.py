@@ -112,9 +112,9 @@ def text_sink(ctx, append_mode, header, footer, tee=None, target=None,
 
 
 def report_question(sink):
-    """Le modèle a posé une question au lieu de produire le texte. En mode
-    ajout, le message s'insère après la sélection ; en remplacement, la
-    sélection reste intacte et le message de fin du runner informe."""
+    """Le modèle a posé une question au lieu de produire le texte. Le message
+    de repli suit la destination du sink : dans le document après la sélection
+    pour l'ancien sink d'ajout, dans la palette pour les autres."""
     sink.insert_message("[Le modèle a posé une question. Veuillez réessayer.]")
 
 
