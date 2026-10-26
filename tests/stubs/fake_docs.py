@@ -41,6 +41,13 @@ class FakeCursor:
     def getString(self):
         return self.selected_text
 
+    def setString(self, value):
+        self.selected_text = value
+        self._doc.replaced = value
+
+    def getText(self):
+        return self._doc.text_obj
+
 
 class FakeWriterText:
     def __init__(self, doc):

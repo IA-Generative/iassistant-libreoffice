@@ -125,7 +125,8 @@ mutant, fermé en finally) → l'action complète s'annule d'un Ctrl+Z.
 
 Principe clé (petits modèles) : **la prose longue ne transite jamais en
 argument JSON** — elle est streamée en réponse finale vers un *sink*
-(`sinks.py` : PaletteSink, WriterInsertSink, WriterReplaceSink, CalcCellSink).
+(`sinks.py` : PaletteSink, WriterInsertSink, WriterReplaceSink,
+WriterTargetSink, CalcCellSink).
 
 **Les capacités du modèle sont MESURÉES, pas supposées** (`core/capabilities.py`).
 Trois capacités distinctes : le relais accepte `tools` (A), le modèle appelle un
@@ -209,6 +210,12 @@ comme « la demande porte sur le document entier ».
 - **pipeline** (Python pilote, iso-fonctionnalité stricte avec l'historique,
   marqueurs `---début-du-…---` conservés) : Résumer, Simplifier,
   Raccourcir/Allonger, Transformer (Calc), Analyser (Calc).
+  Les presets Writer lisent leur cible (texte et plage) en un seul `on_main`
+  avant l'appel au modèle, affichent le texte dans la palette au fil du flux,
+  puis l'écrivent en un seul passage sur le thread principal, dans une seule
+  action d'annulation (`WriterTargetSink`). Un arrêt, une erreur ou une
+  question du modèle n'écrivent rien ; une cible modifiée pendant le run non
+  plus, et la palette le dit.
   Les presets Calc lisent la partie utile de la sélection en un seul `on_main`
   avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
   zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis

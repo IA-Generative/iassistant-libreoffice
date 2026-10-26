@@ -43,6 +43,11 @@ class _FilteredWriterSink:
     coupure aux stop phrases, rejeu d'une réponse arrivée d'un bloc. Les
     sous-classes décident où va le texte retenu (`_emit`)."""
 
+    # Ce que le bilan d'un runner lit sur tout sink Writer ; seul
+    # WriterTargetSink, qui lit sa cible d'avance, peut les lever.
+    target_changed = False
+    stopped = False
+
     def __init__(self, ctx, question_patterns=None, on_question=None,
                  stop_phrases=None, tee=None):
         self.ctx = ctx
@@ -186,6 +191,92 @@ class WriterReplaceSink(_FilteredWriterSink):
         rng.setString(final)
         try:
             self.ctx.controller.select(rng)
+        except Exception:
+            pass
+
+
+class WriterTargetSink(_FilteredWriterSink):
+    """Cible lue avant le run, écrite une fois la réponse complète.
+
+    Pendant le flux, le texte retenu ne va qu'à la palette (`tee`). `finish`
+    l'écrit ensuite en un seul passage sur le thread principal, dans une seule
+    action d'annulation : après la cible entre les marqueurs, ou à sa place,
+    resélectionnée pour permettre l'itération. Rien n'est écrit sur une
+    question du modèle, après un arrêt (`stopped`), ni si la cible ne contient
+    plus le texte lu avant le run (`target_changed`) : le résultat reste alors
+    dans la palette.
+    """
+
+    def __init__(self, ctx, target, append, header_marker, footer_marker,
+                 original="", undo_label="", cancel_event=None,
+                 question_patterns=None, on_question=None, stop_phrases=None,
+                 tee=None):
+        super().__init__(ctx, question_patterns=question_patterns,
+                         on_question=on_question, stop_phrases=stop_phrases,
+                         tee=tee)
+        self.target = target
+        self.append = append
+        self.header_marker = header_marker
+        self.footer_marker = footer_marker
+        self.original = original
+        self.undo_label = undo_label
+        self.cancel_event = cancel_event
+        self.target_changed = False
+        self.stopped = False
+        self.shown = False            # du texte retenu a atteint la palette
+
+    def _emit(self, text):
+        if text and self.tee:
+            self.tee(text)
+            self.shown = True
+
+    def insert_message(self, message):
+        """Message de repli : dans la palette, jamais dans le document."""
+        if self.tee:
+            self.tee(message)
+
+    def finish(self, text, streamed):
+        self._replay(text)
+        if self.question_detected or not self.accumulated.strip():
+            return
+        final = self.accumulated if self.append else self.accumulated.strip()
+        self.ctx.on_main(lambda: self._write_on_main(final))
+
+    def _write_on_main(self, final):
+        """Thread principal exclusivement, celui du bouton Arrêter : un arrêt
+        demandé avant cette écriture est donc toujours vu. Rien n'est écrit
+        après un arrêt, ni si la cible a été modifiée pendant le run."""
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            self.stopped = True
+            return
+        if self.target.getString() != self.original:
+            self.target_changed = True
+            return
+        undo = self.ctx.model.getUndoManager()
+        undo.enterUndoContext(self.undo_label)
+        try:
+            if self.append:
+                self._insert_after_target(final)
+            else:
+                self._replace_target(final)
+        finally:
+            undo.leaveUndoContext()
+
+    def _insert_after_target(self, final):
+        text_obj = self.target.getText()
+        cursor = text_obj.createTextCursorByRange(self.target)
+        cursor.collapseToEnd()
+        text_obj.insertString(
+            cursor, self.header_marker + final + self.footer_marker, False)
+        try:
+            self.ctx.controller.getViewCursor().gotoRange(cursor.getEnd(), False)
+        except Exception:
+            pass
+
+    def _replace_target(self, final):
+        self.target.setString(final)
+        try:
+            self.ctx.controller.select(self.target)
         except Exception:
             pass
 

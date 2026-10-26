@@ -246,6 +246,7 @@
   "preset.done_summarize_replaced": "Resumen insertado en lugar de la selección.",
   "preset.done_simplify": "Reformulación insertada tras la selección.",
   "preset.done_simplify_replaced": "Reformulación insertada en lugar de la selección.",
+  "preset.target_changed": "El texto de destino cambió durante la generación: no se escribió nada en el documento. El resultado sigue mostrado arriba, listo para copiar.",
   "preset.question_asked": "El modelo hizo una pregunta en lugar de responder. Inténtelo de nuevo.",
   "preset.done_transform": "{count} fila(s) transformada(s) en la columna {col}.",
   "preset.done_analyze": "Análisis escrito bajo la selección.",

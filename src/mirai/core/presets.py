@@ -21,7 +21,7 @@ from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
 from .prompts import PIPELINE_TEXT_SYSTEM
-from .sinks import CalcCellSink, WriterInsertSink, WriterReplaceSink
+from .sinks import CalcCellSink, WriterInsertSink, WriterReplaceSink, WriterTargetSink
 from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
     SIMPLIFY_QUESTION_PATTERNS,
@@ -61,35 +61,38 @@ def _legacy_telemetry(ctx, span, attrs=None):
     ctx.shell.telemetry(span, payload)
 
 
-def _target_selection_text(ctx):
-    """Texte cible d'une action directe : la sélection si elle existe, sinon
-    le PARAGRAPHE COURANT (identifié sous le curseur, puis sélectionné pour
-    que les sinks opèrent dessus). Retourne "" si aucun texte ciblable."""
+def _read_target(ctx):
+    """Cible d'une action directe, lue en un seul passage sur le thread
+    principal avant l'appel au modèle : la sélection si elle existe, sinon le
+    PARAGRAPHE COURANT (sous le curseur).
+
+    Rend (texte, plage) ; Writer fait suivre à la plage les modifications du
+    document, c'est elle qui recevra le résultat. ("", None) si aucun texte
+    n'est ciblable."""
+    return ctx.on_main(lambda: _read_target_on_main(ctx))
+
+
+def _read_target_on_main(ctx):
     try:
         rng = ctx.controller.getSelection().getByIndex(0)
-    except Exception:
-        return ""
-    text = rng.getString()
-    if text.strip():
-        return text
-    try:
+        text = rng.getString()
+        if text.strip():
+            return text, rng
         cursor = rng.getText().createTextCursorByRange(rng)
         cursor.gotoStartOfParagraph(False)
         cursor.gotoEndOfParagraph(True)
         paragraph = cursor.getString()
-        if not paragraph.strip():
-            return ""
-        ctx.controller.select(cursor)
-        return paragraph
     except Exception:
-        return ""
+        return "", None
+    return (paragraph, cursor) if paragraph.strip() else ("", None)
 
 
 def _text_client(shell, max_tokens):
     return LLMClient(shell, max_tokens=max_tokens)
 
 
-def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
+def text_sink(ctx, append_mode, header, footer, tee=None, target=None,
+              cancel_event=None, **kwargs):
     """Où va le texte produit : à la suite entre marqueurs, ou en remplacement.
 
     Les deux usages sont légitimes et les utilisateurs ne s'accordent pas :
@@ -97,16 +100,22 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
     choix vient de la case « Ajouter à la suite » de la palette ; ce helper est
     le SEUL endroit qui le traduit en destination, pour qu'aucun preset ne
     puisse l'ignorer.
+
+    Avec `target` (plage lue par `_read_target`), le texte ne fait que
+    s'afficher pendant le flux et n'est écrit qu'une fois la réponse complète.
     """
+    if target is not None:
+        return WriterTargetSink(ctx, target, append_mode, header, footer,
+                                tee=tee, cancel_event=cancel_event, **kwargs)
     if append_mode:
         return WriterInsertSink(ctx, header, footer, tee=tee, **kwargs)
     return WriterReplaceSink(ctx, tee=tee, **kwargs)
 
 
 def report_question(sink):
-    """Le modèle a posé une question au lieu de produire le texte. En mode
-    ajout, le message s'insère après la sélection ; en remplacement, la
-    sélection reste intacte et le message de fin du runner informe."""
+    """Le modèle a posé une question au lieu de produire le texte. Le message
+    de repli suit la destination du sink : dans le document après la sélection
+    pour l'ancien sink d'ajout, dans la palette pour les autres."""
     sink.insert_message("[Le modèle a posé une question. Veuillez réessayer.]")
 
 
@@ -116,6 +125,10 @@ def _outcome(sink, done_message):
         return _t("preset.question_asked")
     if not sink.accumulated.strip():
         return error_message("empty_response")
+    if sink.stopped:
+        return error_message("cancelled")
+    if sink.target_changed:
+        return _t("preset.target_changed")
     return done_message
 
 
@@ -126,7 +139,7 @@ def _system(specific):
 
 def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                dispatcher=None):
-    base_text = _target_selection_text(ctx)
+    base_text, target = _read_target(ctx)
     _legacy_telemetry(ctx, "ExtendSelection",
                       {"action": "extend_selection",
                        "text_length": str(len(base_text))})
@@ -143,49 +156,48 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
     max_tokens = shell.get_config("extend_selection_max_tokens", 15000)
     llm = _text_client(shell, max_tokens)
 
-    sink = WriterInsertSink(
-        ctx, "\n\n---début-du-texte-généré---\n", "\n---fin-du-texte-généré---\n",
-        question_patterns=EXTEND_QUESTION_PATTERNS, tee=tee)
+    sink = text_sink(
+        ctx, True, "\n\n---début-du-texte-généré---\n", "\n---fin-du-texte-généré---\n",
+        tee=tee, target=target, original=base_text, cancel_event=cancel_event,
+        undo_label=_t("preset.undo_extend"),
+        question_patterns=EXTEND_QUESTION_PATTERNS)
 
-    ctx.undo_begin(_t("preset.undo_extend"))
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": base_text}],
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": base_text}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event)
+    if step.error:
+        return error_message(step.error)
+
+    if sink.question_detected:
+        # Retry unique avec directive renforcée ; son texte ne se colle pas à
+        # ce que le premier essai avait déjà affiché.
+        if sink.shown:
+            sink.insert_message("\n")
+        sink.done = False
+        sink.question_detected = False
+        sink.accumulated = ""
+        retry_system = _system(
+            "Tu dois CONTINUER le texte de l'utilisateur mot après mot, "
+            "comme si tu en étais l'auteur. Il est INTERDIT de poser une "
+            "question ou de reformuler. Commence immédiatement par les mots "
+            "qui suivent naturellement le texte fourni.")
+        retry_prompt = ("Voici le texte à continuer :\n\n" + base_text
+                        + "\n\nÉcris UNIQUEMENT la suite directe, sans "
+                          "aucune introduction.")
+        step = llm.step([{"role": "system", "content": retry_system},
+                         {"role": "user", "content": retry_prompt}],
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event)
         if step.error:
             return error_message(step.error)
-
-        if sink.question_detected:
-            # Retry unique avec directive renforcée.
-            sink.done = False
-            sink.question_detected = False
-            sink.accumulated = ""
-            retry_system = _system(
-                "Tu dois CONTINUER le texte de l'utilisateur mot après mot, "
-                "comme si tu en étais l'auteur. Il est INTERDIT de poser une "
-                "question ou de reformuler. Commence immédiatement par les mots "
-                "qui suivent naturellement le texte fourni.")
-            retry_prompt = ("Voici le texte à continuer :\n\n" + base_text
-                            + "\n\nÉcris UNIQUEMENT la suite directe, sans "
-                              "aucune introduction.")
-            step = llm.step([{"role": "system", "content": retry_system},
-                             {"role": "user", "content": retry_prompt}],
-                            on_text_delta=sink.stream_delta,
-                            cancel_event=cancel_event)
-            if sink.question_detected:
-                sink.insert_message(
-                    "\n[Le modèle n'a pas pu continuer le texte."
-                    " Essayez de sélectionner plus de contexte.]")
-        sink.finish(step.text, step.streamed)
-        return _t("preset.done_extend")
-    finally:
-        ctx.undo_end()
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.done_extend"))
 
 
 def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True):
-    original = _target_selection_text(ctx)
+    original, target = _read_target(ctx)
     _legacy_telemetry(ctx, "SummarizeSelection",
                       {"action": "summarize_selection",
                        "text_length": str(len(original))})
@@ -211,29 +223,27 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
 
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-résumé---\n", "\n---fin-du-résumé---\n",
-                     tee=tee, stop_phrases=STOP_PHRASES,
+                     tee=tee, target=target, original=original,
+                     cancel_event=cancel_event,
+                     undo_label=_t("preset.undo_summarize"),
+                     stop_phrases=STOP_PHRASES,
                      question_patterns=patterns_absent_from(
-                         original, EXTEND_QUESTION_PATTERNS),
-                     on_question=report_question)
+                         original, EXTEND_QUESTION_PATTERNS))
 
-    ctx.undo_begin(_t("preset.undo_summarize"))
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-        sink.finish(step.text, step.streamed)
-        return _outcome(sink, _t("preset.done_summarize") if append_mode
-                        else _t("preset.done_summarize_replaced"))
-    finally:
-        ctx.undo_end()
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event)
+    if step.error:
+        return error_message(step.error)
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.done_summarize") if append_mode
+                    else _t("preset.done_summarize_replaced"))
 
 
 def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=True):
-    original = _target_selection_text(ctx)
+    original, target = _read_target(ctx)
     _legacy_telemetry(ctx, "SimplifySelection",
                       {"action": "simplify_selection",
                        "text_length": str(len(original))})
@@ -264,28 +274,26 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---reformulation-du-texte---\n",
                      "\n---fin-de-reformulation---\n", tee=tee,
+                     target=target, original=original, cancel_event=cancel_event,
+                     undo_label=_t("preset.undo_simplify"),
                      question_patterns=patterns_absent_from(
                          original, SIMPLIFY_QUESTION_PATTERNS),
-                     on_question=report_question, stop_phrases=STOP_PHRASES)
+                     stop_phrases=STOP_PHRASES)
 
-    ctx.undo_begin(_t("preset.undo_simplify"))
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-        sink.finish(step.text, step.streamed)
-        return _outcome(sink, _t("preset.done_simplify") if append_mode
-                        else _t("preset.done_simplify_replaced"))
-    finally:
-        ctx.undo_end()
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event)
+    if step.error:
+        return error_message(step.error)
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.done_simplify") if append_mode
+                    else _t("preset.done_simplify_replaced"))
 
 
 def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                 append_mode=False):
-    original = _target_selection_text(ctx)
+    original, target_range = _read_target(ctx)
     _legacy_telemetry(ctx, "ResizeSelection",
                       {"action": "resize_selection",
                        "text_length": str(len(original))})
@@ -309,21 +317,18 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-texte-ajusté---\n",
                      "\n---fin-du-texte-ajusté---\n", tee=tee,
+                     target=target_range, original=original,
+                     cancel_event=cancel_event, undo_label=undo_label,
                      question_patterns=patterns_absent_from(
-                         original, EXTEND_QUESTION_PATTERNS),
-                     on_question=report_question)
-    ctx.undo_begin(undo_label)
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-        sink.finish(step.text, step.streamed)
-        return _outcome(sink, _t("preset.resized", target=target))
-    finally:
-        ctx.undo_end()
+                         original, EXTEND_QUESTION_PATTERNS))
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event)
+    if step.error:
+        return error_message(step.error)
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.resized", target=target))
 
 
 def run_shorten(ctx, shell, user_text, tee, cancel_event=None,

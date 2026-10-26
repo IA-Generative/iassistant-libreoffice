@@ -43,6 +43,22 @@ class StoppedSSEResponse(FakeSSEResponse):
             yield line
 
 
+class ProbedSSEResponse(FakeSSEResponse):
+    """Flux pendant lequel `during()` s'exécute juste après la livraison du
+    premier chunk : ce que voit, ou ce que fait, l'utilisateur pendant que le
+    modèle écrit."""
+
+    def __init__(self, chunks, during):
+        super().__init__(chunks)
+        self._during = during
+
+    def __iter__(self):
+        for index, line in enumerate(self._lines):
+            if index == 1:
+                self._during()
+            yield line
+
+
 def text_chunks(*texts, finish="stop"):
     """Chunks SSE simulant un texte streamé delta par delta."""
     chunks = [{"choices": [{"delta": {"content": t}}]} for t in texts]
