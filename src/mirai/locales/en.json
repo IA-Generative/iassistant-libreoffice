@@ -250,6 +250,7 @@
   "preset.done_transform": "{count} row(s) transformed into column {col}.",
   "preset.done_analyze": "Analysis written below the selection.",
   "preset.refused_transform": "{count} row(s) not written: the result would be a refused formula (see #ERREUR in the column).",
+  "preset.skipped_transform": "{count} row(s) not written: their source value changed during the run.",
   "preset.refused_analyze": "Analysis not written: the generated text would be a refused formula (see #ERREUR below the selection).",
   "sel.writer_selection": "Selection: \"{excerpt}\"",
   "sel.no_selection": "Whole document — quick actions apply to the current paragraph",

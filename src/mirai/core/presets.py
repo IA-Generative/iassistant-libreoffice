@@ -356,9 +356,7 @@ def _read_transform(ctx):
         sheet, ctx.controller.getSelection().getRangeAddress())
     sources = []
     for row in row_range:
-        parts = [sheet.getCellByPosition(col, row).getString()
-                 for col in col_range]
-        source_text = " | ".join(p for p in parts if p)
+        source_text = _row_text(sheet, col_range, row)
         if source_text:
             sources.append((row, source_text))
     out_col, needs_header = calc_tools.find_free_output_column(
@@ -367,11 +365,22 @@ def _read_transform(ctx):
     return _TransformPlan(sheet, col_range, len(row_range), sources, out_col, header)
 
 
-def _write_result_row(plan, row, text):
+SOURCE_CHANGED = "source modifiée pendant le run"
+
+
+def _row_text(sheet, col_range, row):
+    parts = [sheet.getCellByPosition(col, row).getString() for col in col_range]
+    return " | ".join(p for p in parts if p)
+
+
+def _write_result_row(plan, row, source_text, text):
     """Écrit le résultat d'une ligne, précédé de l'en-tête à la première
-    écriture du run, et rend la raison d'un refus. Thread principal
-    exclusivement."""
+    écriture du run, et rend la raison d'un refus. Une ligne qui ne porte
+    plus la source lue avant le run n'est pas écrite : le résultat ne lui
+    correspond plus. Thread principal exclusivement."""
     sheet = plan.sheet
+    if _row_text(sheet, plan.col_range, row) != source_text:
+        return SOURCE_CHANGED
     if plan.header:
         try:
             header_cell = sheet.getCellByPosition(plan.out_col, 0)
@@ -410,6 +419,16 @@ def _fit_result_column(plan):
         pass
 
 
+def _transform_message(out_col, transformed, refused, skipped):
+    message = _t("preset.done_transform", count=transformed,
+                 col=calc_tools.col_letter(out_col))
+    if refused:
+        message += " " + _t("preset.refused_transform", count=refused)
+    if skipped:
+        message += " " + _t("preset.skipped_transform", count=skipped)
+    return message
+
+
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True):
     plan = ctx.on_main(lambda: _read_transform(ctx))
@@ -430,13 +449,14 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
 
     # Chaque ligne est écrite dès sa réponse complète, dans un seul contexte
     # d'annulation ouvert à la première écriture : un Ctrl+Z retire le run.
-    transformed = refused = 0
+    transformed = refused = skipped = 0
     interrupted = ""
     try:
         for row, source_text in plan.sources:
             prompt = ("VALEUR SOURCE :\n" + source_text
                       + "\n\nINSTRUCTION : " + user_text + "\n\nRÉSULTAT :")
-            sink = CalcCellSink(ctx, partial(_write_result_row, plan, row), tee=tee)
+            sink = CalcCellSink(ctx, partial(_write_result_row, plan, row, source_text),
+                                tee=tee)
             step = llm.step([{"role": "system", "content": system_prompt},
                              {"role": "user", "content": prompt}],
                             on_text_delta=sink.stream_delta,
@@ -446,13 +466,15 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                 # Un arrêt n'écrit rien pour la ligne en cours ; une erreur la signale.
                 if step.error != "cancelled":
                     ctx.undo_begin(_t("preset.undo_transform"))
-                    ctx.on_main(partial(_write_result_row, plan, row,
+                    ctx.on_main(partial(_write_result_row, plan, row, source_text,
                                         "#ERREUR: " + step.error))
                 break
             ctx.undo_begin(_t("preset.undo_transform"))
             sink.finish(step.text, step.streamed)
             if sink.written:
                 transformed += 1
+            elif sink.refusal == SOURCE_CHANGED:
+                skipped += 1
             elif sink.refusal:
                 refused += 1
         if transformed or refused:
@@ -462,11 +484,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
 
     if interrupted:
         return error_message(interrupted)
-    message = _t("preset.done_transform", count=transformed,
-                 col=calc_tools.col_letter(plan.out_col))
-    if refused:
-        message += " " + _t("preset.refused_transform", count=refused)
-    return message
+    return _transform_message(plan.out_col, transformed, refused, skipped)
 
 
 def _read_table(ctx):

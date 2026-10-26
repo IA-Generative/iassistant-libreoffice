@@ -370,6 +370,32 @@ def test_an_empty_analysis_is_not_announced_as_written():
     assert sheet.merged == []
 
 
+def test_a_row_whose_source_moved_during_the_run_is_not_written():
+    """Une ligne insérée pendant le run décale les sources : les lignes qui ne
+    portent plus la valeur lue avant le run ne reçoivent pas de résultat, et
+    la palette dit combien."""
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire",
+                                (0, 2): "prune", (0, 3): "cerise"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A4")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR", "PLUM", "CHERRY")])
+
+    def insert_a_row_above_row_3(chunk):
+        if chunk == "PLUM":        # la troisième réponse arrive : l'utilisateur insère une ligne
+            shifted = {(col, row + 1 if row >= 2 else row): value
+                       for (col, row), value in sheet.grid.items()}
+            sheet.grid.clear()
+            sheet.grid.update(shifted)
+
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    insert_a_row_above_row_3)
+
+    assert message == (_t("preset.done_transform", count=2, col="B") + " "
+                       + _t("preset.skipped_transform", count=2))
+    assert [sheet.grid.get((1, row)) for row in range(5)] == ["APPLE", "PEAR", None, None, None]
+    assert [sheet.grid.get((0, row)) for row in range(5)] == ["pomme", "poire", None, "prune", "cerise"]
+
+
 # Une sélection de colonnes ou de lignes entières est lue sur le thread
 # principal, d'un seul appel : seule sa partie utilisée doit l'être.
 

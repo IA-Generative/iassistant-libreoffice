@@ -250,6 +250,7 @@
   "preset.done_transform": "{count} ligne(s) transformée(s) en colonne {col}.",
   "preset.done_analyze": "Analyse écrite sous la sélection.",
   "preset.refused_transform": "{count} ligne(s) non écrite(s) : le résultat serait une formule refusée (voir #ERREUR dans la colonne).",
+  "preset.skipped_transform": "{count} ligne(s) non écrite(s) : leur valeur source a changé pendant le run.",
   "preset.refused_analyze": "Analyse non écrite : le texte produit serait une formule refusée (voir #ERREUR sous la sélection).",
   "sel.writer_selection": "Sélection : « {excerpt} »",
   "sel.no_selection": "Document entier — les actions rapides portent sur le paragraphe courant",
