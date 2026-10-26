@@ -1570,6 +1570,29 @@ def test_a_writer_preset_streams_its_reply_to_the_palette(palette_module, monkey
     assert doc.replaced == "Résumé concis."
 
 
+def test_an_error_before_any_reply_fills_the_open_assistant_line(palette_module, monkeypatch):
+    """Un runner qui échoue avant d'avoir streamé donne une seule ligne
+    « MIrAI : ⚠ … », pas une ligne vide suivie de l'erreur."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeWriterDoc
+
+    def _unreachable(_shell, max_tokens):
+        raise RuntimeError("relais injoignable")
+
+    monkeypatch.setattr(presets, "_text_client", _unreachable)
+    palette = _build(palette_module)
+    palette._progress = palette_module.RunProgress()
+    doc = FakeWriterDoc(selection_text="Un long texte administratif.")
+    preset = next(p for p in presets.PRESETS if p.id == "summarize")
+    palette._run_in_worker(preset, "", ToolContext(doc, doc.controller, "writer", palette.shell),
+                           preset.label)
+
+    shown = palette._models["response"].Text
+    assert _t("palette.assistant_prefix") + "\n" not in shown
+    assert _t("palette.assistant_prefix") + "⚠ " in shown
+
+
 def test_a_target_edited_during_the_run_keeps_the_result_in_the_palette(
         palette_module, monkeypatch):
     from tests.stubs.fake_docs import FakeWriterDoc

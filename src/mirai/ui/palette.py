@@ -1560,8 +1560,13 @@ class AssistantPalette:
             pass          # contrôle sans setText (FixedText) ou déjà disposé
 
     def _append_response(self, prefix, text=""):
-        """Ajoute une ligne à l'échange EN COURS, affiché en tête du fil."""
-        self._current_exchange.append((prefix + text) if text else prefix)
+        """Ajoute une ligne à l'échange EN COURS, affiché en tête du fil. Une
+        ligne ouverte restée vide (préfixe seul) reçoit le texte plutôt que
+        d'en précéder une seconde."""
+        if text and self._current_exchange and self._current_exchange[-1] == prefix:
+            self._current_exchange[-1] = prefix + text
+        else:
+            self._current_exchange.append((prefix + text) if text else prefix)
         self._render_conversation()
 
     def _stream_response(self, chunk):
