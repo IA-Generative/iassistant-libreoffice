@@ -1565,3 +1565,33 @@ def test_the_model_text_of_a_preset_stays_in_the_conversation(palette_module, mo
 
     done = _t("preset.done_transform", count=1, col="B")
     assert store.load_for("calc")[-1]["text"] == "APPLE\n" + done
+
+
+def test_a_stop_after_streamed_text_starts_its_own_line(palette_module, monkeypatch,
+                                                        tmp_path):
+    """« Arrêter » pendant le flux d'un preset : la ligne d'arrêt ne
+    s'accroche pas au texte déjà affiché."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.conversation import ConversationStore
+    from src.mirai.core.llm_client import LLMClient
+    from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet
+    from tests.stubs.fake_shell import FakeShell, StoppedSSEResponse, text_chunks
+
+    store = ConversationStore(str(tmp_path))
+    monkeypatch.setattr(palette_module, "ConversationStore", lambda _dir: store)
+    cancel = threading.Event()
+    relay = FakeShell(responses=[StoppedSSEResponse(text_chunks("PE", "AR"), cancel)])
+    monkeypatch.setattr(presets, "_text_client",
+                        lambda _shell, max_tokens: LLMClient(relay))
+    palette = _build(palette_module, "calc")
+    palette._progress = palette_module.RunProgress()
+    palette._cancel = cancel
+    preset = next(p for p in presets.PRESETS if p.id == "transform")
+    doc = FakeCalcDoc(FakeCalcSheet(grid={(0, 0): "poire"}), selection_ref="A1:A1")
+    ctx = ToolContext(doc, doc.controller, "calc", palette.shell)
+
+    palette._run_in_worker(preset, "traduire en anglais", ctx, preset.label)
+
+    assert (_t("palette.assistant_prefix") + "PE\n⏹ " + _t("run.stopped")
+            in palette._models["response"].Text)

@@ -2156,7 +2156,10 @@ class AssistantPalette:
             self.journal_line(_stop_line())
         else:
             observer.on_stop()
-        self._stream_response(_stop_line())
+        # La ligne d'arrêt ne s'accroche pas au texte déjà streamé.
+        line = self._current_exchange[-1] if self._current_exchange else ""
+        ends_line = not line or line.endswith(("\n", _t("palette.assistant_prefix")))
+        self._stream_response(("" if ends_line else "\n") + _stop_line())
 
     def _finish_run(self):
         """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""
