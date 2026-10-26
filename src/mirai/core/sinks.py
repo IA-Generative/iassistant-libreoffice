@@ -44,6 +44,11 @@ class _FilteredWriterSink:
     coupure aux stop phrases, rejeu d'une réponse arrivée d'un bloc. Les
     sous-classes décident où va le texte retenu (`_emit`)."""
 
+    # Ce que le bilan d'un runner lit sur tout sink Writer ; seul
+    # WriterTargetSink, qui lit sa cible d'avance, peut les lever.
+    target_changed = False
+    stopped = False
+
     def __init__(self, ctx, question_patterns=None, on_question=None,
                  stop_phrases=None, tee=None):
         self.ctx = ctx

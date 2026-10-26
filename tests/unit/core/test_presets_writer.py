@@ -465,6 +465,16 @@ def test_nothing_is_written_when_the_target_changed_during_the_run(append_mode):
     assert message == _t("preset.target_changed")
 
 
+@MODES
+def test_the_outcome_reads_the_legacy_sinks_too(append_mode):
+    """Sans cible lue d'avance, `text_sink` rend un ancien sink : le bilan du
+    runner le lit sans erreur."""
+    doc = FakeWriterDoc(selection_text="Texte.")
+    sink = presets.text_sink(_ctx(doc, FakeShell()), append_mode, "", "")
+    sink.stream_delta("Résumé.")
+    assert presets._outcome(sink, "fait") == "fait"
+
+
 def test_a_reply_received_in_one_block_is_filtered_before_the_final_write():
     doc = FakeWriterDoc(selection_text="Texte.")
     sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "",
