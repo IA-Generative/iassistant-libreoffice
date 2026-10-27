@@ -48,9 +48,22 @@ class Snapshot:
 
 def read(ctx):
     """Thread principal exclusivement."""
-    items = _paragraphs(ctx)
+    items = _body(ctx)
     return Snapshot(items, [p.getString() for p in items],
                     [paragraph_style(p) for p in items])
+
+
+def _body(ctx):
+    """Paragraphes du document hors index (table des matières…) : Writer les
+    régénère, et l'API les laisse écrire malgré leur protection."""
+    return [p for p in _paragraphs(ctx) if _index_of(p) is None]
+
+
+def _index_of(paragraph):
+    try:
+        return paragraph.getPropertyValue("DocumentIndex")
+    except Exception:
+        return None
 
 
 @dataclasses.dataclass
@@ -224,7 +237,7 @@ def write(ctx, snapshot, apply, undo_label, cancel_event=None):
     du bouton Arrêter : un arrêt demandé avant cette écriture est donc vu."""
     if cancel_event is not None and cancel_event.is_set():
         return "stopped"
-    if [p.getString() for p in _paragraphs(ctx)] != snapshot.texts:
+    if [p.getString() for p in _body(ctx)] != snapshot.texts:
         return "changed"
     undo = ctx.model.getUndoManager()
     undo.enterUndoContext(undo_label)

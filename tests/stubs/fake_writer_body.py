@@ -16,6 +16,7 @@ class FakeParagraph:
         self._doc = doc
         self.text = text
         self.style = style
+        self.index = None        # index (table des matières…) qui contient le paragraphe
 
     def supportsService(self, name):
         return name == "com.sun.star.text.Paragraph"
@@ -30,6 +31,8 @@ class FakeParagraph:
     def getPropertyValue(self, name):
         if name == "ParaStyleName":
             return self.style
+        if name == "DocumentIndex":
+            return self.index
         raise AttributeError(name)
 
     def setPropertyValue(self, name, value):

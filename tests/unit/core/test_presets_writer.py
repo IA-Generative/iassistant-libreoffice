@@ -206,6 +206,20 @@ def test_an_empty_document_is_reported_without_calling_the_model():
     assert shell.requests == []
 
 
+def test_the_table_of_contents_is_never_rewritten():
+    """Writer régénère la table des matières : elle n'est ni envoyée au
+    modèle, ni écrite."""
+    doc = FakeBodyDoc(["Table des matières", "Rapport\t1", "Rapport", "Le contexte, en détail."],
+                      ["Contents Heading", "Contents 1", "Heading 1", "Standard"])
+    doc.items[0].index = doc.items[1].index = "Table des matières1"
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le contexte."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Table des matières", "Rapport\t1", "Rapport", "Le contexte."]
+    assert "Rapport\t1" not in shell.requests[0]["messages"][-1]["content"]
+
+
 @pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
                                     presets.run_shorten, presets.run_lengthen],
                          ids=["summarize", "simplify", "shorten", "lengthen"])
