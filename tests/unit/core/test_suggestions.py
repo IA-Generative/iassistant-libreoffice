@@ -25,10 +25,10 @@ def test_medium_selection_proposes_simplifying():
     assert "Simplifier la formulation" in _labels(items)
 
 
-def test_without_selection_targets_the_current_paragraph():
-    """Sans sélection les actions portent sur le paragraphe : le proposer."""
+def test_without_selection_offers_to_simplify_the_document():
+    """Sans sélection les actions portent sur tout le document : le proposer."""
     items = suggest("writer", selected_text="", has_paragraph=True)
-    assert "Simplifier ce paragraphe" in _labels(items)
+    assert "Simplifier le document" in _labels(items)
 
 
 def test_empty_document_still_offers_prompt_starters():

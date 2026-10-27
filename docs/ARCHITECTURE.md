@@ -179,12 +179,12 @@ libre sans sélection envoie donc tout le corps d'un seul appel, pour qu'une
 demande globale (« en deux paragraphes ») garde son sens, avec les titres
 intérieurs marqués « # » : le modèle rend ceux qu'il garde et
 `doc_rewrite.styled_lines()` redonne à chaque paragraphe un style de titre ou
-de corps. Au-delà de `document_chunk_max_chars` caractères (20 000 par
-défaut), elle réécrit section par section (`doc_rewrite.sections()` : un titre
-et son corps, jusqu'au titre suivant), titres en place, et la palette le dit.
-`core/whole_document.py` lit le document avant le run et n'écrit qu'une fois la
-dernière réponse reçue, dans une seule action d'annulation, si le document n'a
-pas changé entre-temps.
+de corps. Les actions rapides, elles, réécrivent section par section
+(`doc_rewrite.sections()` : un titre et son corps, jusqu'au titre suivant),
+titres en place ; la demande libre aussi au-delà de `document_chunk_max_chars`
+caractères (20 000 par défaut), et la palette le dit. `core/whole_document.py`
+lit le document avant le run et n'écrit qu'une fois la dernière réponse reçue,
+dans une seule action d'annulation, si le document n'a pas changé entre-temps.
 Un document sans texte de corps, vide ou fait de titres seuls, n'a rien à
 réécrire : la demande libre y rédige le texte demandé et l'écrit à la fin du
 document, dans le style du corps.
@@ -228,6 +228,11 @@ comme « la demande porte sur le document entier ».
   action d'annulation (`WriterTargetSink`). Un arrêt, une erreur ou une
   question du modèle n'écrivent rien ; une cible modifiée pendant le run non
   plus, et la palette le dit.
+  Sans sélection, ces presets portent sur tout le document, par le même
+  chemin que la demande libre (`core/whole_document.py`) : réécriture section
+  par section, ou ajout d'un seul bloc après le dernier paragraphe. Le résumé
+  suit toujours le dernier paragraphe ; au-delà de `document_chunk_max_chars`,
+  il se fait par étapes (chaque morceau de section, puis l'ensemble).
   Les presets Calc lisent la partie utile de la sélection en un seul `on_main`
   avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
   zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis

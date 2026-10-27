@@ -18,6 +18,7 @@ from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
 from src.mirai.core.ui_thread import DirectDispatcher
 from tests.stubs.fake_docs import FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+from tests.stubs.fake_writer_body import FakeBodyDoc
 from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
 
 
@@ -216,20 +217,41 @@ TARGETS = pytest.mark.parametrize("selection,paragraph", [
 ], ids=["selection", "current_paragraph"])
 
 
-@pytest.mark.parametrize("runner", ["run_summarize", "run_simplify",
-                                    "run_shorten", "run_lengthen"])
-@pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
-@TARGETS
-def test_writer_presets_touch_the_document_only_on_the_main_thread(
-        thread_guard, runner, append_mode, selection, paragraph):
-    fake = FakeWriterDoc(selection_text=selection, current_paragraph=paragraph)
+WRITER_PRESETS = pytest.mark.parametrize("runner", ["run_summarize", "run_simplify",
+                                                   "run_shorten", "run_lengthen"])
+APPEND_MODES = pytest.mark.parametrize("append_mode", [True, False],
+                                       ids=["append", "replace"])
+
+
+@WRITER_PRESETS
+@APPEND_MODES
+def test_writer_presets_on_a_selection_touch_the_document_only_on_the_main_thread(
+        thread_guard, runner, append_mode):
+    selection = "Un texte administratif sélectionné."
+    fake = FakeWriterDoc(selection_text=selection)
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
 
     _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
         ctx, shell, "", None, append_mode=append_mode))
 
-    assert (selection or paragraph) in shell.requests[0]["messages"][-1]["content"]
+    assert selection in shell.requests[0]["messages"][-1]["content"]
     assert "Texte produit." in (fake.inserted if append_mode else fake.replaced)
+    assert fake.undo.entered and fake.undo.left == 1
+
+
+@WRITER_PRESETS
+@APPEND_MODES
+def test_writer_presets_on_the_whole_document_touch_it_only_on_the_main_thread(
+        thread_guard, runner, append_mode):
+    fake = FakeBodyDoc(["Titre", "Un paragraphe administratif dense."],
+                       ["Heading 1", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
+
+    _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
+        ctx, shell, "", None, append_mode=append_mode))
+
+    assert "Un paragraphe administratif dense." in shell.requests[0]["messages"][-1]["content"]
+    assert "Texte produit." in fake.paragraphs
     assert fake.undo.entered and fake.undo.left == 1
 
 

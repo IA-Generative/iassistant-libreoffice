@@ -237,9 +237,7 @@ def _selection_string(ctx):
 def _writer_targets(model):
     """(texte sélectionné, texte du paragraphe courant) — jamais d'exception.
 
-    Sans sélection les actions ciblent le paragraphe sous le curseur : il faut
-    donc pouvoir l'afficher, sinon l'indicateur laisse croire qu'aucune cible
-    n'est déterminée.
+    Le paragraphe courant, lu seulement sans sélection, sert aux suggestions.
     """
     selected = paragraph = ""
     try:
@@ -1205,7 +1203,7 @@ class AssistantPalette:
             if model is None:
                 return ""
             if hasattr(model, "Text"):
-                return selection_info.writer_label(*_writer_targets(model))
+                return selection_info.writer_label(_writer_targets(model)[0])
             if hasattr(model, "Sheets"):
                 area = model.CurrentController.Selection.getRangeAddress()
                 return selection_info.calc_label(

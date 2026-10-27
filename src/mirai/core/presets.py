@@ -17,6 +17,7 @@ import re
 from functools import partial
 
 from ..i18n import t as _t
+from . import doc_rewrite, whole_document
 from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
@@ -61,23 +62,25 @@ def _legacy_telemetry(ctx, span, attrs=None):
     ctx.shell.telemetry(span, payload)
 
 
-def _read_target(ctx):
+def _read_target(ctx, current_paragraph=False):
     """Cible d'une action directe, lue en un seul passage sur le thread
-    principal avant l'appel au modèle : la sélection si elle existe, sinon le
-    PARAGRAPHE COURANT (sous le curseur).
+    principal avant l'appel au modèle : la sélection si elle existe, sinon,
+    avec `current_paragraph`, le PARAGRAPHE COURANT (sous le curseur).
 
     Rend (texte, plage) ; Writer fait suivre à la plage les modifications du
     document, c'est elle qui recevra le résultat. ("", None) si aucun texte
-    n'est ciblable."""
-    return ctx.on_main(lambda: _read_target_on_main(ctx))
+    n'est ciblable : les actions portent alors sur tout le document."""
+    return ctx.on_main(lambda: _read_target_on_main(ctx, current_paragraph))
 
 
-def _read_target_on_main(ctx):
+def _read_target_on_main(ctx, current_paragraph):
     try:
         rng = ctx.controller.getSelection().getByIndex(0)
         text = rng.getString()
         if text.strip():
             return text, rng
+        if not current_paragraph:
+            return "", None
         cursor = rng.getText().createTextCursorByRange(rng)
         cursor.gotoStartOfParagraph(False)
         cursor.gotoEndOfParagraph(True)
@@ -139,7 +142,7 @@ def _system(specific):
 
 def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                dispatcher=None):
-    base_text, target = _read_target(ctx)
+    base_text, target = _read_target(ctx, current_paragraph=True)
     _legacy_telemetry(ctx, "ExtendSelection",
                       {"action": "extend_selection",
                        "text_length": str(len(base_text))})
@@ -195,17 +198,16 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
     return _outcome(sink, _t("preset.done_extend"))
 
 
-def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
-                  dispatcher=None, append_mode=True):
-    original, target = _read_target(ctx)
-    _legacy_telemetry(ctx, "SummarizeSelection",
-                      {"action": "summarize_selection",
-                       "text_length": str(len(original))})
-    if not original.strip():
-        return _t("sel.no_target")
+_SUMMARY_SYSTEM = (
+    "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
+    "en utilisant le minimum de mots nécessaire tout en préservant "
+    "les informations clés. Tu réponds TOUJOURS dans la même langue "
+    "que le texte fourni.")
 
-    prompt = (
-        "TEXTE À RÉSUMER :\n" + original + "\n\n"
+
+def _summary_prompt(text):
+    return (
+        "TEXTE À RÉSUMER :\n" + text + "\n\n"
         "Crée le résumé le plus court possible qui capture les informations essentielles.\n"
         "Sois extrêmement concis — utilise le minimum de mots nécessaire.\n"
         "Ne pose AUCUNE question.\n"
@@ -213,11 +215,18 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
         "IMPORTANT : Réponds dans la MÊME LANGUE que le texte original.\n\n"
         "RÉSUMÉ :\n"
     )
-    system_prompt = _system(
-        "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
-        "en utilisant le minimum de mots nécessaire tout en préservant "
-        "les informations clés. Tu réponds TOUJOURS dans la même langue "
-        "que le texte fourni.")
+
+
+def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
+                  dispatcher=None, append_mode=True):
+    original, target = _read_target(ctx)
+    if target is None:
+        return _summarize_document(ctx, shell, tee, cancel_event)
+    _legacy_telemetry(ctx, "SummarizeSelection",
+                      {"action": "summarize_selection",
+                       "text_length": str(len(original))})
+
+    system_prompt = _system(_SUMMARY_SYSTEM)
     max_tokens = int(shell.get_config("summarize_selection_max_tokens", 15000))
     llm = _text_client(shell, max_tokens)
 
@@ -231,7 +240,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                          original, EXTEND_QUESTION_PATTERNS))
 
     step = llm.step([{"role": "system", "content": system_prompt},
-                     {"role": "user", "content": prompt}],
+                     {"role": "user", "content": _summary_prompt(original)}],
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event)
     if step.error:
@@ -241,14 +250,26 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                     else _t("preset.done_summarize_replaced"))
 
 
+_SIMPLIFY_SYSTEM = (
+    "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
+    "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
+    "la même langue que le texte fourni. Tu utilises des phrases courtes "
+    "et des mots courants.")
+
+
+def _simplify_system(shell):
+    configured = str(shell.get_config("simplify_selection_system_prompt", "") or "").strip()
+    return _system((configured + " " + _SIMPLIFY_SYSTEM) if configured else _SIMPLIFY_SYSTEM)
+
+
 def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=True):
     original, target = _read_target(ctx)
+    if target is None:
+        return _simplify_document(ctx, shell, tee, cancel_event, append_mode)
     _legacy_telemetry(ctx, "SimplifySelection",
                       {"action": "simplify_selection",
                        "text_length": str(len(original))})
-    if not original.strip():
-        return _t("sel.no_target")
 
     prompt = (
         "TEXTE À REFORMULER :\n" + original + "\n\n"
@@ -261,13 +282,6 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
         "- N'ajoute AUCUNE explication\n- Produis UNIQUEMENT le texte reformulé\n\n"
         "VERSION REFORMULÉE :\n"
     )
-    base_system = (
-        "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
-        "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
-        "la même langue que le texte fourni. Tu utilises des phrases courtes "
-        "et des mots courants.")
-    configured = str(shell.get_config("simplify_selection_system_prompt", "") or "").strip()
-    system_prompt = _system((configured + " " + base_system) if configured else base_system)
     max_tokens = len(original) + int(shell.get_config("simplify_selection_max_tokens", 15000))
     llm = _text_client(shell, max_tokens)
 
@@ -280,7 +294,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                          original, SIMPLIFY_QUESTION_PATTERNS),
                      stop_phrases=STOP_PHRASES)
 
-    step = llm.step([{"role": "system", "content": system_prompt},
+    step = llm.step([{"role": "system", "content": _simplify_system(shell)},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event)
@@ -291,14 +305,20 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                     else _t("preset.done_simplify_replaced"))
 
 
+_RESIZE_SYSTEM = (
+    "Tu réécris des textes en ajustant leur longueur sans en changer le "
+    "sens ni la langue. Tu réponds uniquement avec le texte réécrit.")
+
+
 def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                 append_mode=False):
     original, target_range = _read_target(ctx)
+    if target_range is None:
+        return _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event,
+                                append_mode)
     _legacy_telemetry(ctx, "ResizeSelection",
                       {"action": "resize_selection",
                        "text_length": str(len(original))})
-    if not original.strip():
-        return _t("sel.no_target")
 
     word_count = len(original.split())
     target = max(1, int(round(word_count * ratio)))
@@ -309,9 +329,6 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
         "Conserve le sens, le ton et la MÊME LANGUE que l'original.\n"
         "Produis UNIQUEMENT le texte réécrit, sans introduction ni commentaire."
     )
-    system_prompt = _system(
-        "Tu réécris des textes en ajustant leur longueur sans en changer le "
-        "sens ni la langue. Tu réponds uniquement avec le texte réécrit.")
     llm = _text_client(shell, max(1000, target * 4))
 
     sink = text_sink(ctx, append_mode,
@@ -321,7 +338,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                      cancel_event=cancel_event, undo_label=undo_label,
                      question_patterns=patterns_absent_from(
                          original, EXTEND_QUESTION_PATTERNS))
-    step = llm.step([{"role": "system", "content": system_prompt},
+    step = llm.step([{"role": "system", "content": _system(_RESIZE_SYSTEM)},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event)
@@ -341,6 +358,127 @@ def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=False):
     return _run_resize(ctx, shell, 1.4, _t("preset.undo_lengthen"), tee, cancel_event,
                        append_mode=append_mode)
+
+
+# Sans sélection, les actions Writer portent sur tout le document : le modèle
+# reçoit chaque section à part, et le résultat n'est écrit qu'une fois la
+# dernière réponse reçue (voir whole_document).
+
+def _read_document(ctx, span, action):
+    """Tout le document, lu sur le thread principal avant l'appel au modèle."""
+    snapshot = ctx.on_main(lambda: whole_document.read(ctx))
+    _legacy_telemetry(ctx, span, {"action": action,
+                                  "text_length": str(len(snapshot.text))})
+    return snapshot
+
+
+def _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
+                    done_message):
+    """Bilan d'une action sur tout le document : `apply` n'écrit que si le
+    modèle a tout rendu, d'un seul passage sur le thread principal."""
+    if result.question:
+        return _t("preset.question_asked")
+    if result.error:
+        return error_message(result.error)
+    outcome = ctx.on_main(lambda: whole_document.write(
+        ctx, snapshot, apply, undo_label, cancel_event))
+    if outcome == "stopped":
+        return error_message("cancelled")
+    if outcome == "changed":
+        return _t("preset.target_changed")
+    return done_message
+
+
+def _write_rewrite(ctx, snapshot, result, append_mode, undo_label, markers,
+                   cancel_event, done_message):
+    """Écrit les sections réécrites à leur place, ou en un bloc après le
+    dernier paragraphe entre les `markers` (début, fin)."""
+    if not (result.error or result.question or result.drafts):
+        return _t("palette.headings_only")
+
+    def apply():
+        if append_mode:
+            whole_document.append_block(
+                ctx, snapshot, whole_document.rewritten_lines(snapshot, result.drafts),
+                *markers)
+        else:
+            whole_document.replace(ctx, snapshot, result.drafts)
+
+    return _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
+                           done_message)
+
+
+def _summarize_document(ctx, shell, tee, cancel_event):
+    """Le résumé de tout le document, inséré après son dernier paragraphe,
+    jamais à sa place."""
+    snapshot = _read_document(ctx, "SummarizeSelection", "summarize_selection")
+    if snapshot.empty:
+        return _t("palette.empty_document")
+    model = whole_document.Model(
+        _text_client(shell, int(shell.get_config("summarize_selection_max_tokens", 15000))),
+        _system(_SUMMARY_SYSTEM), cancel_event=cancel_event,
+        question_patterns=patterns_absent_from(snapshot.text, EXTEND_QUESTION_PATTERNS),
+        stop_phrases=STOP_PHRASES)
+    result = whole_document.summarize(model, snapshot, _summary_prompt,
+                                      whole_document.max_chars(shell), tee)
+    lines = [(line.strip(), "") for line in result.text.splitlines() if line.strip()]
+    return _write_document(
+        ctx, snapshot, result,
+        lambda: whole_document.append_block(ctx, snapshot, lines,
+                                            "---début-du-résumé---", "---fin-du-résumé---"),
+        _t("preset.undo_summarize"), cancel_event, _t("preset.done_summarize_document"))
+
+
+_SIMPLIFY_INSTRUCTION = (
+    "Réécris ce texte dans un langage clair et simple compréhensible par tous : "
+    "phrases courtes, mots courants (évite le jargon et les termes techniques), "
+    "voix active, exemples concrets quand c'est possible. Garde la MÊME LANGUE "
+    "que le texte original, ne traduis pas.")
+
+
+def _simplify_document(ctx, shell, tee, cancel_event, append_mode):
+    snapshot = _read_document(ctx, "SimplifySelection", "simplify_selection")
+    if snapshot.empty:
+        return _t("palette.empty_document")
+    limit = whole_document.max_chars(shell)
+    model = whole_document.Model(
+        _text_client(shell, limit + int(shell.get_config("simplify_selection_max_tokens", 15000))),
+        _simplify_system(shell), cancel_event=cancel_event,
+        question_patterns=patterns_absent_from(snapshot.text, SIMPLIFY_QUESTION_PATTERNS),
+        stop_phrases=STOP_PHRASES)
+    result = whole_document.rewrite(model, snapshot, lambda _originals: _SIMPLIFY_INSTRUCTION,
+                                    limit, tee)
+    done = (_t("preset.done_simplify_document") if append_mode
+            else _t("preset.done_simplify_document_replaced"))
+    return _write_rewrite(ctx, snapshot, result, append_mode, _t("preset.undo_simplify"),
+                          ("---reformulation-du-texte---", "---fin-de-reformulation---"),
+                          cancel_event, done)
+
+
+def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mode):
+    snapshot = _read_document(ctx, "ResizeSelection", "resize_selection")
+    if snapshot.empty:
+        return _t("palette.empty_document")
+    goal = "plus courte" if ratio < 1 else "plus longue"
+
+    def instruction_for(originals):
+        words = max(1, int(round(len(" ".join(originals).split()) * ratio)))
+        return (f"Réécris ce texte en une version {goal} d'environ {words} mots. "
+                "Conserve le sens et le ton.")
+
+    limit = whole_document.max_chars(shell)
+    # Le plus long morceau compte environ un mot pour cinq caractères.
+    model = whole_document.Model(
+        _text_client(shell, max(1000, int(round(limit / 5 * ratio)) * 4)),
+        _system(_RESIZE_SYSTEM), cancel_event=cancel_event,
+        question_patterns=patterns_absent_from(snapshot.text, EXTEND_QUESTION_PATTERNS))
+    result = whole_document.rewrite(model, snapshot, instruction_for, limit, tee)
+    body_words = sum(len(text.split()) for text, style in zip(
+        snapshot.texts, snapshot.styles, strict=True) if not doc_rewrite.is_heading(style))
+    return _write_rewrite(ctx, snapshot, result, append_mode, undo_label,
+                          ("---début-du-texte-ajusté---", "---fin-du-texte-ajusté---"),
+                          cancel_event,
+                          _t("preset.resized", target=max(1, int(round(body_words * ratio)))))
 
 
 @dataclasses.dataclass

@@ -36,6 +36,14 @@ class Snapshot:
     texts: list
     styles: list
 
+    @property
+    def empty(self):
+        return not any(text.strip() for text in self.texts)
+
+    @property
+    def text(self):
+        return "\n".join(text for text in self.texts if text.strip())
+
 
 def read(ctx):
     """Thread principal exclusivement."""
@@ -179,6 +187,26 @@ def rewrite_whole(model, snapshot, instruction, tee=None):
         return Outcome(error="empty_response", step=model.last_step)
     return Outcome(drafts=[Draft(indexes, [text for text, _ in lines],
                                  styles=[style for _, style in lines])])
+
+
+def summarize(model, snapshot, prompt_for, limit, tee=None):
+    """Résumé du document, d'un appel s'il tient sous `limit` caractères ;
+    sinon par étapes : chaque morceau de section, puis l'ensemble des résumés
+    partiels. Seul le résumé final s'affiche dans la palette. Worker."""
+    text = snapshot.text
+    if len(text) > limit:
+        partials = []
+        for section in doc_rewrite.sections(snapshot.texts, snapshot.styles):
+            heading = [snapshot.texts[section.heading]] if section.heading is not None else []
+            for indexes in doc_rewrite.chunks(snapshot.texts, section.body, limit):
+                answer = model.ask(prompt_for("\n".join(
+                    heading + [snapshot.texts[i] for i in indexes])))
+                if isinstance(answer, Outcome):
+                    return answer
+                partials.append(answer.strip())
+        text = "\n\n".join(partials)
+    answer = model.ask(prompt_for(text), tee)
+    return answer if isinstance(answer, Outcome) else Outcome(text=answer)
 
 
 def write(ctx, snapshot, apply, undo_label, cancel_event=None):
