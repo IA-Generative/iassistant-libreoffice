@@ -1090,6 +1090,24 @@ def test_a_global_request_applies_to_the_whole_document(palette_module, monkeypa
     assert "# Analyse" in prompt and "Les causes." in prompt
 
 
+@pytest.mark.parametrize("texts,styles,kept", [
+    (ARTICLE, ARTICLE_STYLES, "palette.title_kept"),
+    (["Le contexte.", "Analyse", "Les chiffres."], ["Standard", "Heading 2", "Standard"], None),
+], ids=["document_title_stays", "only_heading_dropped"])
+def test_the_summary_says_a_heading_was_kept_only_when_one_is_left(
+        palette_module, monkeypatch, texts, styles, kept):
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(texts, styles)
+    palette, _, _ = _rewrite_document(palette_module, monkeypatch, doc,
+                                      ["Premier bloc.\nSecond bloc."])
+
+    summary = _t("palette.document_summary", how=_t("palette.how_rewritten"),
+                 before=len(texts) - 1 if kept else len(texts), after=2,
+                 kept=_t(kept) if kept else "")
+    assert palette.conversation.load()[-1]["text"] == summary
+
+
 def test_the_reasoning_of_a_model_never_reaches_the_document(palette_module, monkeypatch):
     """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
     qui suit son bloc <think> est écrit."""

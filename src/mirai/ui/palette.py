@@ -2040,14 +2040,18 @@ class AssistantPalette:
 
         body = sum(len(draft.indexes) for draft in result.drafts)
         after = sum(len(draft.paragraphs) for draft in result.drafts)
+        # En ajout, l'original reste entier ; en remplacement, le modèle peut
+        # avoir retiré tous les titres intérieurs.
+        kept_count = (len(headings) if append
+                      else whole_document.headings_kept(document, result.drafts))
         self.journal_line(
             _t("palette.journal_written", before=body, after=after),
             step=telemetry_steps.DOCUMENT_DONE,
             **{"body.paragraphs": body,
                "result.paragraphs": after,
-               "headings.kept": len(headings),
+               "headings.kept": kept_count,
                "append.mode": bool(append)})
-        kept = _t("palette.title_kept") if headings else ""
+        kept = _t("palette.title_kept") if kept_count else ""
         how = _t("palette.how_appended") if append else _t("palette.how_rewritten")
         summary = _t("palette.document_summary", how=how,
                      before=body, after=after, kept=kept)

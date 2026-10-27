@@ -263,6 +263,18 @@ def replace(ctx, snapshot, drafts):
                          draft.paragraphs, draft.styles)
 
 
+def headings_kept(snapshot, drafts):
+    """Nombre de titres encore dans le document une fois les morceaux écrits
+    à leur place : ceux hors des morceaux, plus ceux que le modèle a rendus."""
+    rewritten = {index for draft in drafts for index in draft.indexes}
+    outside = sum(1 for index, style in enumerate(snapshot.styles)
+                  if index not in rewritten and snapshot.texts[index].strip()
+                  and doc_rewrite.is_heading(style))
+    returned = sum(1 for draft in drafts for style in draft.styles or ()
+                   if doc_rewrite.is_heading(style))
+    return outside + returned
+
+
 def rewritten_lines(snapshot, drafts):
     """Lignes (texte, style) du bloc ajouté après le document : chaque section
     sous son titre, chaque paragraphe réécrit dans le style que le modèle lui
