@@ -215,6 +215,28 @@ def test_a_kept_heading_gets_its_heading_style_back():
                      ("LES CHIFFRES.", "Text Body")]
 
 
+def test_a_heading_whose_spelling_the_model_fixed_keeps_its_level():
+    from src.mirai.core.doc_rewrite import styled_lines
+
+    lines = styled_lines("Intro.\n# Partie 1\nCorps 1.\n# Détails\nCorps 2.",
+                         ["Intro.", "Partie 1", "Corps 1.", "Détials", "Corps 2."],
+                         ["Standard", "Heading 1", "Standard", "Heading 2", "Standard"])
+
+    assert [style for _, style in lines] == [
+        "Standard", "Heading 1", "Standard", "Heading 2", "Standard"]
+
+
+def test_a_heading_returned_without_its_marker_stays_a_heading():
+    from src.mirai.core.doc_rewrite import styled_lines
+
+    lines = styled_lines("LE CONTEXTE.\nAnalyse\nLES CHIFFRES.",
+                         ["Le contexte.", "Analyse", "Les chiffres."],
+                         ["Text Body", "Heading 2", "Text Body"])
+
+    assert lines == [("LE CONTEXTE.", "Text Body"), ("Analyse", "Heading 2"),
+                     ("LES CHIFFRES.", "Text Body")]
+
+
 def test_body_text_never_takes_a_heading_style():
     """« En deux paragraphes » : le titre intérieur disparaît, le corps reste du corps."""
     from src.mirai.core.doc_rewrite import styled_lines

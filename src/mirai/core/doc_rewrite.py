@@ -19,6 +19,7 @@ Ce module ne connaît pas UNO : il reçoit des paragraphes, rend des paragraphes
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import re
 
 # Détecter les DEMANDES D'INFORMATION plutôt que les demandes de modification.
@@ -150,8 +151,9 @@ def build_rewrite_prompt(paragraphs, instruction: str, headings=None) -> str:
         "- Renvoie UNIQUEMENT le document réécrit, rien d'autre.\n"
         "- UN paragraphe par ligne, sans les marqueurs [Pn], sans ligne vide.\n"
         "- Pas d'introduction, pas de commentaire, pas de markdown.\n"
-        "- Conserve la langue d'origine.\n"
-        "- Ne reprends pas le titre : il n'est pas dans le texte à réécrire."
+        "- Conserve la langue d'origine."
+        + ("\n- Ne reprends pas le titre : il n'est pas dans le texte à réécrire."
+           if headings else "")
     )
 
 
@@ -183,9 +185,10 @@ def build_document_prompt(paragraphs, styles, instruction: str, headings=None) -
               for text, style in zip(paragraphs, styles, strict=True)]
     prompt = build_rewrite_prompt(marked, instruction, headings=headings)
     if any(is_heading(style) for style in styles):
-        prompt += ("\n- Seule exception au markdown : une ligne qui commence par "
-                   "« # » est un titre ; si tu le gardes, rends-le sur sa propre "
-                   "ligne, précédé de « # ».")
+        prompt += ("\n- Seule exception au markdown : une ligne du texte qui commence "
+                   "par « # » est un titre intérieur, distinct du TITRE donné en "
+                   "contexte ; si tu le gardes, rends-le sur sa propre ligne, "
+                   "précédé de « # ».")
     return prompt
 
 
@@ -199,10 +202,11 @@ def styled_lines(answer, originals, styles):
 
     Le corps ne prend jamais un style de titre : écrit position par position,
     il prenait celui du titre intérieur qu'il remplaçait, et ce titre
-    disparaissait. Une ligne « # … » reprend le style du titre d'origine de
-    même texte, sinon celui du premier titre ; une ligne de corps reprend le
-    style du paragraphe de corps à la même place, sinon celui du dernier corps
-    rencontré."""
+    disparaissait. Une ligne « # … » reprend le style du titre d'origine au
+    texte le plus proche, sinon celui du premier titre ; une ligne sans
+    marqueur qui reprend exactement un titre d'origine garde son style ; une
+    ligne de corps reprend le style du paragraphe de corps à la même place,
+    sinon celui du dernier corps rencontré."""
     heading_styles = {text.strip().lower(): style
                       for text, style in zip(originals, styles, strict=True)
                       if is_heading(style)}
@@ -214,12 +218,23 @@ def styled_lines(answer, originals, styles):
         if marked:
             text = (marked.group(1) or "").strip()
             if text:
-                result.append((text, heading_styles.get(text.lower(), first_heading)))
+                result.append((text, _closest_heading(text, heading_styles) or first_heading))
+            continue
+        if line.lower() in heading_styles:
+            # Un titre gardé sans son marqueur, comme le demande le prompt système.
+            result.append((line, heading_styles[line.lower()]))
             continue
         if position < len(styles) and not is_heading(styles[position]):
             body_style = styles[position]
         result.append((line, body_style))
     return result
+
+
+def _closest_heading(text, heading_styles):
+    """Style du titre d'origine le plus proche : le modèle corrige souvent
+    l'orthographe ou la casse d'un titre qu'il garde."""
+    close = difflib.get_close_matches(text.lower(), heading_styles, n=1, cutoff=0.8)
+    return heading_styles[close[0]] if close else None
 
 
 def parse_rewritten(text: str):
