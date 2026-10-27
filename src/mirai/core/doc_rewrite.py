@@ -67,7 +67,7 @@ def wants_document_rewrite(prompt: str) -> bool:
 # Styles qui désignent un titre. On teste en minuscules et par préfixe : les
 # noms varient selon la langue de l'interface et la version (« Heading 1 »,
 # « Titre 1 », « Title »…).
-_HEADING_PREFIXES = ("heading", "titre", "title", "überschrift", "encabezado")
+_HEADING_PREFIXES = ("heading", "titre", "title", "subtitle", "überschrift", "encabezado")
 
 
 def is_heading(style_name: str) -> bool:

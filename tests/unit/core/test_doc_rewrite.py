@@ -124,7 +124,7 @@ def test_empty_response_yields_nothing():
 def test_heading_styles_are_recognised():
     from src.mirai.core.doc_rewrite import is_heading
 
-    for style in ("Heading 1", "heading 2", "Titre 1", "Title", "Überschrift 1"):
+    for style in ("Heading 1", "heading 2", "Titre 1", "Title", "Subtitle", "Überschrift 1"):
         assert is_heading(style), style
     for style in ("Standard", "Text Body", "Corps de texte", "", None):
         assert not is_heading(style), style
