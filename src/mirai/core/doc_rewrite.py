@@ -200,13 +200,11 @@ _HEADING_LINE = re.compile(r"#+(?:\s+(.*))?")
 def styled_lines(answer, originals, styles):
     """(texte, style) de chaque paragraphe rendu pour `build_document_prompt`.
 
-    Le corps ne prend jamais un style de titre : écrit position par position,
-    il prenait celui du titre intérieur qu'il remplaçait, et ce titre
-    disparaissait. Une ligne « # … » reprend le style du titre d'origine au
-    texte le plus proche, sinon celui du premier titre ; une ligne sans
-    marqueur qui reprend exactement un titre d'origine garde son style ; une
-    ligne de corps reprend le style du paragraphe de corps à la même place,
-    sinon celui du dernier corps rencontré."""
+    Le corps ne prend jamais un style de titre. Une ligne « # … » reprend le
+    style du titre d'origine au texte le plus proche, sinon celui du premier
+    titre ; une ligne sans marqueur qui reprend exactement un titre d'origine
+    garde son style ; une ligne de corps reprend le style du paragraphe de
+    corps à la même place, sinon celui du dernier corps rencontré."""
     heading_styles = {text.strip().lower(): style
                       for text, style in zip(originals, styles, strict=True)
                       if is_heading(style)}
