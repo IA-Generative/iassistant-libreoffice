@@ -130,31 +130,6 @@ def test_heading_styles_are_recognised():
         assert not is_heading(style), style
 
 
-def test_body_range_excludes_a_leading_heading():
-    """Le défaut observé : le corps réécrit héritait du style Titre."""
-    from src.mirai.core.doc_rewrite import body_range
-
-    assert body_range(["Heading 1", "Standard", "Standard"]) == (2, 3)
-
-
-def test_body_range_excludes_headings_at_both_ends():
-    from src.mirai.core.doc_rewrite import body_range
-
-    assert body_range(["Title", "Standard", "Standard", "Heading 2"]) == (2, 3)
-
-
-def test_body_range_covers_everything_without_headings():
-    from src.mirai.core.doc_rewrite import body_range
-
-    assert body_range(["Standard", "Standard"]) == (1, 2)
-
-
-def test_body_range_is_none_when_only_headings():
-    from src.mirai.core.doc_rewrite import body_range
-
-    assert body_range(["Heading 1", "Title"]) is None
-
-
 def test_prompt_gives_the_heading_as_context_only():
     prompt = build_rewrite_prompt(["Corps."], "réécris",
                                   headings=["Mon titre"])
@@ -162,3 +137,97 @@ def test_prompt_gives_the_heading_as_context_only():
     assert "Mon titre" in prompt
     assert "NE PAS reprendre" in prompt
     assert "Ne reprends pas le titre" in prompt
+
+
+# Découpage en sections : un titre et son corps, jusqu'au titre suivant
+
+def test_each_heading_starts_a_section():
+    from src.mirai.core.doc_rewrite import Section, sections
+
+    texts = ["Intro.", "Titre A", "Corps A.", "Titre B", "Corps B1.", "Corps B2."]
+    styles = ["Standard", "Heading 1", "Standard", "Heading 2", "Standard", "Standard"]
+
+    assert sections(texts, styles) == [Section(None, (0,)), Section(1, (2,)),
+                                       Section(3, (4, 5))]
+
+
+def test_blank_paragraphs_around_a_section_body_are_left_out():
+    """Ils espacent un titre de son texte : la réécriture ne les supprime pas."""
+    from src.mirai.core.doc_rewrite import Section, sections
+
+    texts = ["Titre", "", "Un.", "", "Deux.", "", "Autre titre"]
+    styles = ["Heading 1", "Standard", "Standard", "Standard", "Standard",
+              "Standard", "Heading 1"]
+
+    assert sections(texts, styles) == [Section(0, (2, 3, 4))]
+
+
+def test_a_heading_without_text_below_has_no_section():
+    from src.mirai.core.doc_rewrite import sections
+
+    assert sections(["Titre", "", "Sous-titre"],
+                    ["Heading 1", "Standard", "Heading 2"]) == []
+
+
+def test_a_long_section_is_cut_between_paragraphs():
+    from src.mirai.core.doc_rewrite import chunks
+
+    texts = ["a" * 40, "b" * 40, "c" * 40]
+
+    assert chunks(texts, (0, 1, 2), 100) == [(0, 1), (2,)]
+
+
+def test_a_paragraph_longer_than_the_limit_is_sent_alone():
+    from src.mirai.core.doc_rewrite import chunks
+
+    texts = ["a" * 10, "b" * 300, "c" * 10]
+
+    assert chunks(texts, (0, 1, 2), 100) == [(0,), (1,), (2,)]
+
+
+# Tout le corps d'un seul appel : le modèle rend la structure, le style vient
+# du document
+
+def test_the_whole_document_prompt_marks_interior_headings():
+    from src.mirai.core.doc_rewrite import build_document_prompt
+
+    prompt = build_document_prompt(["Le contexte.", "Analyse", "Les chiffres."],
+                                   ["Standard", "Heading 2", "Standard"], "x")
+
+    assert "[P2] # Analyse" in prompt
+    assert "précédé de « # »" in prompt
+
+
+def test_without_interior_heading_the_prompt_does_not_mention_them():
+    from src.mirai.core.doc_rewrite import build_document_prompt
+
+    assert "« # »" not in build_document_prompt(["Un.", "Deux."], ["Standard"] * 2, "x")
+
+
+def test_a_kept_heading_gets_its_heading_style_back():
+    from src.mirai.core.doc_rewrite import styled_lines
+
+    lines = styled_lines("LE CONTEXTE.\n# Analyse\nLES CHIFFRES.",
+                         ["Le contexte.", "Analyse", "Les chiffres."],
+                         ["Text Body", "Heading 2", "Text Body"])
+
+    assert lines == [("LE CONTEXTE.", "Text Body"), ("Analyse", "Heading 2"),
+                     ("LES CHIFFRES.", "Text Body")]
+
+
+def test_body_text_never_takes_a_heading_style():
+    """« En deux paragraphes » : le titre intérieur disparaît, le corps reste du corps."""
+    from src.mirai.core.doc_rewrite import styled_lines
+
+    lines = styled_lines("Premier bloc.\nSecond bloc.",
+                         ["Le contexte.", "Analyse", "Les chiffres."],
+                         ["Standard", "Heading 2", "Standard"])
+
+    assert lines == [("Premier bloc.", "Standard"), ("Second bloc.", "Standard")]
+
+
+def test_a_line_starting_with_a_hash_is_body_text_when_there_was_no_heading():
+    from src.mirai.core.doc_rewrite import styled_lines
+
+    assert styled_lines("#1 des ventes.", ["Premier des ventes."], ["Standard"]) == [
+        ("#1 des ventes.", "Standard")]

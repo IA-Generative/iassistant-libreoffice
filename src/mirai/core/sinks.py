@@ -96,6 +96,23 @@ class _FilteredWriterSink:
             self.stream_delta(text)
 
 
+class DraftSink(_FilteredWriterSink):
+    """Texte retenu pour une écriture faite plus tard, en une fois : filtré
+    comme par les sinks Writer, affiché dans la palette (`tee`), jamais écrit
+    par le sink lui-même."""
+
+    def __init__(self, question_patterns=None, stop_phrases=None, tee=None):
+        super().__init__(None, question_patterns=question_patterns,
+                         stop_phrases=stop_phrases, tee=tee)
+
+    def _emit(self, text):
+        if text and self.tee:
+            self.tee(text)
+
+    def finish(self, text, streamed):
+        self._replay(text)
+
+
 class WriterInsertSink(_FilteredWriterSink):
     """Insertion streamée après la sélection : marqueurs d'en-tête/pied,
     stop phrases et détection de question."""

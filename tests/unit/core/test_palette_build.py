@@ -655,6 +655,13 @@ def _run_spans(palette):
             if c.args and c.args[0] == "AssistantRun"]
 
 
+def _snapshot(texts, styles=None):
+    """Document lu avant le run, sans références de paragraphes : réservé aux
+    runs qui s'arrêtent avant d'écrire."""
+    from src.mirai.core.whole_document import Snapshot
+    return Snapshot([None] * len(texts), list(texts), list(styles or [""] * len(texts)))
+
+
 def _step_spans(shell, step_name):
     from src.mirai.core import telemetry_steps
     return [c.args[1] for c in shell.telemetry.call_args_list
@@ -701,10 +708,9 @@ def test_selection_rewrite_branch_has_its_kind(palette_module, monkeypatch):
 def test_document_rewrite_branch_has_its_kind(palette_module, monkeypatch):
     palette = _build(palette_module)
     monkeypatch.setattr(palette, "_run_document_rewrite",
-                        lambda ctx, prompt, paragraphs, styles: {"ok": True})
+                        lambda ctx, prompt, document: {"ok": True})
     palette._run_in_worker(None, "réécris tout", MagicMock(), "shown",
-                           snapshot={"rewrite": True, "paragraphs": ["a"],
-                                     "styles": [""]})
+                           snapshot={"rewrite": True, "document": _snapshot(["a"])})
     assert _run_spans(palette)[0]["run.kind"] == "document_rewrite"
 
 
@@ -763,12 +769,8 @@ def test_a_cancelled_run_is_flagged(palette_module, monkeypatch):
     assert attrs["assistant.reason"] == "cancelled"
 
 
-@pytest.mark.parametrize("snapshot", [
-    {"rewrite_selection": True, "selection": "Un paragraphe."},
-    {"rewrite": True, "paragraphs": ["Un paragraphe."], "styles": [""]},
-], ids=["selection", "document"])
-def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch,
-                                                   snapshot):
+@pytest.mark.parametrize("kind", ["selection", "document"])
+def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch, kind):
     """« Arrêter » pendant le flux : la palette annonce l'arrêt et le
     document reste tel quel."""
     from src.mirai.core.context import ToolContext
@@ -787,6 +789,9 @@ def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch,
     doc = FakeWriterDoc(selection_text="Un paragraphe.",
                         paragraphs=["Un paragraphe."])
     ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    snapshot = ({"rewrite_selection": True, "selection": "Un paragraphe."}
+                if kind == "selection" else
+                {"rewrite": True, "document": _snapshot(["Un paragraphe."])})
 
     palette._run_in_worker(None, "reformule", ctx, "reformule", snapshot=snapshot)
 
@@ -933,16 +938,6 @@ def test_a_calc_preset_shows_the_model_text_in_the_palette(palette_module, monke
     assert sheet.grid[(1, 0)] == "APPLE"
 
 
-def test_document_rewrite_reports_why_it_did_nothing(palette_module):
-    """Les sorties anticipées doivent nommer leur cause dans le résumé."""
-    palette = _build(palette_module)
-    assert palette._run_document_rewrite(
-        MagicMock(), "x", []) == {"ok": False, "reason": "empty_document"}
-    assert palette._run_document_rewrite(
-        MagicMock(), "x", ["Titre"], ["Heading 1"]) == {
-            "ok": False, "reason": "headings_only"}
-
-
 def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
     """Sélection ou document entier : le texte réécrit garde sa langue, quelle
     que soit celle de l'interface."""
@@ -962,7 +957,7 @@ def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
     palette._progress = palette_module.RunProgress()
     palette._run_selection_rewrite(MagicMock(), "shorten", "Some English text.")
     palette._run_document_rewrite(
-        MagicMock(), "shorten", ["First paragraph.", "Second paragraph."])
+        MagicMock(), "shorten", _snapshot(["First paragraph.", "Second paragraph."]))
 
     assert len(sent) == 2
     for messages in sent:
@@ -992,12 +987,187 @@ def test_rewrites_present_the_document_as_data(palette_module, monkeypatch):
     palette._progress = palette_module.RunProgress()
     palette._run_selection_rewrite(MagicMock(), "raccourcis", injection)
     palette._run_document_rewrite(
-        MagicMock(), "raccourcis", ["Premier paragraphe.", injection])
+        MagicMock(), "raccourcis", _snapshot(["Premier paragraphe.", injection]))
 
     assert len(sent) == 2
     for messages in sent:
         assert prompts.DOCUMENT_DATA_RULE in messages[0]["content"]
         assert injection in messages[-1]["content"]
+
+
+# Demande libre sur tout le document : réécrite section par section, écrite une
+# fois la dernière réponse reçue.
+
+ARTICLE = ["Rapport", "Le contexte.", "Analyse", "Les chiffres.", "Les causes."]
+ARTICLE_STYLES = ["Heading 1", "Standard", "Heading 2", "Standard", "Standard"]
+
+
+def _rewrite_document(palette_module, monkeypatch, doc, replies, append=False,
+                      during_request=None, config=None, instruction="mets en majuscules"):
+    """Lance une demande libre sur tout le document, « en majuscules » par
+    défaut ; `during_request(doc)` s'exécute à chaque appel au modèle."""
+    from src.mirai.core import whole_document
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.llm_client import LLMClient
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    relay = FakeShell(responses=[FakeSSEResponse(text_chunks(r)) for r in replies])
+    urlopen = relay.urlopen
+
+    def _urlopen(request, timeout=None):
+        if during_request:
+            during_request(doc)
+        return urlopen(request, timeout)
+
+    relay.urlopen = _urlopen
+    monkeypatch.setattr(palette_module, "LLMClient",
+                        lambda _shell, max_tokens=None: LLMClient(relay))
+    palette = _build(palette_module)
+    settings = dict(config or {})
+    palette.shell.get_config.side_effect = lambda key, default=None: settings.get(key, default)
+    palette._progress = palette_module.RunProgress()
+    palette.append_mode = append
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    summary = palette._run_document_rewrite(ctx, instruction, whole_document.read(ctx))
+    palette._delta_buffer.flush()
+    return palette, relay, summary
+
+
+ABEILLES = "Les abeilles pollinisent les fleurs.\nElles vivent en colonies."
+
+
+@pytest.mark.parametrize("append", [False, True], ids=["replace", "append"])
+def test_an_empty_document_receives_the_text_it_asks_for(palette_module, monkeypatch,
+                                                         append):
+    """Rien à comparer : le texte remplit le document, sans marqueurs."""
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc([""])
+    palette, relay, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, [ABEILLES], append=append,
+        instruction="Rédige un texte sur les abeilles")
+
+    assert summary == {"ok": True}
+    assert doc.paragraphs == ABEILLES.split("\n")
+    assert doc.styles == ["Standard", "Standard"]
+    assert doc.undo.entered == [_t("preset.undo_compose_document")]
+    assert doc.writes_outside_undo == 0
+    assert "Rédige un texte sur les abeilles" in relay.requests[0]["messages"][-1]["content"]
+    assert _t("palette.document_composed", count=2) in palette._models["response"].Text
+
+
+@pytest.mark.parametrize("texts,styles,body_style", [
+    (["Les abeilles"], ["Heading 1"], "Standard"),
+    (["Les abeilles", ""], ["Heading 1", "Text Body"], "Text Body"),
+], ids=["title_only", "title_then_blank_line"])
+def test_text_asked_under_a_lone_title_follows_it_in_body_style(
+        palette_module, monkeypatch, texts, styles, body_style):
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(texts, styles)
+    _, relay, _ = _rewrite_document(palette_module, monkeypatch, doc, [ABEILLES],
+                                    instruction="Rédige l'introduction")
+
+    assert doc.paragraphs == ["Les abeilles"] + ABEILLES.split("\n")
+    assert doc.styles == ["Heading 1", body_style, body_style]
+    assert "Les abeilles" in relay.requests[0]["messages"][-1]["content"]
+
+
+def test_a_global_request_applies_to_the_whole_document(palette_module, monkeypatch):
+    """« En deux paragraphes » : deux paragraphes en tout, d'un seul appel. Le
+    titre du document reste, le corps ne prend jamais un style de titre."""
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    _, relay, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."])
+
+    assert summary == {"ok": True}
+    assert doc.paragraphs == ["Rapport", "Premier bloc.", "Second bloc."]
+    assert doc.styles == ["Heading 1", "Standard", "Standard"]
+    assert len(relay.requests) == 1
+    prompt = relay.requests[0]["messages"][-1]["content"]
+    assert "# Analyse" in prompt and "Les causes." in prompt
+
+
+def test_a_heading_the_model_keeps_stays_a_heading(palette_module, monkeypatch):
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    _rewrite_document(palette_module, monkeypatch, doc,
+                      ["LE CONTEXTE.\n# Analyse\nLES CHIFFRES.\nLES CAUSES."])
+
+    assert doc.paragraphs == ["Rapport", "LE CONTEXTE.", "Analyse",
+                              "LES CHIFFRES.", "LES CAUSES."]
+    assert doc.styles == ARTICLE_STYLES
+
+
+def test_a_document_rewrite_is_written_once_in_one_undo_action(palette_module, monkeypatch):
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    writes_seen = []
+    palette, _, _ = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."],
+        during_request=lambda d: writes_seen.append(d.writes))
+
+    assert writes_seen == [0]
+    assert doc.undo.entered == [_t("preset.undo_rewrite_document")]
+    assert doc.undo.left == 1 and doc.writes_outside_undo == 0
+    assert "Premier bloc.\nSecond bloc.\n" in palette._models["response"].Text
+
+
+def test_a_document_edited_during_the_rewrite_is_left_alone(palette_module, monkeypatch):
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+
+    def _user_types(d):
+        d.items[3].text = "Les chiffres, revus à la main."
+
+    palette, _, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."],
+        during_request=_user_types)
+
+    assert summary == {"ok": False, "reason": "target_changed"}
+    assert doc.paragraphs[1] == "Le contexte."
+    assert doc.undo.entered == []
+    assert _t("preset.target_changed") in palette._models["response"].Text
+
+
+def test_a_document_rewrite_in_append_mode_adds_one_block_at_the_end(
+        palette_module, monkeypatch):
+    """L'original reste en place ; le bloc ajouté garde les titres rendus."""
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    _rewrite_document(palette_module, monkeypatch, doc,
+                      ["LE CONTEXTE.\n# Analyse\nLES CHIFFRES."], append=True)
+
+    assert doc.paragraphs == ARTICLE + [
+        "---début-du-texte-réécrit---", "LE CONTEXTE.", "Analyse", "LES CHIFFRES.",
+        "---fin-du-texte-réécrit---"]
+    assert doc.styles == ARTICLE_STYLES + [
+        "Standard", "Standard", "Heading 2", "Standard", "Standard"]
+
+
+def test_a_document_longer_than_the_limit_is_rewritten_section_by_section(
+        palette_module, monkeypatch):
+    """Chaque section part à part, sous son titre qui reste en place, et la
+    palette dit que la demande a été appliquée section par section."""
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    palette, relay, _ = _rewrite_document(
+        palette_module, monkeypatch, doc, ["LE CONTEXTE.", "LES CHIFFRES.\nLES CAUSES."],
+        config={"document_chunk_max_chars": 30})
+
+    assert len(relay.requests) == 2
+    assert "Les chiffres." not in relay.requests[0]["messages"][-1]["content"]
+    assert doc.paragraphs == ["Rapport", "LE CONTEXTE.", "Analyse",
+                              "LES CHIFFRES.", "LES CAUSES."]
+    assert doc.styles == ARTICLE_STYLES
+    assert _t("palette.rewrite_by_section") in palette._models["response"].Text
 
 
 def test_a_free_prompt_question_keeps_the_selection(palette_module, monkeypatch):

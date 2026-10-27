@@ -54,6 +54,7 @@ from ..core import (
     selection_info,
     suggestions,
     telemetry_steps,
+    whole_document,
 )
 from ..core import presets as presets_module
 from ..core.context import ToolContext
@@ -1776,7 +1777,7 @@ class AssistantPalette:
         `_run_selection_rewrite`) seulement si le modèle n'a pas prouvé savoir
         enchaîner les outils (`_model_can_chain_tools`).
         """
-        snapshot = {"selection": "", "paragraphs": [], "styles": [],
+        snapshot = {"selection": "", "document": None,
                     "rewrite": False, "rewrite_selection": False}
         try:
             snapshot["selection"] = _selection_string(ctx) or ""
@@ -1794,10 +1795,7 @@ class AssistantPalette:
             return snapshot
         if wants_edit and not snapshot["selection"].strip():
             try:
-                from ..core.tools.writer_tools import _paragraphs, paragraph_style
-                items = _paragraphs(ctx)
-                snapshot["paragraphs"] = [p.getString() for p in items]
-                snapshot["styles"] = [paragraph_style(p) for p in items]
+                snapshot["document"] = whole_document.read(ctx)
                 snapshot["rewrite"] = True
             except Exception as exc:
                 self.shell.log(f"[palette] lecture du document impossible : {exc}")
@@ -1828,8 +1826,7 @@ class AssistantPalette:
             elif snapshot.get("rewrite"):
                 kind = "document_rewrite"
                 summary = self._run_document_rewrite(ctx, prompt_text,
-                                                     snapshot["paragraphs"],
-                                                     snapshot["styles"])
+                                                     snapshot["document"])
             else:
                 summary = self._run_agentic(preset, prompt_text, ctx)
             self._delta_buffer.flush()
@@ -2012,124 +2009,180 @@ class AssistantPalette:
         self.conversation.append("assistant", summary, ctx.app)
         return {"ok": True}
 
-    def _run_document_rewrite(self, ctx, instruction, originals, styles=None):
-        """Réécrit le document : Python lit, le LLM rédige, Python applique.
+    def _run_document_rewrite(self, ctx, instruction, document):
+        """Réécrit le document : Python lit, le LLM rédige, Python écrit une
+        fois la réponse complète.
 
         Aucun tool call n'est demandé au modèle — c'est ce qui rend l'opération
-        fiable là où le mode agentique échouait silencieusement.
+        fiable là où le mode agentique échouait silencieusement. Le corps part
+        d'un seul appel pour qu'une demande globale garde son sens ; le modèle
+        rend les titres intérieurs qu'il garde, et Python redonne à chaque
+        paragraphe son style : le corps ne prend jamais celui d'un titre.
         """
-        from ..core.tools.writer_tools import replace_paragraphs
-
-        if not originals:
-            self._append_response(_t("palette.assistant_prefix"),
-                                  _t("palette.empty_document"))
-            return {"ok": False, "reason": "empty_document"}
-
-        # Les titres restent en place : les inclure dans la plage réécrite y
-        # ferait tomber du corps de texte, qui hériterait du style Titre.
-        styles = styles or [""] * len(originals)
-        span = doc_rewrite.body_range(styles)
-        if span is None:
-            self._append_response(
-                _t("palette.assistant_prefix"), _t("palette.headings_only"))
-            return {"ok": False, "reason": "headings_only"}
-        first, last = span
-        body = originals[first - 1:last]
-        headings = [text for text, style in zip(originals, styles, strict=False)
+        found = doc_rewrite.sections(document.texts, document.styles)
+        if not found:
+            return self._compose_document(ctx, instruction, document)
+        headings = [text for text, style in zip(document.texts, document.styles,
+                                                strict=True)
                     if doc_rewrite.is_heading(style) and text.strip()]
+        append = self.append_mode
+        self._journal_rewrite_start(document, found, headings, append)
 
-        self.journal_line(_t("palette.journal_read", count=len(originals)),
+        self._progress.set_phase(_t("progress.writing"))
+        self._append_response(_t("palette.assistant_prefix"))
+        result = self._ask_rewrite(self._document_model(), document, instruction)
+        failure = self._ask_failed(result)
+        if failure is None:
+            failure = self._write_document(
+                ctx, document,
+                lambda: self._apply_rewrite(ctx, document, result.drafts, append),
+                _t("preset.undo_rewrite_document"))
+        if failure is not None:
+            return failure
+
+        body = sum(len(draft.indexes) for draft in result.drafts)
+        after = sum(len(draft.paragraphs) for draft in result.drafts)
+        self.journal_line(
+            _t("palette.journal_written", before=body, after=after),
+            step=telemetry_steps.DOCUMENT_DONE,
+            **{"body.paragraphs": body,
+               "result.paragraphs": after,
+               "headings.kept": len(headings),
+               "append.mode": bool(append)})
+        kept = _t("palette.title_kept") if headings else ""
+        how = _t("palette.how_appended") if append else _t("palette.how_rewritten")
+        summary = _t("palette.document_summary", how=how,
+                     before=body, after=after, kept=kept)
+        self._stream_response(summary)
+        self.conversation.append("user", instruction, ctx.app)
+        self.conversation.append("assistant", summary, ctx.app)
+        return {"ok": True}
+
+    def _compose_document(self, ctx, instruction, document):
+        """Document sans texte de corps, vide ou fait de titres seuls : le
+        texte demandé est rédigé puis écrit à la fin du document. Sans
+        marqueurs, même en ajout : il n'y a rien à comparer."""
+        self.journal_line(_t("palette.journal_read", count=len(document.texts)),
                           step=telemetry_steps.DOCUMENT_READ,
-                          **{"document.paragraphs": len(originals),
+                          **{"document.paragraphs": len(document.texts),
+                             "document.headings": 0})
+        self._progress.set_phase(_t("progress.writing"))
+        self._append_response(_t("palette.assistant_prefix"))
+        result = whole_document.compose(self._document_model(), document, instruction,
+                                        tee=self._stream_response)
+        failure = self._ask_failed(result)
+        if failure is None:
+            failure = self._write_document(
+                ctx, document, lambda: whole_document.add_text(ctx, document, result.drafts[0]),
+                _t("preset.undo_compose_document"))
+        if failure is not None:
+            return failure
+
+        count = len(result.drafts[0].paragraphs)
+        self.journal_line(
+            _t("palette.journal_written", before=0, after=count),
+            step=telemetry_steps.DOCUMENT_DONE,
+            **{"body.paragraphs": 0, "result.paragraphs": count,
+               "headings.kept": 0, "append.mode": bool(self.append_mode)})
+        summary = _t("palette.document_composed", count=count)
+        self._stream_response(summary)
+        self.conversation.append("user", instruction, ctx.app)
+        self.conversation.append("assistant", summary, ctx.app)
+        return {"ok": True}
+
+    def _document_model(self):
+        return whole_document.Model(LLMClient(self.shell), prompts.PIPELINE_TEXT_SYSTEM,
+                                    cancel_event=self._cancel, progress=self._progress)
+
+    def _ask_failed(self, result):
+        """Résumé du run quand le modèle n'a rien rendu à écrire : arrêt,
+        erreur ou réponse vide. None sinon."""
+        self._delta_buffer.flush()
+        if self._cancelled():
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if result.error:
+            return self._report_rewrite_failure(result)
+        return None
+
+    def _write_document(self, ctx, document, apply, undo_label):
+        """Écrit d'un seul passage sur le thread principal. Rend le résumé du
+        run quand rien n'a été écrit (arrêt, document modifié), None sinon."""
+        self._progress.set_phase(_t("progress.applying"))
+        outcome = self.dispatcher.call(lambda: whole_document.write(
+            ctx, document, apply, undo_label, self._cancel), timeout=30)
+        if outcome == "stopped":
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if outcome == "changed":
+            self._stream_response(_t("preset.target_changed"))
+            return {"ok": False, "reason": "target_changed"}
+        return None
+
+    def _ask_rewrite(self, model, document, instruction):
+        """Tout le corps d'un seul appel ; au-delà du seuil, section par
+        section, et la palette le dit : une demande globale (« en deux
+        paragraphes ») s'applique alors à chaque section."""
+        limit = whole_document.max_chars(self.shell)
+        span = whole_document.body_span(document)
+        if sum(len(document.texts[i]) for i in span) <= limit:
+            return whole_document.rewrite_whole(model, document, instruction,
+                                                tee=self._stream_response)
+        self._stream_response(_t("palette.rewrite_by_section") + "\n")
+        return whole_document.rewrite(model, document, lambda _originals: instruction,
+                                      limit, tee=self._stream_response)
+
+    def _journal_rewrite_start(self, document, found, headings, append):
+        self.journal_line(_t("palette.journal_read", count=len(document.texts)),
+                          step=telemetry_steps.DOCUMENT_READ,
+                          **{"document.paragraphs": len(document.texts),
                              "document.headings": len(headings)})
         if headings:
             self.journal_line(_t("palette.journal_heading_kept"),
                               detail=f"« {headings[0][:50]} »")
         self.journal_line(
-            _t("palette.journal_rewrite_start", first=first, last=last),
+            _t("palette.journal_rewrite_start",
+               first=found[0].body[0] + 1, last=found[-1].body[-1] + 1),
             step=telemetry_steps.DOCUMENT_START,
-            **{"body.paragraphs": len(body),
-               "append.mode": bool(self.append_mode)})
-        self._progress.set_phase(_t("progress.writing"))
-        self._append_response(_t("palette.assistant_prefix"))
-        llm = LLMClient(self.shell)
-        step = llm.step(
-            [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
-             {"role": "user",
-              "content": doc_rewrite.build_rewrite_prompt(
-                  body, instruction, headings=headings)}],
-            on_text_delta=self._stream_response,
-            cancel_event=self._cancel,
-            progress=self._progress)
-        self._delta_buffer.flush()
+            **{"body.paragraphs": found[-1].body[-1] - found[0].body[0] + 1,
+               "append.mode": bool(append)})
 
-        if self._cancelled():
-            self._report_stop()
-            return {"ok": False, "reason": "cancelled"}
-        if step.error:
-            self._stream_response("⚠ " + error_message(step.error))
-            return {"ok": False, "reason": step.error}
+    @staticmethod
+    def _apply_rewrite(ctx, document, drafts, append):
+        """Thread principal exclusivement. En ajout, l'original reste en place
+        et le résultat suit le dernier paragraphe, entre deux marqueurs."""
+        if append:
+            whole_document.append_block(
+                ctx, document, whole_document.rewritten_lines(document, drafts),
+                "---début-du-texte-réécrit---", "---fin-du-texte-réécrit---")
+        else:
+            whole_document.replace(ctx, document, drafts)
 
-        rewritten = doc_rewrite.parse_rewritten(step.text)
-        if not rewritten:
-            # Dire CE QUI s'est passé : « inexploitable » n'oriente vers aucune
-            # action. Si le modèle a consommé son budget en raisonnement sans
-            # rien répondre — et que la reprise élargie du client n'a pas suffi —
-            # le remède est un autre modèle, pas un autre prompt.
-            if step.starved_by_reasoning:
-                self.journal_line(
-                    _t("palette.journal_budget_starved"),
-                    step=telemetry_steps.REASONING_STARVED,
-                    **{"reasoning.chars": int(step.reasoning_chars),
-                       "finish.reason": "length"})
-                self._stream_response(_t("palette.budget_starved"))
-                return {"ok": False, "reason": "reasoning_starved"}
-            else:
-                self.journal_line(
-                    _t("palette.journal_unusable"),
-                    step=telemetry_steps.DOCUMENT_EMPTY,
-                    **{"reply.chars": len(step.text or ""),
-                       "finish.reason": (step.finish_reason or "unknown")})
-                self._stream_response(_t("palette.unusable"))
-            return {"ok": False, "reason": "empty_reply"}
-
-        self._progress.set_phase(_t("progress.applying"))
-
-        def _apply():
-            if self.append_mode:
-                # L'original est conservé : le résultat s'ajoute après le
-                # dernier paragraphe traité, encadré par des marqueurs.
-                body_text = "\n".join(rewritten)
-                replace_paragraphs(ctx, {
-                    "start": last, "end": last,
-                    "text": "\n".join([originals[last - 1],
-                                       "---début-du-texte-réécrit---",
-                                       body_text,
-                                       "---fin-du-texte-réécrit---"])})
-            else:
-                replace_paragraphs(ctx, {"start": first, "end": last,
-                                         "text": "\n".join(rewritten)})
-            ctx.undo_end()
-
-        # `post` et non `call` : on n'a pas besoin du résultat, et attendre
-        # exposerait au délai d'AsyncCallback décrit plus haut.
-        self.dispatcher.post(_apply)
+    def _report_rewrite_failure(self, result):
+        """Dit pourquoi le document n'a pas été réécrit."""
+        if result.error != "empty_response":
+            self._stream_response("⚠ " + error_message(result.error))
+            return {"ok": False, "reason": result.error}
+        # Dire CE QUI s'est passé : « inexploitable » n'oriente vers aucune
+        # action. Si le modèle a consommé son budget en raisonnement sans
+        # rien répondre — et que la reprise élargie du client n'a pas suffi —
+        # le remède est un autre modèle, pas un autre prompt.
+        step = result.step
+        if step.starved_by_reasoning:
+            self.journal_line(
+                _t("palette.journal_budget_starved"),
+                step=telemetry_steps.REASONING_STARVED,
+                **{"reasoning.chars": int(step.reasoning_chars),
+                   "finish.reason": "length"})
+            self._stream_response(_t("palette.budget_starved"))
+            return {"ok": False, "reason": "reasoning_starved"}
         self.journal_line(
-            _t("palette.journal_written", before=len(body), after=len(rewritten)),
-            step=telemetry_steps.DOCUMENT_DONE,
-            **{"body.paragraphs": len(body),
-               "result.paragraphs": len(rewritten),
-               "headings.kept": len(headings),
-               "append.mode": bool(self.append_mode)})
-        kept = _t("palette.title_kept") if headings else ""
-        how = (_t("palette.how_appended") if self.append_mode
-               else _t("palette.how_rewritten"))
-        summary = _t("palette.document_summary", how=how,
-                     before=len(body), after=len(rewritten), kept=kept)
-        self._stream_response("\n" + summary)
-        self.conversation.append("user", instruction, ctx.app)
-        self.conversation.append("assistant", summary, ctx.app)
-        return {"ok": True}
+            _t("palette.journal_unusable"),
+            step=telemetry_steps.DOCUMENT_EMPTY,
+            **{"reply.chars": len(step.text or ""),
+               "finish.reason": (step.finish_reason or "unknown")})
+        self._stream_response(_t("palette.unusable"))
+        return {"ok": False, "reason": "empty_reply"}
 
     def _prepare_agentic_run(self, preset, prompt_text, ctx):
         """Résout prompt, contexte supplémentaire et destination de la sortie."""

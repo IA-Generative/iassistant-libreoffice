@@ -18,6 +18,7 @@ Ce module ne connaît pas UNO : il reçoit des paragraphes, rend des paragraphes
 
 from __future__ import annotations
 
+import dataclasses
 import re
 
 # Détecter les DEMANDES D'INFORMATION plutôt que les demandes de modification.
@@ -74,20 +75,55 @@ def is_heading(style_name: str) -> bool:
     return any(name.startswith(prefix) for prefix in _HEADING_PREFIXES)
 
 
-def body_range(styles):
-    """(début, fin) 1-indexés des paragraphes de CORPS à réécrire, ou None.
+@dataclasses.dataclass(frozen=True)
+class Section:
+    """Un titre et le corps qui le suit, jusqu'au titre suivant. Index des
+    paragraphes à partir de 0 ; `heading` vaut None pour le texte placé avant
+    le premier titre."""
+    heading: int | None
+    body: tuple
 
-    Les titres sont exclus : réécrire une plage qui commence par un titre y
-    écrase du corps de texte, et comme chaque paragraphe conserve son style,
-    ce corps s'affiche en style Titre. C'est précisément le défaut observé.
-    Les titres restent donc intacts, ce qu'attend d'ailleurs un utilisateur qui
-    demande de « restructurer l'article ».
+
+def sections(texts, styles):
+    """Sections du document dont le corps contient du texte, dans l'ordre.
+
+    Les titres ne sont jamais réécrits : réécrire d'un seul tenant une plage
+    qui contient un titre y écrit du corps de texte, qui prend le style Titre.
+    Le corps va du premier au dernier paragraphe non vide de la section : les
+    paragraphes vides qui l'encadrent espacent souvent un titre de son texte,
+    et la réécriture les laisse en place.
     """
-    indexes = [i for i, style in enumerate(styles, start=1)
-               if not is_heading(style)]
-    if not indexes:
-        return None
-    return indexes[0], indexes[-1]
+    found, heading, body = [], None, []
+    for index, style in enumerate(styles):
+        if is_heading(style):
+            found.append((heading, body))
+            heading, body = index, []
+        else:
+            body.append(index)
+    found.append((heading, body))
+    result = []
+    for heading, body in found:
+        filled = [index for index in body if texts[index].strip()]
+        if filled:
+            result.append(Section(heading, tuple(range(filled[0], filled[-1] + 1))))
+    return result
+
+
+def chunks(texts, indexes, max_chars):
+    """Découpe des paragraphes consécutifs en morceaux d'au plus `max_chars`
+    caractères, un appel au modèle chacun. Un paragraphe n'est jamais coupé :
+    plus long que la limite, il forme son propre morceau."""
+    result, current, size = [], [], 0
+    for index in indexes:
+        length = len(texts[index])
+        if current and size + length > max_chars:
+            result.append(tuple(current))
+            current, size = [], 0
+        current.append(index)
+        size += length
+    if current:
+        result.append(tuple(current))
+    return result
 
 
 def build_rewrite_prompt(paragraphs, instruction: str, headings=None) -> str:
@@ -103,7 +139,7 @@ def build_rewrite_prompt(paragraphs, instruction: str, headings=None) -> str:
         # Le titre est donné pour le CONTEXTE, jamais à réécrire : il garde son
         # style, et le modèle ne doit pas le reprendre dans sa réponse.
         joined = " / ".join(headings)
-        context = (f"TITRE DU DOCUMENT (à NE PAS reprendre dans ta réponse, "
+        context = (f"TITRE (à NE PAS reprendre dans ta réponse, "
                    f"il reste en place) : {joined}\n\n")
     return (
         context +
@@ -117,6 +153,67 @@ def build_rewrite_prompt(paragraphs, instruction: str, headings=None) -> str:
         "- Conserve la langue d'origine.\n"
         "- Ne reprends pas le titre : il n'est pas dans le texte à réécrire."
     )
+
+
+def build_compose_prompt(instruction: str, headings=None) -> str:
+    """Demande de rédaction pour un document sans texte de corps : il n'y a
+    rien à réécrire, le modèle écrit ce que la demande décrit, sous les titres
+    déjà en place."""
+    context = ""
+    if headings:
+        context = (f"TITRES DÉJÀ DANS LE DOCUMENT (à NE PAS reprendre dans ta "
+                   f"réponse, ils restent en place) : {' / '.join(headings)}\n\n")
+    return (
+        context +
+        f"DEMANDE : {instruction}\n\n"
+        "RÈGLES DE RÉPONSE :\n"
+        "- Renvoie UNIQUEMENT le texte demandé, rien d'autre.\n"
+        "- UN paragraphe par ligne, sans ligne vide.\n"
+        "- Pas d'introduction, pas de commentaire, pas de markdown.\n"
+        "- Rédige dans la langue de la demande."
+    )
+
+
+def build_document_prompt(paragraphs, styles, instruction: str, headings=None) -> str:
+    """Demande portant sur tout le corps du document, d'un seul appel : elle
+    garde ainsi son sens global (« en deux paragraphes »). Les titres
+    intérieurs y figurent, marqués « # » ; le modèle les garde ou les retire
+    selon la demande, et `styled_lines` leur rend leur style."""
+    marked = [f"# {text}" if is_heading(style) else text
+              for text, style in zip(paragraphs, styles, strict=True)]
+    prompt = build_rewrite_prompt(marked, instruction, headings=headings)
+    if any(is_heading(style) for style in styles):
+        prompt += ("\n- Seule exception au markdown : une ligne qui commence par "
+                   "« # » est un titre ; si tu le gardes, rends-le sur sa propre "
+                   "ligne, précédé de « # ».")
+    return prompt
+
+
+def styled_lines(answer, originals, styles):
+    """(texte, style) de chaque paragraphe rendu pour `build_document_prompt`.
+
+    Le corps ne prend jamais un style de titre : écrit position par position,
+    il prenait celui du titre intérieur qu'il remplaçait, et ce titre
+    disparaissait. Une ligne « # … » reprend le style du titre d'origine de
+    même texte, sinon celui du premier titre ; une ligne de corps reprend le
+    style du paragraphe de corps à la même place, sinon celui du dernier corps
+    rencontré."""
+    heading_styles = {text.strip().lower(): style
+                      for text, style in zip(originals, styles, strict=True)
+                      if is_heading(style)}
+    first_heading = next((style for style in styles if is_heading(style)), "")
+    body_style = next((style for style in styles if not is_heading(style)), "")
+    result = []
+    for position, line in enumerate(parse_rewritten(answer)):
+        if first_heading and line.startswith("#"):
+            text = line.lstrip("#").strip()
+            if text:
+                result.append((text, heading_styles.get(text.lower(), first_heading)))
+            continue
+        if position < len(styles) and not is_heading(styles[position]):
+            body_style = styles[position]
+        result.append((line, body_style))
+    return result
 
 
 def parse_rewritten(text: str):

@@ -146,7 +146,8 @@ taille moyenne, une demande de réécriture du document donnait `iterations=2` :
 lecture appelée, écriture jamais. Trois renforts de prompt n'y ont rien changé.
 Dès qu'une action DOIT aboutir, elle est pilotée depuis Python — le LLM n'est
 alors qu'une fonction texte et le résultat est appliqué par le code
-(`core/doc_rewrite.py`, même patron que les presets pipeline). Le mode agentique
+(`core/doc_rewrite.py` et `core/whole_document.py`, même patron que les presets
+pipeline). Le mode agentique
 reste pour l'exploration et les demandes ouvertes.
 
 **Bascule vers le chemin déterministe : on énumère les QUESTIONS, pas les
@@ -171,11 +172,22 @@ compteur est une estimation locale (caractères ÷ 4) **marquée `~`**, remplac�
 par la valeur exacte si le relais envoie spontanément un bloc `usage` — jamais
 réclamé, car `stream_options` fait rejeter la requête par certains relais.
 
-**Les titres sortent de la plage réécrite.** Préserver le style de chaque
-paragraphe ne suffit pas : si la plage commence par un titre, le premier bloc
-de corps s'y déverse et s'affiche en style Titre. `doc_rewrite.body_range()`
-borne la réécriture aux paragraphes de corps ; les titres sont donnés au modèle
-comme contexte, avec consigne de ne pas les reprendre.
+**Le corps ne prend jamais le style d'un titre.** Préserver le style de chaque
+paragraphe ne suffit pas : écrite position par position, une plage qui contient
+un titre y déverse du corps de texte, qui s'affiche en style Titre. La demande
+libre sans sélection envoie donc tout le corps d'un seul appel, pour qu'une
+demande globale (« en deux paragraphes ») garde son sens, avec les titres
+intérieurs marqués « # » : le modèle rend ceux qu'il garde et
+`doc_rewrite.styled_lines()` redonne à chaque paragraphe un style de titre ou
+de corps. Au-delà de `document_chunk_max_chars` caractères (20 000 par
+défaut), elle réécrit section par section (`doc_rewrite.sections()` : un titre
+et son corps, jusqu'au titre suivant), titres en place, et la palette le dit.
+`core/whole_document.py` lit le document avant le run et n'écrit qu'une fois la
+dernière réponse reçue, dans une seule action d'annulation, si le document n'a
+pas changé entre-temps.
+Un document sans texte de corps, vide ou fait de titres seuls, n'a rien à
+réécrire : la demande libre y rédige le texte demandé et l'écrit à la fin du
+document, dans le style du corps.
 
 **Écriture de configuration atomique.** `set_config` écrit dans un fichier
 temporaire puis `os.replace`. En place, un lecteur concurrent peut voir un JSON
