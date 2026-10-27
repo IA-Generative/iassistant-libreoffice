@@ -454,7 +454,7 @@ def _simplify_document(ctx, shell, tee, cancel_event, append_mode):
         return _t("palette.empty_document")
     limit = whole_document.max_chars(shell)
     model = whole_document.Model(
-        _text_client(shell, limit + int(shell.get_config("simplify_selection_max_tokens", 15000))),
+        _text_client(shell, int(shell.get_config("simplify_selection_max_tokens", 15000))),
         _simplify_system(shell), cancel_event=cancel_event,
         question_patterns=patterns_absent_from(snapshot.text, SIMPLIFY_QUESTION_PATTERNS),
         stop_phrases=STOP_PHRASES)

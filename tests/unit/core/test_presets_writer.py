@@ -140,6 +140,19 @@ def test_shorten_without_selection_rewrites_each_section_under_its_heading():
     assert message == _t("preset.resized", target=4)
 
 
+def test_simplify_without_selection_asks_the_configured_token_budget():
+    """Le budget de la réponse reste celui de la configuration, quelle que
+    soit la taille des morceaux : il tient dans le contexte du modèle."""
+    doc = _article()
+    shell = FakeShell(config={"simplify_selection_max_tokens": 9000},
+                      responses=[FakeSSEResponse(text_chunks("Le cadre.")),
+                                 FakeSSEResponse(text_chunks("Les nombres."))])
+
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert [request["max_tokens"] for request in shell.requests] == [9000, 9000]
+
+
 def test_shorten_removes_the_surplus_paragraphs_while_changes_are_recorded():
     doc = _article()
     doc.record_changes = True
