@@ -59,6 +59,15 @@ class FakeCursor:
     def write_last(self, text):
         self._anchor.text += text
 
+    def gotoRange(self, position, _expand):
+        self._until = position[1]
+
+    def setString(self, _text):
+        # Le curseur va de la fin d'un paragraphe à la fin d'un suivant :
+        # effacer la plage supprime les paragraphes qu'elle couvre.
+        items = self._doc.items
+        del items[items.index(self._anchor) + 1:items.index(self._until) + 1]
+
 
 class FakeText:
     def __init__(self, doc):
@@ -69,9 +78,6 @@ class FakeText:
 
     def createTextCursorByRange(self, position):
         return FakeCursor(self._doc, position)
-
-    def removeTextContent(self, para):
-        self._doc.items.remove(para)
 
     def insertControlCharacter(self, cursor, _char, _absorb):
         cursor.append_paragraph()

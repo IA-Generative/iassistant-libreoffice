@@ -140,6 +140,17 @@ def test_shorten_without_selection_rewrites_each_section_under_its_heading():
     assert message == _t("preset.resized", target=4)
 
 
+def test_shorten_removes_the_surplus_paragraphs_while_changes_are_recorded():
+    doc = _article()
+    doc.record_changes = True
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte.")),
+                                 FakeSSEResponse(text_chunks("Chiffres, causes."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Rapport", "Contexte.", "Analyse", "Chiffres, causes."]
+
+
 def test_simplify_without_selection_in_append_mode_keeps_the_document():
     doc = _article()
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le cadre.")),

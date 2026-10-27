@@ -132,12 +132,12 @@ def write_paragraphs(body, targets, new_texts, styles=None):
         _set_style(para, style)
 
     if len(new_texts) < len(targets):
-        # Moins de paragraphes qu'avant : vider puis supprimer le surplus.
-        for para in targets[len(new_texts):]:
-            try:
-                body.removeTextContent(para)
-            except Exception:
-                para.setString("")
+        # Moins de paragraphes qu'avant : effacer le surplus d'un seul tenant.
+        # removeTextContent ne supprime rien, sans erreur, quand Writer
+        # enregistre les modifications ; effacer la plage marche dans les deux cas.
+        cursor = body.createTextCursorByRange(targets[len(new_texts) - 1].getEnd())
+        cursor.gotoRange(targets[-1].getEnd(), True)
+        cursor.setString("")
     elif len(new_texts) > len(targets):
         # Plus de paragraphes qu'avant : les ajouter après le dernier, qui
         # sert de modèle de style.

@@ -54,9 +54,20 @@ class FakeBodyCursor:
     def __init__(self, doc, position):
         self._doc = doc
         self.anchor = position.paragraph
+        self._until = None
 
     def getEnd(self):
         return UnoStruct(paragraph=self.anchor)
+
+    def gotoRange(self, position, _expand):
+        self._until = position.paragraph
+
+    def setString(self, _text):
+        # Le curseur va de la fin d'un paragraphe à la fin d'un suivant :
+        # effacer la plage supprime les paragraphes qu'elle couvre.
+        self._doc.record_write()
+        items = self._doc.items
+        del items[items.index(self.anchor) + 1:items.index(self._until) + 1]
 
     def setPropertyValue(self, name, value):
         if name != "ParaStyleName":
@@ -77,6 +88,10 @@ class FakeBodyText:
         return FakeBodyCursor(self._doc, position)
 
     def removeTextContent(self, paragraph):
+        # Comme Writer : quand les modifications sont enregistrées, rien
+        # n'est supprimé et rien ne le signale.
+        if self._doc.record_changes:
+            return
         self._doc.record_write()
         self._doc.items.remove(paragraph)
 
@@ -117,6 +132,7 @@ class FakeBodyDoc:
         self.items = [FakeParagraph(self, text, style)
                       for text, style in zip(paragraphs, styles, strict=True)]
         self.Text = FakeBodyText(self)
+        self.record_changes = False      # Édition > Suivi des modifications > Enregistrer
         self.undo = FakeUndo()
         self.writes = 0
         self.writes_outside_undo = 0
