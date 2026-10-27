@@ -321,7 +321,7 @@
   "palette.applied": "Cambio aplicado.",
   "palette.empty_document": "El documento está vacío.",
   "palette.headings_only": "Este documento solo contiene títulos.",
-  "palette.rewrite_by_section": "Documento largo: la petición se aplica sección por sección.",
+  "palette.rewrite_by_section": "Documento largo: la petición se aplica por partes, sección por sección, dividiendo las más largas.",
   "palette.mode_tools": "Modo de herramientas: {mode}",
   "palette.no_action": "ℹ Ninguna acción sobre el documento — respuesta solo en texto.",
   "palette.capabilities": "   Aquí, el asistente sabe: {tools}.",

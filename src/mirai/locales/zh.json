@@ -321,7 +321,7 @@
   "palette.applied": "修改已应用。",
   "palette.empty_document": "文档为空。",
   "palette.headings_only": "此文档只包含标题。",
-  "palette.rewrite_by_section": "文档较长：该请求将逐节应用。",
+  "palette.rewrite_by_section": "文档较长：该请求将分段应用，逐节进行，过长的节会再拆分。",
   "palette.mode_tools": "工具模式：{mode}",
   "palette.no_action": "ℹ 未对文档执行操作 — 仅返回纯文本。",
   "palette.capabilities": "   此处助手可以：{tools}。",
