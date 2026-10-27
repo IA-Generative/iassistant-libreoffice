@@ -1090,6 +1090,18 @@ def test_a_global_request_applies_to_the_whole_document(palette_module, monkeypa
     assert "# Analyse" in prompt and "Les causes." in prompt
 
 
+def test_the_reasoning_of_a_model_never_reaches_the_document(palette_module, monkeypatch):
+    """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
+    qui suit son bloc <think> est écrit."""
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    _rewrite_document(palette_module, monkeypatch, doc,
+                      ["<think>\nDeux blocs suffisent.\n</think>\nPremier bloc.\nSecond bloc."])
+
+    assert doc.paragraphs == ["Rapport", "Premier bloc.", "Second bloc."]
+
+
 def test_a_heading_the_model_keeps_stays_a_heading(palette_module, monkeypatch):
     from tests.stubs.fake_writer_body import FakeBodyDoc
 

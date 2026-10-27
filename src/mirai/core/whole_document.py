@@ -11,6 +11,7 @@ import dataclasses
 
 from . import doc_rewrite
 from .sinks import DraftSink
+from .text_filters import strip_think_blocks
 from .tools.writer_tools import (
     PARAGRAPH_BREAK,
     _paragraphs,
@@ -104,7 +105,10 @@ class Model:
         sink.finish(step.text, step.streamed)
         if sink.question_detected:
             return Outcome(question=True)
-        if not sink.accumulated.strip():
+        # Les deltas arrivent bruts : un modèle qui raisonne dans le contenu y
+        # laisse ses blocs <think>.
+        text = strip_think_blocks(sink.accumulated)
+        if not text.strip():
             return Outcome(error="empty_response", step=step)
         if step.finish_reason == "length":
             # Écrire une réponse coupée supprimerait les paragraphes qu'elle
@@ -112,7 +116,7 @@ class Model:
             return Outcome(error="truncated", step=step)
         if tee:
             tee("\n")
-        return sink.accumulated
+        return text
 
 
 def rewrite(model, snapshot, instruction_for, limit, tee=None):
