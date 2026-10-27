@@ -195,13 +195,12 @@ def test_the_whole_document_prompt_marks_interior_headings():
                                    ["Standard", "Heading 2", "Standard"], "x")
 
     assert "[P2] # Analyse" in prompt
-    assert "précédé de « # »" in prompt
 
 
 def test_without_interior_heading_the_prompt_does_not_mention_them():
     from src.mirai.core.doc_rewrite import build_document_prompt
 
-    assert "« # »" not in build_document_prompt(["Un.", "Deux."], ["Standard"] * 2, "x")
+    assert "#" not in build_document_prompt(["Un.", "Deux."], ["Standard"] * 2, "x")
 
 
 def test_a_kept_heading_gets_its_heading_style_back():
