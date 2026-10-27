@@ -115,6 +115,7 @@ _PLACEHOLDER_CASES = (
     ("palette.journal_rewrite_start", {"first": 1, "last": 3}),
     ("palette.journal_written", {"before": 3, "after": 3}),
     ("palette.document_summary", {"how": "réécrit", "before": 3, "after": 3, "kept": ""}),
+    ("palette.document_composed", {"count": 2}),
     ("palette.err_generic", {"text": "HTTP 500"}),
     ("run.err_generic", {"code": "http_500"}),
     ("entry.test_failed", {"detail": "erreur"}),

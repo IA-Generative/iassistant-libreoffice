@@ -53,6 +53,7 @@ ERROR_KEYS = {
     "cancelled": "run.stopped",
     # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
     "empty_response": "run.err_empty",
+    "truncated": "run.err_truncated",
     "max_iterations": "run.not_converged",
     # Plafond atteint après un outil mutant : le document a changé, et
     # relancer la demande le réécrirait.

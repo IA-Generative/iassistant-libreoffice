@@ -93,7 +93,7 @@ def get_document_map(ctx, args):
                       data={"paragraph_count": index, "truncated": truncated})
 
 
-def _paragraphs(ctx):
+def document_paragraphs(ctx):
     """Liste les objets paragraphe du document, dans l'ordre."""
     items = []
     enumeration = ctx.model.Text.createEnumeration()
@@ -115,6 +115,50 @@ def paragraph_style(para):
         return ""
 
 
+def write_paragraphs(body, targets, new_texts, styles=None):
+    """Écrit `new_texts` à la place des paragraphes consécutifs `targets`, un
+    paragraphe par texte. Avec `styles`, un par texte, chaque paragraphe prend
+    le sien ; sans, il garde celui qu'il avait. Thread principal exclusivement."""
+    styles = styles or [""] * len(new_texts)
+    # Remplacer PARAGRAPHE PAR PARAGRAPHE, jamais une plage d'un seul geste.
+    # `setString` sur une étendue couvrant plusieurs paragraphes applique le
+    # style du PREMIER à tout le bloc : un document dont [P1] est un titre se
+    # retrouvait intégralement en style titre. Écrire dans chaque paragraphe
+    # séparément préserve le style de chacun.
+    # strict=False assumé : les longueurs diffèrent dès qu'on change le nombre
+    # de paragraphes, et le surplus est traité juste après.
+    for para, new_text, style in zip(targets, new_texts, styles, strict=False):
+        para.setString(new_text)
+        _set_style(para, style)
+
+    if len(new_texts) < len(targets):
+        # Moins de paragraphes qu'avant : effacer le surplus d'un seul tenant.
+        # removeTextContent ne supprime rien, sans erreur, quand Writer
+        # enregistre les modifications ; effacer la plage marche dans les deux cas.
+        cursor = body.createTextCursorByRange(targets[len(new_texts) - 1].getEnd())
+        cursor.gotoRange(targets[-1].getEnd(), True)
+        cursor.setString("")
+    elif len(new_texts) > len(targets):
+        # Plus de paragraphes qu'avant : les ajouter après le dernier, qui
+        # sert de modèle de style.
+        cursor = body.createTextCursorByRange(targets[-1].getEnd())
+        for extra, style in zip(new_texts[len(targets):], styles[len(targets):],
+                                strict=True):
+            body.insertControlCharacter(cursor, PARAGRAPH_BREAK, False)
+            _set_style(cursor, style)
+            body.insertString(cursor, extra, False)
+
+
+def _set_style(target, style):
+    """Style de paragraphe d'un paragraphe ou de celui d'un curseur."""
+    if not style:
+        return
+    try:
+        target.setPropertyValue("ParaStyleName", style)
+    except Exception:
+        pass
+
+
 def replace_paragraphs(ctx, args):
     """Remplace une plage de paragraphes [Pn]…[Pm] par un nouveau texte.
 
@@ -133,7 +177,7 @@ def replace_paragraphs(ctx, args):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"plage de paragraphes invalide : {start}..{end}")
 
-    paragraphs = _paragraphs(ctx)
+    paragraphs = document_paragraphs(ctx)
     if start > len(paragraphs):
         return ToolResult(
             call_id="", ok=False, content="",
@@ -143,32 +187,7 @@ def replace_paragraphs(ctx, args):
     ctx.undo_begin("Réécriture de paragraphes")
     targets = paragraphs[start - 1:end]
     new_texts = text.split("\n")
-
-    # Remplacer PARAGRAPHE PAR PARAGRAPHE, jamais une plage d'un seul geste.
-    # `setString` sur une étendue couvrant plusieurs paragraphes applique le
-    # style du PREMIER à tout le bloc : un document dont [P1] est un titre se
-    # retrouvait intégralement en style titre. Écrire dans chaque paragraphe
-    # séparément préserve le style de chacun.
-    # strict=False assumé : les longueurs diffèrent dès qu'on change le nombre
-    # de paragraphes, et le surplus est traité juste après.
-    for para, new_text in zip(targets, new_texts, strict=False):
-        para.setString(new_text)
-
-    body = ctx.model.Text
-    if len(new_texts) < len(targets):
-        # Moins de paragraphes qu'avant : vider puis supprimer le surplus.
-        for para in targets[len(new_texts):]:
-            try:
-                body.removeTextContent(para)
-            except Exception:
-                para.setString("")
-    elif len(new_texts) > len(targets):
-        # Plus de paragraphes qu'avant : les ajouter après le dernier, qui
-        # sert de modèle de style.
-        cursor = body.createTextCursorByRange(targets[-1].getEnd())
-        for extra in new_texts[len(targets):]:
-            body.insertControlCharacter(cursor, PARAGRAPH_BREAK, False)
-            body.insertString(cursor, extra, False)
+    write_paragraphs(ctx.model.Text, targets, new_texts)
 
     return ToolResult(
         call_id="", ok=True,

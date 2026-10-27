@@ -4,6 +4,7 @@ phrases, retry sur question, undo unique. Assertions portées des
 comportements de menu_actions/writer.py."""
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,7 @@ from tests.stubs.fake_shell import (
     StoppedSSEResponse,
     text_chunks,
 )
+from tests.stubs.fake_writer_body import FakeBodyDoc
 
 SUMMARY_HEADER = "\n\n---début-du-résumé---\n"
 SUMMARY_FOOTER = "\n---fin-du-résumé---\n"
@@ -74,22 +76,204 @@ def test_extend_targets_current_paragraph_without_selection():
     assert prompt == "Le paragraphe en cours de rédaction"
 
 
-def test_summarize_targets_current_paragraph_without_selection():
-    doc = FakeWriterDoc(selection_text="",
-                        current_paragraph="Un paragraphe administratif dense.")
-    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Résumé bref."))])
-    presets.run_summarize(_ctx(doc, shell), shell, "", None)
-    assert "Résumé bref." in doc.inserted
+# Sans sélection : tout le document, section par section, écrit une fois la
+# dernière réponse reçue.
+
+ARTICLE = ["Rapport", "Le contexte.", "Analyse", "Les chiffres.", "Les causes."]
+ARTICLE_STYLES = ["Heading 1", "Standard", "Heading 2", "Standard", "Standard"]
+
+
+def _article():
+    return FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+
+
+@MODES
+def test_summarize_without_selection_adds_a_summary_after_the_document(append_mode):
+    """Le résumé suit le dernier paragraphe, même en mode remplacement : il ne
+    prend jamais la place du document."""
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Les causes expliquent les chiffres."))])
+
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None,
+                                    append_mode=append_mode)
+
+    assert doc.paragraphs == ARTICLE + ["---début-du-résumé---",
+                                        "Les causes expliquent les chiffres.",
+                                        "---fin-du-résumé---"]
+    assert doc.styles[len(ARTICLE):] == ["Standard"] * 3
     prompt = shell.requests[0]["messages"][-1]["content"]
-    assert "Un paragraphe administratif dense." in prompt
+    assert all(text in prompt for text in ARTICLE)
+    assert message == _t("preset.done_summarize_document")
 
 
-def test_shorten_targets_current_paragraph_without_selection():
-    doc = FakeWriterDoc(selection_text="",
-                        current_paragraph=" ".join(f"mot{i}" for i in range(10)))
-    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("court."))])
+def test_a_long_document_is_summarized_section_by_section_then_as_a_whole():
+    doc = _article()
+    shell = FakeShell(config={"document_chunk_max_chars": 30}, responses=[
+        FakeSSEResponse(text_chunks("Contexte posé.")),
+        FakeSSEResponse(text_chunks("Chiffres et causes.")),
+        FakeSSEResponse(text_chunks("Résumé final.")),
+    ])
+    teed = []
+
+    presets.run_summarize(_ctx(doc, shell), shell, "", teed.append)
+
+    final_prompt = shell.requests[-1]["messages"][-1]["content"]
+    assert "Contexte posé.\n\nChiffres et causes." in final_prompt
+    assert "Les chiffres." not in final_prompt
+    assert doc.paragraphs[len(ARTICLE) + 1] == "Résumé final."
+    assert "".join(teed) == "Résumé final.\n"
+
+
+def test_shorten_without_selection_rewrites_each_section_under_its_heading():
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte.")),
+                                 FakeSSEResponse(text_chunks("Chiffres, causes."))])
+
+    message = presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Rapport", "Contexte.", "Analyse", "Chiffres, causes."]
+    assert doc.styles == ["Heading 1", "Standard", "Heading 2", "Standard"]
+    assert "Les causes." in shell.requests[1]["messages"][-1]["content"]
+    assert "Le contexte." not in shell.requests[1]["messages"][-1]["content"]
+    assert doc.undo.entered == [_t("preset.undo_shorten")]
+    assert doc.writes_outside_undo == 0
+    assert message == _t("preset.resized", target=4)
+
+
+@pytest.mark.parametrize("limit", ["beaucoup", 0, -5])
+def test_an_unusable_chunk_limit_falls_back_to_the_default(limit):
+    """Une valeur de configuration qui n'est pas un nombre positif : le
+    document part comme avec le seuil par défaut, une section par appel."""
+    doc = _article()
+    shell = FakeShell(config={"document_chunk_max_chars": limit},
+                      responses=[FakeSSEResponse(text_chunks("Contexte.")),
+                                 FakeSSEResponse(text_chunks("Chiffres, causes."))])
+
     presets.run_shorten(_ctx(doc, shell), shell, "", None)
-    assert doc.replaced == "court."   # le paragraphe est remplacé
+
+    assert doc.paragraphs == ["Rapport", "Contexte.", "Analyse", "Chiffres, causes."]
+    assert len(shell.requests) == 2
+
+
+def test_simplify_without_selection_asks_the_configured_token_budget():
+    """Le budget de la réponse reste celui de la configuration, quelle que
+    soit la taille des morceaux : il tient dans le contexte du modèle."""
+    doc = _article()
+    shell = FakeShell(config={"simplify_selection_max_tokens": 9000},
+                      responses=[FakeSSEResponse(text_chunks("Le cadre.")),
+                                 FakeSSEResponse(text_chunks("Les nombres."))])
+
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert [request["max_tokens"] for request in shell.requests] == [9000, 9000]
+
+
+def test_shorten_removes_the_surplus_paragraphs_while_changes_are_recorded():
+    doc = _article()
+    doc.record_changes = True
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte.")),
+                                 FakeSSEResponse(text_chunks("Chiffres, causes."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Rapport", "Contexte.", "Analyse", "Chiffres, causes."]
+
+
+def test_simplify_without_selection_in_append_mode_keeps_the_document():
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le cadre.")),
+                                 FakeSSEResponse(text_chunks("Les nombres.\nPourquoi."))])
+
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=True)
+
+    assert doc.paragraphs == ARTICLE + [
+        "---reformulation-du-texte---", "Rapport", "Le cadre.", "Analyse",
+        "Les nombres.", "Pourquoi.", "---fin-de-reformulation---"]
+    assert message == _t("preset.done_simplify_document")
+
+
+@pytest.mark.parametrize("second_reply,expected", [
+    (lambda cancel: FakeSSEResponse(text_chunks("Voulez-vous une version plus courte ?")),
+     lambda: _t("preset.question_asked")),
+    (lambda cancel: OSError("connexion refusée"), lambda: error_message("network_error")),
+    (lambda cancel: StoppedSSEResponse(text_chunks("Les ", "nombres."), cancel),
+     lambda: _t("run.stopped")),
+    (lambda cancel: FakeSSEResponse(text_chunks("Les nombres et", finish="length")),
+     lambda: error_message("truncated")),
+], ids=["question", "error", "stopped", "truncated"])
+def test_a_whole_document_action_cut_short_writes_nothing(second_reply, expected):
+    """Une question du modèle, une erreur, un arrêt ou une réponse coupée au
+    plafond de jetons sur une section laisse tout le document tel quel, y
+    compris les sections déjà réécrites."""
+    cancel = threading.Event()
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le cadre.")),
+                                 second_reply(cancel)])
+
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None,
+                                   cancel_event=cancel, append_mode=False)
+
+    assert doc.paragraphs == ARTICLE
+    assert doc.writes == 0
+    assert message == expected()
+
+
+def test_a_document_edited_during_a_whole_document_action_is_left_alone():
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Résumé."))])
+    urlopen = shell.urlopen
+
+    def _user_types_then_model_answers(request, timeout=None):
+        doc.items[1].text = "Le contexte, revu à la main."
+        return urlopen(request, timeout)
+
+    shell.urlopen = _user_types_then_model_answers
+    message = presets.run_summarize(_ctx(doc, shell), shell, "", None)
+
+    assert message == _t("preset.target_changed")
+    assert len(doc.paragraphs) == len(ARTICLE)
+    assert doc.undo.entered == []
+
+
+def test_an_empty_document_is_reported_without_calling_the_model():
+    doc = FakeBodyDoc(["", ""])
+    shell = FakeShell()
+
+    message = presets.run_lengthen(_ctx(doc, shell), shell, "", None)
+
+    assert message == _t("palette.empty_document")
+    assert shell.requests == []
+
+
+def test_the_table_of_contents_is_never_rewritten():
+    """Writer régénère la table des matières : elle n'est ni envoyée au
+    modèle, ni écrite."""
+    doc = FakeBodyDoc(["Table des matières", "Rapport\t1", "Rapport", "Le contexte, en détail."],
+                      ["Contents Heading", "Contents 1", "Heading 1", "Standard"])
+    doc.items[0].index = doc.items[1].index = "Table des matières1"
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le contexte."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Table des matières", "Rapport\t1", "Rapport", "Le contexte."]
+    assert "Rapport\t1" not in shell.requests[0]["messages"][-1]["content"]
+
+
+@pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
+                                    presets.run_shorten, presets.run_lengthen],
+                         ids=["summarize", "simplify", "shorten", "lengthen"])
+def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
+    """Des cellules de tableau sélectionnées : Writer rend un curseur de
+    tableau, pas une plage de texte. Rien n'est envoyé ni écrit."""
+    doc = _article()
+    doc.controller.getSelection = lambda: SimpleNamespace(getRangeName=lambda: "A1:B1")
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert message == _t("sel.no_target")
+    assert doc.paragraphs == ARTICLE
+    assert shell.requests == []
 
 
 def test_stopped_shorten_keeps_the_selection():
