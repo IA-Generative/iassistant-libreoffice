@@ -1003,15 +1003,18 @@ ARTICLE_STYLES = ["Heading 1", "Standard", "Heading 2", "Standard", "Standard"]
 
 
 def _rewrite_document(palette_module, monkeypatch, doc, replies, append=False,
-                      during_request=None, config=None, instruction="mets en majuscules"):
+                      during_request=None, config=None, instruction="mets en majuscules",
+                      finish="stop"):
     """Lance une demande libre sur tout le document, « en majuscules » par
-    défaut ; `during_request(doc)` s'exécute à chaque appel au modèle."""
+    défaut ; `during_request(doc)` s'exécute à chaque appel au modèle, et
+    chaque réponse se termine sur `finish`."""
     from src.mirai.core import whole_document
     from src.mirai.core.context import ToolContext
     from src.mirai.core.llm_client import LLMClient
     from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
-    relay = FakeShell(responses=[FakeSSEResponse(text_chunks(r)) for r in replies])
+    relay = FakeShell(responses=[FakeSSEResponse(text_chunks(r, finish=finish))
+                                 for r in replies])
     urlopen = relay.urlopen
 
     def _urlopen(request, timeout=None):
@@ -1106,6 +1109,21 @@ def test_the_summary_says_a_heading_was_kept_only_when_one_is_left(
                  before=len(texts) - 1 if kept else len(texts), after=2,
                  kept=_t(kept) if kept else "")
     assert palette.conversation.load()[-1]["text"] == summary
+
+
+def test_a_reply_cut_at_the_token_cap_leaves_the_document_alone(palette_module, monkeypatch):
+    from src.mirai.core.orchestrator import error_message
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    palette, _, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["LE CONTEXTE.\n# Analyse\nLES CHIF"],
+        finish="length")
+
+    assert summary == {"ok": False, "reason": "truncated"}
+    assert doc.paragraphs == ARTICLE
+    assert doc.writes == 0
+    assert error_message("truncated") in palette._models["response"].Text
 
 
 def test_a_question_from_the_model_leaves_the_document_alone(palette_module, monkeypatch):
