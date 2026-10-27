@@ -1108,6 +1108,19 @@ def test_the_summary_says_a_heading_was_kept_only_when_one_is_left(
     assert palette.conversation.load()[-1]["text"] == summary
 
 
+def test_a_question_from_the_model_leaves_the_document_alone(palette_module, monkeypatch):
+    from tests.stubs.fake_writer_body import FakeBodyDoc
+
+    doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
+    palette, _, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Pouvez-vous préciser le ton souhaité ?"])
+
+    assert summary == {"ok": False, "reason": "model_question"}
+    assert doc.paragraphs == ARTICLE
+    assert doc.writes == 0
+    assert _t("preset.question_asked") in palette._models["response"].Text
+
+
 def test_the_reasoning_of_a_model_never_reaches_the_document(palette_module, monkeypatch):
     """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
     qui suit son bloc <think> est écrit."""

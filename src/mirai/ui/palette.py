@@ -2028,7 +2028,7 @@ class AssistantPalette:
 
         self._progress.set_phase(_t("progress.writing"))
         self._append_response(_t("palette.assistant_prefix"))
-        result = self._ask_rewrite(self._document_model(), document, instruction)
+        result = self._ask_rewrite(self._document_model(document), document, instruction)
         failure = self._ask_failed(result)
         if failure is None:
             failure = self._write_document(
@@ -2070,7 +2070,7 @@ class AssistantPalette:
                              "document.headings": 0})
         self._progress.set_phase(_t("progress.writing"))
         self._append_response(_t("palette.assistant_prefix"))
-        result = whole_document.compose(self._document_model(), document, instruction,
+        result = whole_document.compose(self._document_model(document), document, instruction,
                                         tee=self._stream_response)
         failure = self._ask_failed(result)
         if failure is None:
@@ -2092,17 +2092,23 @@ class AssistantPalette:
         self.conversation.append("assistant", summary, ctx.app)
         return {"ok": True}
 
-    def _document_model(self):
-        return whole_document.Model(LLMClient(self.shell), prompts.PIPELINE_TEXT_SYSTEM,
-                                    cancel_event=self._cancel, progress=self._progress)
+    def _document_model(self, document):
+        from ..core.text_filters import EXTEND_QUESTION_PATTERNS, patterns_absent_from
+        return whole_document.Model(
+            LLMClient(self.shell), prompts.PIPELINE_TEXT_SYSTEM,
+            cancel_event=self._cancel, progress=self._progress,
+            question_patterns=patterns_absent_from(document.text, EXTEND_QUESTION_PATTERNS))
 
     def _ask_failed(self, result):
         """Résumé du run quand le modèle n'a rien rendu à écrire : arrêt,
-        erreur ou réponse vide. None sinon."""
+        question, erreur ou réponse vide. None sinon."""
         self._delta_buffer.flush()
         if self._cancelled():
             self._report_stop()
             return {"ok": False, "reason": "cancelled"}
+        if result.question:
+            self._stream_response("\n" + _t("preset.question_asked"))
+            return {"ok": False, "reason": "model_question"}
         if result.error:
             return self._report_rewrite_failure(result)
         return None
