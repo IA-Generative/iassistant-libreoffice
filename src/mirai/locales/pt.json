@@ -360,6 +360,7 @@
   "run.err_429": "Cota de solicitações atingida. Tente novamente em instantes.",
   "run.err_network": "O servidor de IA está inacessível. Verifique sua conexão de rede e tente novamente.",
   "run.err_empty": "O assistente não produziu nada. Tente novamente — se persistir, informe.",
+  "run.err_truncated": "A resposta do modelo foi cortada antes do fim: nada foi escrito no documento. Tente uma parte mais curta.",
   "run.err_generic": "Erro do serviço de IA ({code}). Tente novamente.",
   "run.stopped": "Interrompido.",
   "run.not_converged": "O assistente não convergiu — tente novamente especificando a solicitação.",

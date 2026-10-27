@@ -360,6 +360,7 @@
   "run.err_429": "Quota de requêtes atteint. Merci de réessayer dans quelques instants.",
   "run.err_network": "Le serveur IA est injoignable. Vérifiez votre connexion réseau puis réessayez.",
   "run.err_empty": "L'assistant n'a rien produit. Réessayez — si cela persiste, signalez-le.",
+  "run.err_truncated": "La réponse du modèle a été coupée avant la fin : rien n'a été écrit dans le document. Essayez sur une partie plus courte.",
   "run.err_generic": "Erreur du service IA ({code}). Réessayez.",
   "run.stopped": "Arrêté.",
   "run.not_converged": "L'assistant n'a pas convergé — réessayez en précisant la demande.",

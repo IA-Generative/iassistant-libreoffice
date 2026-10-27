@@ -158,10 +158,13 @@ def test_simplify_without_selection_in_append_mode_keeps_the_document():
     (lambda cancel: OSError("connexion refusée"), lambda: error_message("network_error")),
     (lambda cancel: StoppedSSEResponse(text_chunks("Les ", "nombres."), cancel),
      lambda: _t("run.stopped")),
-], ids=["question", "error", "stopped"])
+    (lambda cancel: FakeSSEResponse(text_chunks("Les nombres et", finish="length")),
+     lambda: error_message("truncated")),
+], ids=["question", "error", "stopped", "truncated"])
 def test_a_whole_document_action_cut_short_writes_nothing(second_reply, expected):
-    """Une question du modèle, une erreur ou un arrêt sur une section laisse
-    tout le document tel quel, y compris les sections déjà réécrites."""
+    """Une question du modèle, une erreur, un arrêt ou une réponse coupée au
+    plafond de jetons sur une section laisse tout le document tel quel, y
+    compris les sections déjà réécrites."""
     cancel = threading.Event()
     doc = _article()
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le cadre.")),

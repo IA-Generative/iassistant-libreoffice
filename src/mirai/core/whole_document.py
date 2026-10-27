@@ -106,6 +106,10 @@ class Model:
             return Outcome(question=True)
         if not sink.accumulated.strip():
             return Outcome(error="empty_response", step=step)
+        if step.finish_reason == "length":
+            # Écrire une réponse coupée supprimerait les paragraphes qu'elle
+            # n'a pas atteints.
+            return Outcome(error="truncated", step=step)
         if tee:
             tee("\n")
         return sink.accumulated

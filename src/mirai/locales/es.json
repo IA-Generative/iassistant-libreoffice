@@ -360,6 +360,7 @@
   "run.err_429": "Cuota de solicitudes alcanzada. Inténtelo de nuevo en unos momentos.",
   "run.err_network": "El servidor de IA no es accesible. Compruebe su conexión de red y reintente.",
   "run.err_empty": "El asistente no produjo nada. Reintente — si persiste, repórtelo.",
+  "run.err_truncated": "La respuesta del modelo se cortó antes del final: no se escribió nada en el documento. Pruebe con una parte más corta.",
   "run.err_generic": "Error del servicio de IA ({code}). Reintente.",
   "run.stopped": "Detenido.",
   "run.not_converged": "El asistente no convergió — reintente precisando la solicitud.",

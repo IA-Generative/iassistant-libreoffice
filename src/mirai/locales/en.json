@@ -360,6 +360,7 @@
   "run.err_429": "Request quota reached. Please try again shortly.",
   "run.err_network": "The AI server is unreachable. Check your network connection and try again.",
   "run.err_empty": "The assistant produced nothing. Try again — if it persists, report it.",
+  "run.err_truncated": "The model's reply was cut off before the end: nothing was written to the document. Try a shorter part.",
   "run.err_generic": "AI service error ({code}). Try again.",
   "run.stopped": "Stopped.",
   "run.not_converged": "The assistant did not converge — try again with a more specific request.",

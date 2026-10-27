@@ -360,6 +360,7 @@
   "run.err_429": "请求配额已达上限。请稍后重试。",
   "run.err_network": "无法连接 AI 服务器。请检查网络连接后重试。",
   "run.err_empty": "助手没有生成任何内容。请重试；若持续出现，请报告。",
+  "run.err_truncated": "模型的回复在结束前被截断：文档中未写入任何内容。请尝试较短的部分。",
   "run.err_generic": "AI 服务错误（{code}）。请重试。",
   "run.stopped": "已停止。",
   "run.not_converged": "助手未能收敛 — 请更明确地描述请求后重试。",
