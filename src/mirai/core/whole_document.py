@@ -26,7 +26,13 @@ DEFAULT_MAX_CHARS = 20000
 
 
 def max_chars(shell):
-    return int(shell.get_config("document_chunk_max_chars", DEFAULT_MAX_CHARS))
+    """Le seuil configuré, ou le seuil par défaut s'il n'est pas un nombre
+    positif : à 0, chaque paragraphe partirait dans son propre appel."""
+    try:
+        value = int(shell.get_config("document_chunk_max_chars", DEFAULT_MAX_CHARS))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_CHARS
+    return value if value > 0 else DEFAULT_MAX_CHARS
 
 
 @dataclasses.dataclass

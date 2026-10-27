@@ -140,6 +140,21 @@ def test_shorten_without_selection_rewrites_each_section_under_its_heading():
     assert message == _t("preset.resized", target=4)
 
 
+@pytest.mark.parametrize("limit", ["beaucoup", 0, -5])
+def test_an_unusable_chunk_limit_falls_back_to_the_default(limit):
+    """Une valeur de configuration qui n'est pas un nombre positif : le
+    document part comme avec le seuil par défaut, une section par appel."""
+    doc = _article()
+    shell = FakeShell(config={"document_chunk_max_chars": limit},
+                      responses=[FakeSSEResponse(text_chunks("Contexte.")),
+                                 FakeSSEResponse(text_chunks("Chiffres, causes."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Rapport", "Contexte.", "Analyse", "Chiffres, causes."]
+    assert len(shell.requests) == 2
+
+
 def test_simplify_without_selection_asks_the_configured_token_budget():
     """Le budget de la réponse reste celui de la configuration, quelle que
     soit la taille des morceaux : il tient dans le contexte du modèle."""
