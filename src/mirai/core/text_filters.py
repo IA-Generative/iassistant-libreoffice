@@ -16,7 +16,9 @@ EXTEND_QUESTION_PATTERNS = [
     "voulez-vous que je", "souhaitez-vous que",
 ]
 
-SIMPLIFY_QUESTION_PATTERNS = [
+# Simplifier reconnaît aussi tout ce que reconnaissent les autres actions,
+# demandes de précision comprises.
+SIMPLIFY_QUESTION_PATTERNS = EXTEND_QUESTION_PATTERNS + [
     "would you like", "do you want", "should i", "can i help",
     "voulez-vous", "souhaitez-vous", "dois-je", "puis-je",
 ]

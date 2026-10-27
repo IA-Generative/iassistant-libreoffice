@@ -397,6 +397,28 @@ def test_simplify_question_in_replace_mode_keeps_the_selection():
     assert message == presets._t("preset.question_asked")
 
 
+@pytest.mark.parametrize("question", ["Pouvez-vous préciser le public visé ?",
+                                      "Pouvez-vous clarifier ce point ?",
+                                      "Could you clarify the audience?"])
+def test_simplify_takes_a_request_for_details_as_a_question(question):
+    doc = FakeWriterDoc(selection_text="Texte complexe.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(question))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced is None
+    assert doc.inserted == ""
+    assert message == presets._t("preset.question_asked")
+
+
+def test_simplify_without_selection_takes_a_request_for_details_as_a_question():
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Pouvez-vous préciser le public visé ?"))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.paragraphs == ARTICLE
+    assert doc.writes == 0
+    assert message == presets._t("preset.question_asked")
+
+
 def test_summarize_replace_mode_stops_at_the_stop_phrase():
     doc = FakeWriterDoc(selection_text="Un long texte administratif.")
     shell = FakeShell(responses=[FakeSSEResponse(
