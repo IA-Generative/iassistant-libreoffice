@@ -16,11 +16,12 @@ EXTEND_QUESTION_PATTERNS = [
     "voulez-vous que je", "souhaitez-vous que",
 ]
 
-# Simplifier reconnaît aussi tout ce que reconnaissent les autres actions,
-# demandes de précision comprises.
-SIMPLIFY_QUESTION_PATTERNS = EXTEND_QUESTION_PATTERNS + [
+# Motifs larges seulement : une variante longue (« comment puis-je ») resterait
+# active quand le texte source ne contient que la forme courte.
+SIMPLIFY_QUESTION_PATTERNS = [
     "would you like", "do you want", "should i", "can i help",
     "voulez-vous", "souhaitez-vous", "dois-je", "puis-je",
+    "pouvez-vous préciser", "pouvez-vous clarifier", "could you clarify",
 ]
 
 

@@ -496,6 +496,15 @@ def test_shorten_keeps_a_question_quoted_from_the_text():
     assert doc.replaced == "Comment puis-je obtenir mon attestation ? Allez sur le site."
 
 
+def test_simplify_keeps_a_question_from_the_text_reworded():
+    doc = FakeWriterDoc(selection_text=(
+        "De quelle manière puis-je contester la décision ? Vous disposez de deux mois."))
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Comment puis-je contester la décision ? Vous avez deux mois."))])
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Comment puis-je contester la décision ? Vous avez deux mois."
+
+
 def test_simplify_question_patterns_match_whole_words():
     doc = FakeWriterDoc(selection_text="Les demandeurs doivent fournir des pièces.")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
