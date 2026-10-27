@@ -70,18 +70,32 @@ def _read_target(ctx, current_paragraph=False):
     Rend (texte, plage) ; Writer fait suivre à la plage les modifications du
     document, c'est elle qui recevra le résultat. ("", None) si aucun texte
     n'est ciblable : les actions portent alors sur tout le document.
-    ("", _NOT_TEXT) si la sélection n'est pas du texte : il n'y a rien à
-    faire."""
+    ("", _NOT_TEXT) ou ("", _SEVERAL_RANGES) si la sélection ne se prête pas
+    à l'action : `_refusal` en donne le message."""
     return ctx.on_main(lambda: _read_target_on_main(ctx, current_paragraph))
 
 
 # Sélection qui n'est pas du texte : cellules de tableau, cadre, image.
 _NOT_TEXT = object()
+# Plusieurs passages sélectionnés (Ctrl) : l'action ne traiterait que le premier.
+_SEVERAL_RANGES = object()
+
+
+def _refusal(target):
+    """Message d'une cible sur laquelle l'action ne peut rien faire, sinon None."""
+    if target is _NOT_TEXT:
+        return _t("sel.no_target")
+    if target is _SEVERAL_RANGES:
+        return _t("sel.several_ranges")
+    return None
 
 
 def _read_target_on_main(ctx, current_paragraph):
     try:
-        rng = ctx.controller.getSelection().getByIndex(0)
+        selection = ctx.controller.getSelection()
+        if selection.getCount() > 1:
+            return "", _SEVERAL_RANGES
+        rng = selection.getByIndex(0)
         text = rng.getString()
         if text.strip():
             return text, rng
@@ -153,7 +167,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                       {"action": "extend_selection",
                        "text_length": str(len(base_text))})
     if not base_text:
-        return _t("sel.no_target")
+        return _refusal(target) or _t("sel.no_target")
 
     configured = str(shell.get_config("extend_selection_system_prompt", "") or "").strip()
     directive = (
@@ -226,8 +240,9 @@ def _summary_prompt(text):
 def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True):
     original, target = _read_target(ctx)
-    if target is _NOT_TEXT:
-        return _t("sel.no_target")
+    refusal = _refusal(target)
+    if refusal:
+        return refusal
     if target is None:
         return _summarize_document(ctx, shell, tee, cancel_event)
     _legacy_telemetry(ctx, "SummarizeSelection",
@@ -273,8 +288,9 @@ def _simplify_system(shell):
 def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=True):
     original, target = _read_target(ctx)
-    if target is _NOT_TEXT:
-        return _t("sel.no_target")
+    refusal = _refusal(target)
+    if refusal:
+        return refusal
     if target is None:
         return _simplify_document(ctx, shell, tee, cancel_event, append_mode)
     _legacy_telemetry(ctx, "SimplifySelection",
@@ -323,8 +339,9 @@ _RESIZE_SYSTEM = (
 def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                 append_mode=False):
     original, target_range = _read_target(ctx)
-    if target_range is _NOT_TEXT:
-        return _t("sel.no_target")
+    refusal = _refusal(target_range)
+    if refusal:
+        return refusal
     if target_range is None:
         return _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event,
                                 append_mode)

@@ -276,6 +276,25 @@ def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
     assert shell.requests == []
 
 
+@pytest.mark.parametrize("runner", [presets.run_extend, presets.run_summarize,
+                                    presets.run_simplify, presets.run_shorten,
+                                    presets.run_lengthen],
+                         ids=["extend", "summarize", "simplify", "shorten", "lengthen"])
+def test_several_selected_passages_are_refused_without_calling_the_model(runner):
+    """Une sélection multiple (Ctrl) : l'action ne traiterait que le premier
+    passage. Elle le dit, sans rien envoyer ni écrire."""
+    doc = FakeWriterDoc(selection_text="Premier passage.")
+    doc.controller.getSelection = lambda: SimpleNamespace(
+        getCount=lambda: 2, getByIndex=lambda _i: doc.selection_range)
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None)
+
+    assert message == _t("sel.several_ranges")
+    assert doc.inserted == "" and doc.replaced is None
+    assert shell.requests == []
+
+
 def test_stopped_shorten_keeps_the_selection():
     """« Arrêter » pendant le flux : la sélection n'est pas remplacée par un
     texte tronqué, et l'arrêt est annoncé comme tel."""

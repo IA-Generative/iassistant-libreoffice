@@ -261,6 +261,7 @@
   "sel.writer_selection": "选区：“{excerpt}”",
   "sel.no_selection": "整个文档",
   "sel.no_target": "请将光标置于段落中或选择文本。",
+  "sel.several_ranges": "已选择多个段落：请只选择一个，或不选择以处理整个文档。",
   "sel.calc_cell": "已选单元格（{ref}）",
   "sel.calc_range": "已选择 {count} 个单元格（{first}:{last}）",
   "suggestion.w_summarize": "总结这段文字",
