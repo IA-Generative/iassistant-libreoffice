@@ -231,3 +231,14 @@ def test_a_line_starting_with_a_hash_is_body_text_when_there_was_no_heading():
 
     assert styled_lines("#1 des ventes.", ["Premier des ventes."], ["Standard"]) == [
         ("#1 des ventes.", "Standard")]
+
+
+def test_a_hashtag_under_an_interior_heading_stays_body_text():
+    from src.mirai.core.doc_rewrite import styled_lines
+
+    lines = styled_lines("Le contexte.\n# Réseaux\n#JO2024 a généré deux millions de messages.",
+                         ["Le contexte.", "Réseaux", "#JO2024 a généré deux millions de messages."],
+                         ["Standard", "Heading 2", "Standard"])
+
+    assert lines == [("Le contexte.", "Standard"), ("Réseaux", "Heading 2"),
+                     ("#JO2024 a généré deux millions de messages.", "Standard")]

@@ -189,6 +189,11 @@ def build_document_prompt(paragraphs, styles, instruction: str, headings=None) -
     return prompt
 
 
+# Le marqueur de titre est suivi d'une espace : « #JO2024 » ou « #1 » restent
+# du corps de texte.
+_HEADING_LINE = re.compile(r"#+(?:\s+(.*))?")
+
+
 def styled_lines(answer, originals, styles):
     """(texte, style) de chaque paragraphe rendu pour `build_document_prompt`.
 
@@ -205,8 +210,9 @@ def styled_lines(answer, originals, styles):
     body_style = next((style for style in styles if not is_heading(style)), "")
     result = []
     for position, line in enumerate(parse_rewritten(answer)):
-        if first_heading and line.startswith("#"):
-            text = line.lstrip("#").strip()
+        marked = _HEADING_LINE.fullmatch(line) if first_heading else None
+        if marked:
+            text = (marked.group(1) or "").strip()
             if text:
                 result.append((text, heading_styles.get(text.lower(), first_heading)))
             continue
