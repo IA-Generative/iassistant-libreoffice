@@ -43,13 +43,10 @@ def middle_ellipsis(text: str, limit: int = MAX_EXCERPT) -> str:
 
 
 def writer_label(selected_text: str) -> str:
-    """Libellé Writer : la sélection, ou le document entier sans sélection.
-
-    Sans sélection, le libellé citait le paragraphe sous le curseur. Curseur en
-    tête de document, il affichait donc le TITRE — « Paragraphe courant :
-    « OpenClaw » » — ce qui laissait croire que l'action ne porterait que sur
-    cette ligne. Or sans sélection, demande libre et actions rapides portent
-    toutes sur le document entier.
+    """Libellé Writer : la sélection, ou « Document entier » sans sélection,
+    puisque demande libre et actions rapides portent alors sur tout le
+    document. Le paragraphe sous le curseur n'est jamais cité : en tête de
+    document, ce serait le titre, et l'action semblerait ne viser que lui.
     """
     selected = compact_whitespace(selected_text)
     if selected:
