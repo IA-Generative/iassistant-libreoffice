@@ -14,7 +14,7 @@ from .sinks import DraftSink
 from .text_filters import strip_think_blocks
 from .tools.writer_tools import (
     PARAGRAPH_BREAK,
-    _paragraphs,
+    document_paragraphs,
     paragraph_style,
     write_paragraphs,
 )
@@ -62,7 +62,7 @@ def read(ctx):
 def _body(ctx):
     """Paragraphes du document hors index (table des matières…) : Writer les
     régénère, et l'API les laisse écrire malgré leur protection."""
-    return [p for p in _paragraphs(ctx) if _index_of(p) is None]
+    return [p for p in document_paragraphs(ctx) if _index_of(p) is None]
 
 
 def _index_of(paragraph):

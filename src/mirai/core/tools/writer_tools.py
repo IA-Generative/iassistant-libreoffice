@@ -93,7 +93,7 @@ def get_document_map(ctx, args):
                       data={"paragraph_count": index, "truncated": truncated})
 
 
-def _paragraphs(ctx):
+def document_paragraphs(ctx):
     """Liste les objets paragraphe du document, dans l'ordre."""
     items = []
     enumeration = ctx.model.Text.createEnumeration()
@@ -177,7 +177,7 @@ def replace_paragraphs(ctx, args):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"plage de paragraphes invalide : {start}..{end}")
 
-    paragraphs = _paragraphs(ctx)
+    paragraphs = document_paragraphs(ctx)
     if start > len(paragraphs):
         return ToolResult(
             call_id="", ok=False, content="",
