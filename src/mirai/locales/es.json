@@ -261,6 +261,7 @@
   "sel.writer_selection": "Selección: «{excerpt}»",
   "sel.no_selection": "Documento completo",
   "sel.no_target": "Coloque el cursor en un párrafo o seleccione texto.",
+  "sel.several_ranges": "Hay varios pasajes seleccionados: seleccione solo uno, o ninguno para trabajar en todo el documento.",
   "sel.calc_cell": "Celda seleccionada ({ref})",
   "sel.calc_range": "{count} celdas seleccionadas ({first}:{last})",
   "suggestion.w_summarize": "Resumir este pasaje",

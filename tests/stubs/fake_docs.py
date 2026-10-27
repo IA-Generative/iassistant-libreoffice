@@ -128,7 +128,7 @@ class FakeWriterDoc:
 
         controller = SimpleNamespace()
         controller.getSelection = lambda: SimpleNamespace(
-            getByIndex=lambda i: self.selection_range)
+            getCount=lambda: 1, getByIndex=lambda i: self.selection_range)
         controller.getViewCursor = lambda: MagicMock()
         controller.select = _select
         self.controller = controller

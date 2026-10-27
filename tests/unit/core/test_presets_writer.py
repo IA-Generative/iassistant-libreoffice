@@ -276,6 +276,25 @@ def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
     assert shell.requests == []
 
 
+@pytest.mark.parametrize("runner", [presets.run_extend, presets.run_summarize,
+                                    presets.run_simplify, presets.run_shorten,
+                                    presets.run_lengthen],
+                         ids=["extend", "summarize", "simplify", "shorten", "lengthen"])
+def test_several_selected_passages_are_refused_without_calling_the_model(runner):
+    """Une sélection multiple (Ctrl) : l'action ne traiterait que le premier
+    passage. Elle le dit, sans rien envoyer ni écrire."""
+    doc = FakeWriterDoc(selection_text="Premier passage.")
+    doc.controller.getSelection = lambda: SimpleNamespace(
+        getCount=lambda: 2, getByIndex=lambda _i: doc.selection_range)
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None)
+
+    assert message == _t("sel.several_ranges")
+    assert doc.inserted == "" and doc.replaced is None
+    assert shell.requests == []
+
+
 def test_stopped_shorten_keeps_the_selection():
     """« Arrêter » pendant le flux : la sélection n'est pas remplacée par un
     texte tronqué, et l'arrêt est annoncé comme tel."""
@@ -397,6 +416,28 @@ def test_simplify_question_in_replace_mode_keeps_the_selection():
     assert message == presets._t("preset.question_asked")
 
 
+@pytest.mark.parametrize("question", ["Pouvez-vous préciser le public visé ?",
+                                      "Pouvez-vous clarifier ce point ?",
+                                      "Could you clarify the audience?"])
+def test_simplify_takes_a_request_for_details_as_a_question(question):
+    doc = FakeWriterDoc(selection_text="Texte complexe.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(question))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced is None
+    assert doc.inserted == ""
+    assert message == presets._t("preset.question_asked")
+
+
+def test_simplify_without_selection_takes_a_request_for_details_as_a_question():
+    doc = _article()
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Pouvez-vous préciser le public visé ?"))])
+    message = presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.paragraphs == ARTICLE
+    assert doc.writes == 0
+    assert message == presets._t("preset.question_asked")
+
+
 def test_summarize_replace_mode_stops_at_the_stop_phrase():
     doc = FakeWriterDoc(selection_text="Un long texte administratif.")
     shell = FakeShell(responses=[FakeSSEResponse(
@@ -453,6 +494,15 @@ def test_shorten_keeps_a_question_quoted_from_the_text():
         "Comment puis-je obtenir mon attestation ? Allez sur le site."))])
     presets.run_shorten(_ctx(doc, shell), shell, "", None)
     assert doc.replaced == "Comment puis-je obtenir mon attestation ? Allez sur le site."
+
+
+def test_simplify_keeps_a_question_from_the_text_reworded():
+    doc = FakeWriterDoc(selection_text=(
+        "De quelle manière puis-je contester la décision ? Vous disposez de deux mois."))
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "Comment puis-je contester la décision ? Vous avez deux mois."))])
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=False)
+    assert doc.replaced == "Comment puis-je contester la décision ? Vous avez deux mois."
 
 
 def test_simplify_question_patterns_match_whole_words():

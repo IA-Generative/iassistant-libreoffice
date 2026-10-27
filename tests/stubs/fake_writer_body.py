@@ -138,7 +138,8 @@ class FakeBodyDoc:
         self.writes_outside_undo = 0
         selection = SimpleNamespace(getString=lambda: selection_text)
         self.controller = SimpleNamespace(
-            getSelection=lambda: SimpleNamespace(getByIndex=lambda _i: selection),
+            getSelection=lambda: SimpleNamespace(getCount=lambda: 1,
+                                                 getByIndex=lambda _i: selection),
             getViewCursor=lambda: SimpleNamespace(gotoRange=lambda *_a: None),
             select=lambda _target: None)
         self.CurrentController = self.controller
