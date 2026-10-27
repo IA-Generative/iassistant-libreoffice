@@ -69,8 +69,14 @@ def _read_target(ctx, current_paragraph=False):
 
     Rend (texte, plage) ; Writer fait suivre à la plage les modifications du
     document, c'est elle qui recevra le résultat. ("", None) si aucun texte
-    n'est ciblable : les actions portent alors sur tout le document."""
+    n'est ciblable : les actions portent alors sur tout le document.
+    ("", _NOT_TEXT) si la sélection n'est pas du texte : il n'y a rien à
+    faire."""
     return ctx.on_main(lambda: _read_target_on_main(ctx, current_paragraph))
+
+
+# Sélection qui n'est pas du texte : cellules de tableau, cadre, image.
+_NOT_TEXT = object()
 
 
 def _read_target_on_main(ctx, current_paragraph):
@@ -86,7 +92,7 @@ def _read_target_on_main(ctx, current_paragraph):
         cursor.gotoEndOfParagraph(True)
         paragraph = cursor.getString()
     except Exception:
-        return "", None
+        return "", _NOT_TEXT
     return (paragraph, cursor) if paragraph.strip() else ("", None)
 
 
@@ -220,6 +226,8 @@ def _summary_prompt(text):
 def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True):
     original, target = _read_target(ctx)
+    if target is _NOT_TEXT:
+        return _t("sel.no_target")
     if target is None:
         return _summarize_document(ctx, shell, tee, cancel_event)
     _legacy_telemetry(ctx, "SummarizeSelection",
@@ -265,6 +273,8 @@ def _simplify_system(shell):
 def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=True):
     original, target = _read_target(ctx)
+    if target is _NOT_TEXT:
+        return _t("sel.no_target")
     if target is None:
         return _simplify_document(ctx, shell, tee, cancel_event, append_mode)
     _legacy_telemetry(ctx, "SimplifySelection",
@@ -313,6 +323,8 @@ _RESIZE_SYSTEM = (
 def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                 append_mode=False):
     original, target_range = _read_target(ctx)
+    if target_range is _NOT_TEXT:
+        return _t("sel.no_target")
     if target_range is None:
         return _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event,
                                 append_mode)

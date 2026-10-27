@@ -4,6 +4,7 @@ phrases, retry sur question, undo unique. Assertions portées des
 comportements de menu_actions/writer.py."""
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -202,6 +203,23 @@ def test_an_empty_document_is_reported_without_calling_the_model():
     message = presets.run_lengthen(_ctx(doc, shell), shell, "", None)
 
     assert message == _t("palette.empty_document")
+    assert shell.requests == []
+
+
+@pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
+                                    presets.run_shorten, presets.run_lengthen],
+                         ids=["summarize", "simplify", "shorten", "lengthen"])
+def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
+    """Des cellules de tableau sélectionnées : Writer rend un curseur de
+    tableau, pas une plage de texte. Rien n'est envoyé ni écrit."""
+    doc = _article()
+    doc.controller.getSelection = lambda: SimpleNamespace(getRangeName=lambda: "A1:B1")
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert message == _t("sel.no_target")
+    assert doc.paragraphs == ARTICLE
     assert shell.requests == []
 
 
