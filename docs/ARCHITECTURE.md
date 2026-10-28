@@ -173,7 +173,8 @@ par la valeur exacte si le relais envoie spontanément un bloc `usage` — jamai
 réclamé, car `stream_options` fait rejeter la requête par certains relais.
 Le thread `mirai-pulse` ne touche aucun contrôle : il poste chaque image, et
 une image arrivée après l'arrêt de sa jauge est écartée ; la jauge s'arrête
-avant que l'état final ne s'affiche.
+avant que l'état final ne s'affiche. Chaque chemin de run reçoit la jauge et
+la passe à `llm.step`, les presets par leur paramètre `progress`.
 
 **Le corps ne prend jamais le style d'un titre.** Préserver le style de chaque
 paragraphe ne suffit pas : écrite position par position, une plage qui contient

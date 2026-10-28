@@ -1549,6 +1549,26 @@ def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, m
     assert arrets == []
 
 
+def test_the_gauge_follows_the_reply_of_an_action_button(palette_module):
+    """Le bouton d'action reçoit la jauge du run : elle quitte « Connexion… »
+    dès que le texte du modèle arrive."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    palette = _build(palette_module)
+    palette.shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])
+    palette._progress = palette_module.RunProgress()
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    simplify = next(p for p in presets.PRESETS if p.id == "simplify")
+
+    palette._run_pipeline(simplify, "", ctx, "shown")
+
+    assert palette._progress.phase == _t("progress.writing")
+
+
 def _pinned_main_thread(palette):
     """Les mises à jour de la fenêtre passent par un vrai thread principal,
     comme sous LibreOffice : une tâche postée y attend son tour."""

@@ -11,6 +11,7 @@ import pytest
 from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.orchestrator import error_message
+from src.mirai.core.progress import RunProgress
 from src.mirai.i18n import t as _t
 from tests.stubs.fake_docs import FakeWriterDoc
 from tests.stubs.fake_shell import (
@@ -293,6 +294,23 @@ def test_several_selected_passages_are_refused_without_calling_the_model(runner)
     assert message == _t("sel.several_ranges")
     assert doc.inserted == "" and doc.replaced is None
     assert shell.requests == []
+
+
+@pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
+                                    presets.run_shorten, presets.run_lengthen])
+@pytest.mark.parametrize("whole_document", [False, True], ids=["selection", "document"])
+def test_the_gauge_follows_the_reply_of_a_writer_action(runner, whole_document):
+    """Pendant la génération, la jauge quitte « Connexion… » et compte les
+    jetons du texte reçu."""
+    doc = _article() if whole_document else FakeWriterDoc(selection_text="Un texte à reprendre.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le cadre.")),
+                                 FakeSSEResponse(text_chunks("Les nombres."))])
+    progress = RunProgress()
+
+    runner(_ctx(doc, shell), shell, "", None, progress=progress)
+
+    assert progress.phase == _t("progress.writing")
+    assert progress.tokens > 0
 
 
 def test_stopped_shorten_keeps_the_selection():

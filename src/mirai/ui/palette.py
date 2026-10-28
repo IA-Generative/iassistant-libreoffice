@@ -1895,7 +1895,8 @@ class AssistantPalette:
         message = preset.runner(ctx, self.shell, prompt_text, self._stream_response,
                                 cancel_event=self._cancel,
                                 dispatcher=self.dispatcher,
-                                append_mode=self.append_mode)
+                                append_mode=self.append_mode,
+                                progress=self._progress)
         self._delta_buffer.flush()
         if self._cancelled():
             self._report_stop()

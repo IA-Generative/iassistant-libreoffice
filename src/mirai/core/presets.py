@@ -41,7 +41,7 @@ class Preset:
     needs_input: bool = False     # requiert une instruction tapée dans le prompt
     input_hint_key: str = ""
     # pipeline : fn(ctx, shell, user_text, tee, cancel_event=None,
-    #               dispatcher=None, append_mode=…) -> str
+    #               dispatcher=None, append_mode=…, progress=None) -> str
     runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
     sink_spec: str = "palette"    # agentic : "palette" | "replace_selection" | "auto_edit"
@@ -161,7 +161,7 @@ def _system(specific):
 
 
 def run_extend(ctx, shell, user_text, tee, cancel_event=None,
-               dispatcher=None):
+               dispatcher=None, progress=None):
     base_text, target = _read_target(ctx, current_paragraph=True)
     _legacy_telemetry(ctx, "ExtendSelection",
                       {"action": "extend_selection",
@@ -188,7 +188,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
     step = llm.step([{"role": "system", "content": system_prompt},
                      {"role": "user", "content": base_text}],
                     on_text_delta=sink.stream_delta,
-                    cancel_event=cancel_event)
+                    cancel_event=cancel_event, progress=progress)
     if step.error:
         return error_message(step.error)
 
@@ -211,7 +211,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
         step = llm.step([{"role": "system", "content": retry_system},
                          {"role": "user", "content": retry_prompt}],
                         on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
+                        cancel_event=cancel_event, progress=progress)
         if step.error:
             return error_message(step.error)
     sink.finish(step.text, step.streamed)
@@ -238,13 +238,13 @@ def _summary_prompt(text):
 
 
 def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
-                  dispatcher=None, append_mode=True):
+                  dispatcher=None, append_mode=True, progress=None):
     original, target = _read_target(ctx)
     refusal = _refusal(target)
     if refusal:
         return refusal
     if target is None:
-        return _summarize_document(ctx, shell, tee, cancel_event)
+        return _summarize_document(ctx, shell, tee, cancel_event, progress)
     _legacy_telemetry(ctx, "SummarizeSelection",
                       {"action": "summarize_selection",
                        "text_length": str(len(original))})
@@ -265,7 +265,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
     step = llm.step([{"role": "system", "content": system_prompt},
                      {"role": "user", "content": _summary_prompt(original)}],
                     on_text_delta=sink.stream_delta,
-                    cancel_event=cancel_event)
+                    cancel_event=cancel_event, progress=progress)
     if step.error:
         return error_message(step.error)
     sink.finish(step.text, step.streamed)
@@ -286,13 +286,13 @@ def _simplify_system(shell):
 
 
 def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
-                 dispatcher=None, append_mode=True):
+                 dispatcher=None, append_mode=True, progress=None):
     original, target = _read_target(ctx)
     refusal = _refusal(target)
     if refusal:
         return refusal
     if target is None:
-        return _simplify_document(ctx, shell, tee, cancel_event, append_mode)
+        return _simplify_document(ctx, shell, tee, cancel_event, append_mode, progress)
     _legacy_telemetry(ctx, "SimplifySelection",
                       {"action": "simplify_selection",
                        "text_length": str(len(original))})
@@ -323,7 +323,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
     step = llm.step([{"role": "system", "content": _simplify_system(shell)},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,
-                    cancel_event=cancel_event)
+                    cancel_event=cancel_event, progress=progress)
     if step.error:
         return error_message(step.error)
     sink.finish(step.text, step.streamed)
@@ -337,14 +337,14 @@ _RESIZE_SYSTEM = (
 
 
 def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
-                append_mode=False):
+                append_mode=False, progress=None):
     original, target_range = _read_target(ctx)
     refusal = _refusal(target_range)
     if refusal:
         return refusal
     if target_range is None:
         return _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event,
-                                append_mode)
+                                append_mode, progress)
     _legacy_telemetry(ctx, "ResizeSelection",
                       {"action": "resize_selection",
                        "text_length": str(len(original))})
@@ -370,7 +370,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
     step = llm.step([{"role": "system", "content": _system(_RESIZE_SYSTEM)},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,
-                    cancel_event=cancel_event)
+                    cancel_event=cancel_event, progress=progress)
     if step.error:
         return error_message(step.error)
     sink.finish(step.text, step.streamed)
@@ -378,15 +378,15 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
 
 
 def run_shorten(ctx, shell, user_text, tee, cancel_event=None,
-                dispatcher=None, append_mode=False):
+                dispatcher=None, append_mode=False, progress=None):
     return _run_resize(ctx, shell, 0.65, _t("preset.undo_shorten"), tee, cancel_event,
-                       append_mode=append_mode)
+                       append_mode=append_mode, progress=progress)
 
 
 def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
-                 dispatcher=None, append_mode=False):
+                 dispatcher=None, append_mode=False, progress=None):
     return _run_resize(ctx, shell, 1.4, _t("preset.undo_lengthen"), tee, cancel_event,
-                       append_mode=append_mode)
+                       append_mode=append_mode, progress=progress)
 
 
 # Sans sélection, les actions Writer portent sur tout le document : le modèle
@@ -437,7 +437,7 @@ def _write_rewrite(ctx, snapshot, result, append_mode, undo_label, markers,
                            done_message)
 
 
-def _summarize_document(ctx, shell, tee, cancel_event):
+def _summarize_document(ctx, shell, tee, cancel_event, progress):
     """Le résumé de tout le document, inséré après son dernier paragraphe,
     jamais à sa place."""
     snapshot = _read_document(ctx, "SummarizeSelection", "summarize_selection")
@@ -445,7 +445,7 @@ def _summarize_document(ctx, shell, tee, cancel_event):
         return _t("palette.empty_document")
     model = whole_document.Model(
         _text_client(shell, int(shell.get_config("summarize_selection_max_tokens", 15000))),
-        _system(_SUMMARY_SYSTEM), cancel_event=cancel_event,
+        _system(_SUMMARY_SYSTEM), cancel_event=cancel_event, progress=progress,
         question_patterns=patterns_absent_from(snapshot.text, EXTEND_QUESTION_PATTERNS),
         stop_phrases=STOP_PHRASES)
     result = whole_document.summarize(model, snapshot, _summary_prompt,
@@ -465,14 +465,14 @@ _SIMPLIFY_INSTRUCTION = (
     "que le texte original, ne traduis pas.")
 
 
-def _simplify_document(ctx, shell, tee, cancel_event, append_mode):
+def _simplify_document(ctx, shell, tee, cancel_event, append_mode, progress):
     snapshot = _read_document(ctx, "SimplifySelection", "simplify_selection")
     if snapshot.empty:
         return _t("palette.empty_document")
     limit = whole_document.max_chars(shell)
     model = whole_document.Model(
         _text_client(shell, int(shell.get_config("simplify_selection_max_tokens", 15000))),
-        _simplify_system(shell), cancel_event=cancel_event,
+        _simplify_system(shell), cancel_event=cancel_event, progress=progress,
         question_patterns=patterns_absent_from(snapshot.text, SIMPLIFY_QUESTION_PATTERNS),
         stop_phrases=STOP_PHRASES)
     result = whole_document.rewrite(model, snapshot, lambda _originals: _SIMPLIFY_INSTRUCTION,
@@ -484,7 +484,8 @@ def _simplify_document(ctx, shell, tee, cancel_event, append_mode):
                           cancel_event, done)
 
 
-def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mode):
+def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mode,
+                     progress):
     snapshot = _read_document(ctx, "ResizeSelection", "resize_selection")
     if snapshot.empty:
         return _t("palette.empty_document")
@@ -499,7 +500,7 @@ def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mo
     # Le plus long morceau compte environ un mot pour cinq caractères.
     model = whole_document.Model(
         _text_client(shell, max(1000, int(round(limit / 5 * ratio)) * 4)),
-        _system(_RESIZE_SYSTEM), cancel_event=cancel_event,
+        _system(_RESIZE_SYSTEM), cancel_event=cancel_event, progress=progress,
         question_patterns=patterns_absent_from(snapshot.text, EXTEND_QUESTION_PATTERNS))
     result = whole_document.rewrite(model, snapshot, instruction_for, limit, tee)
     body_words = sum(len(text.split()) for text, style in zip(
@@ -604,7 +605,7 @@ def _transform_message(out_col, transformed, refused, skipped):
 
 
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
-                  dispatcher=None, append_mode=True):
+                  dispatcher=None, append_mode=True, progress=None):
     if not user_text.strip():
         return _t("preset.need_transform_input")
     plan = ctx.on_main(lambda: _read_transform(ctx))
@@ -634,7 +635,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
             step = llm.step([{"role": "system", "content": system_prompt},
                              {"role": "user", "content": prompt}],
                             on_text_delta=sink.stream_delta,
-                            cancel_event=cancel_event)
+                            cancel_event=cancel_event, progress=progress)
             if step.error:
                 interrupted = step.error
                 # Un arrêt n'écrit rien pour la ligne en cours ; une erreur la signale.
@@ -700,7 +701,7 @@ def _write_analysis(sheet, cols, rows, text):
 
 
 def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
-                dispatcher=None, append_mode=True):
+                dispatcher=None, append_mode=True, progress=None):
     sheet, cols, rows, table_text, has_data = ctx.on_main(lambda: _read_table(ctx))
     _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
     if not has_data:
@@ -723,7 +724,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     step = llm.step([{"role": "system", "content": system_prompt},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,
-                    cancel_event=cancel_event)
+                    cancel_event=cancel_event, progress=progress)
     if step.error:
         return error_message(step.error)
     ctx.undo_begin(_t("preset.undo_analyze"))

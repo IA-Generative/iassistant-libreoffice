@@ -10,6 +10,7 @@ from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.llm_client import LLMClient
 from src.mirai.core.orchestrator import Orchestrator, error_message
+from src.mirai.core.progress import RunProgress
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tools import register_all
@@ -204,6 +205,24 @@ def test_analyze_writes_merged_cell_below_selection():
     assert "sous la sélection" in message
     prompt = shell.requests[0]["messages"][-1]["content"]
     assert "Paris | 100" in prompt
+
+
+@pytest.mark.parametrize("runner,instruction", [(presets.run_transform, "en majuscules"),
+                                                (presets.run_analyze, "")],
+                         ids=["transform", "analyze"])
+def test_the_gauge_follows_the_reply_of_a_calc_action(runner, instruction):
+    """Pendant la génération, la jauge quitte « Connexion… » et compte les
+    jetons du texte reçu."""
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("POMME")),
+                                 FakeSSEResponse(text_chunks("POIRE"))])
+    progress = RunProgress()
+
+    runner(_ctx(doc, shell), shell, instruction, None, progress=progress)
+
+    assert progress.phase == _t("progress.writing")
+    assert progress.tokens > 0
 
 
 def test_analyze_empty_selection():
