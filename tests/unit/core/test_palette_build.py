@@ -492,21 +492,6 @@ def test_append_mode_is_remembered(palette_module):
     palette.shell.set_config.assert_called_with("assistant_append_mode", "1")
 
 
-def test_sink_follows_the_choice(palette_module):
-    from src.mirai.core.sinks import WriterInsertSink, WriterReplaceSink
-
-    palette = _build(palette_module)
-    ctx = MagicMock()
-
-    palette.append_mode = False
-    assert isinstance(palette._document_sink(ctx), WriterReplaceSink)
-
-    palette.append_mode = True
-    sink = palette._document_sink(ctx)
-    assert isinstance(sink, WriterInsertSink)
-    assert "début-du-texte-modifié" in sink.header_marker
-
-
 # Journal d'actions
 
 def test_journal_receives_lines_outside_agentic_mode(palette_module):

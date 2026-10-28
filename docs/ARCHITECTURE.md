@@ -125,8 +125,7 @@ mutant, fermé en finally) → l'action complète s'annule d'un Ctrl+Z.
 
 Principe clé (petits modèles) : **la prose longue ne transite jamais en
 argument JSON** — elle est streamée en réponse finale vers un *sink*
-(`sinks.py` : PaletteSink, WriterInsertSink, WriterReplaceSink,
-WriterTargetSink, CalcCellSink).
+(`sinks.py` : PaletteSink, WriterTargetSink, CalcCellSink).
 
 **Les capacités du modèle sont MESURÉES, pas supposées** (`core/capabilities.py`).
 Trois capacités distinctes : le relais accepte `tools` (A), le modèle appelle un

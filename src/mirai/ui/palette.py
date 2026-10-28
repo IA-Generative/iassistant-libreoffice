@@ -63,7 +63,7 @@ from ..core.llm_client import LLMClient
 from ..core.orchestrator import Orchestrator, RunObserver, error_message
 from ..core.progress import RunProgress
 from ..core.registry import ToolRegistry
-from ..core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSink
+from ..core.sinks import PaletteSink
 from ..core.tools import register_all
 from ..core.ui_thread import DispatcherClosed, MainThreadDispatcher
 from ..i18n import t as _t
@@ -224,14 +224,6 @@ class _SelectionWatcher(unohelper.Base,
 
     def disposing(self, _event):
         self._palette.detach_selection_watcher()
-
-
-def _selection_string(ctx):
-    """Texte sélectionné, ou chaîne vide. À n'appeler que sur le thread principal."""
-    try:
-        return ctx.controller.getSelection().getByIndex(0).getString()
-    except Exception:
-        return ""
 
 
 def _writer_targets(model):
@@ -1753,20 +1745,6 @@ class AssistantPalette:
             return False
         return bool(verdict and verdict.supports_agentic)
 
-    def _document_sink(self, ctx):
-        """Destination du texte : remplacer la sélection, ou l'ajouter après.
-
-        Le choix appartient à l'utilisateur (case « Ajouter à la suite ») : les
-        deux usages sont légitimes — remplacer va plus vite, ajouter permet de
-        comparer avant de décider. Les marqueurs reprennent la forme historique.
-        """
-        if self.append_mode:
-            return WriterInsertSink(
-                ctx,
-                "\n\n---début-du-texte-modifié---\n",
-                "\n---fin-du-texte-modifié---\n")
-        return WriterReplaceSink(ctx)
-
     def _document_snapshot(self, ctx, preset, prompt_text):
         """Lit d'avance ce dont le run aura besoin. Thread principal uniquement.
 
@@ -2209,21 +2187,12 @@ class AssistantPalette:
         """Résout prompt, contexte supplémentaire et destination de la sortie."""
         extra = ""
         user_prompt = prompt_text
-        sink = None
         if preset is not None:
             if preset.build_extra:
                 extra = preset.build_extra(ctx, self.shell, prompt_text)
             if preset.prompt_template:
                 user_prompt = preset.prompt_template(prompt_text)
-            if preset.sink_spec == "auto_edit":
-                # Lecture du document → thread principal obligatoire.
-                selection = self.dispatcher.call(
-                    lambda: _selection_string(ctx), timeout=10)
-                if selection.strip():
-                    sink = self._document_sink(ctx)
-        if sink is None:
-            sink = PaletteSink(on_delta=self._stream_response)
-        return extra, user_prompt, sink
+        return extra, user_prompt, PaletteSink(on_delta=self._stream_response)
 
     def _report_stop(self, observer=None):
         """Un arrêt voulu, rendu de la même façon sur chaque chemin de run.
