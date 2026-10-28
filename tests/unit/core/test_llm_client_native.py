@@ -6,6 +6,7 @@ import urllib.error
 import pytest
 
 from src.mirai.core.llm_client import LLMClient, StepResult
+from src.mirai.core.progress import RunProgress
 from src.mirai.core.tool_calls import ToolCall, ToolResult
 from tests.stubs.fake_shell import (
     FakeShell,
@@ -29,6 +30,20 @@ def test_text_only_streams_live():
     assert step.text == "Bonjour"
     assert step.streamed and deltas == ["Bon", "jour"]
     assert step.tool_calls == []
+
+
+def test_a_count_repeated_along_one_reply_is_counted_once():
+    """Un relais peut renvoyer son décompte cumulé sur plusieurs chunks d'une
+    même réponse : la jauge garde le dernier, sans les additionner."""
+    chunks = text_chunks("Bon", "jour")
+    chunks[0]["usage"] = {"completion_tokens": 1}
+    chunks[1]["usage"] = {"completion_tokens": 2}
+    shell = FakeShell(responses=[FakeSSEResponse(chunks)])
+    progress = RunProgress()
+
+    LLMClient(shell).step([{"role": "user", "content": "salut"}], progress=progress)
+
+    assert progress.tokens == 2
 
 
 @pytest.mark.parametrize("tools", [None, TOOLS], ids=["text", "native"])

@@ -168,8 +168,14 @@ sans écriture.
 chips grisés, rotor braille rafraîchi ~200 ms, phase courante (Réflexion /
 Rédaction / Action sur le document), compteur de jetons et chronomètre. Le
 compteur est une estimation locale (caractères ÷ 4) **marquée `~`**, remplacée
-par la valeur exacte si le relais envoie spontanément un bloc `usage` — jamais
-réclamé, car `stream_options` fait rejeter la requête par certains relais.
+appel par appel par la valeur exacte si le relais envoie spontanément un bloc
+`usage` — jamais réclamé, car `stream_options` fait rejeter la requête par
+certains relais. Un run de plusieurs appels additionne leurs décomptes.
+Le thread `mirai-pulse` ne touche aucun contrôle : il poste chaque image, et
+une image arrivée après l'arrêt de sa jauge est écartée ; la jauge s'arrête
+avant que l'état final ne s'affiche. « Arrêter » passe par elle aussi : elle
+tient la phase « Arrêt en cours… » jusqu'à la fin du run. Chaque chemin de run reçoit la jauge et
+la passe à `llm.step`, les presets par leur paramètre `progress`.
 
 **Le corps ne prend jamais le style d'un titre.** Préserver le style de chaque
 paragraphe ne suffit pas : écrite position par position, une plage qui contient

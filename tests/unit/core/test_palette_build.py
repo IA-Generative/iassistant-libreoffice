@@ -13,6 +13,7 @@ méthode inexistante, mauvaise signature.
 
 import gc
 import threading
+import time
 import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -1607,6 +1608,123 @@ def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, m
     palette._progress = palette_module.RunProgress()      # le run a pris la main
     palette._publish_analysis(ancienne)
     assert arrets == []
+
+
+def test_the_gauge_follows_the_reply_of_an_action_button(palette_module):
+    """Le bouton d'action reçoit la jauge du run : elle quitte « Connexion… »
+    dès que le texte du modèle arrive."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    palette = _build(palette_module)
+    palette.shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte simple."))])
+    palette._progress = palette_module.RunProgress()
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    simplify = next(p for p in presets.PRESETS if p.id == "simplify")
+
+    palette._run_pipeline(simplify, "", ctx, "shown")
+
+    assert palette._progress.phase == _t("progress.writing")
+
+
+def _pinned_main_thread(palette):
+    """Les mises à jour de la fenêtre passent par un vrai thread principal,
+    comme sous LibreOffice : une tâche postée y attend son tour."""
+    from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
+
+    dispatcher = ThreadPinnedDispatcher()
+    dispatcher.start_pump = dispatcher.stop_pump = lambda: None
+    palette.dispatcher = dispatcher
+    return dispatcher
+
+
+def test_the_final_status_outlasts_the_gauge_frames(palette_module, monkeypatch):
+    """La jauge tourne encore pendant que le run se termine, ici le temps
+    d'envoyer sa télémétrie : la ligne d'état finit sur « Terminé »."""
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    palette.shell.telemetry.side_effect = lambda *_a: time.sleep(0.02)
+    palette._progress = palette_module.RunProgress()
+
+    def _slow_run(*_args):
+        time.sleep(0.02)
+        return {"ok": True}
+
+    monkeypatch.setattr(palette, "_run_pipeline", _slow_run)
+    palette._start_pulse()
+    palette._run_in_worker(_fake_preset(), "", MagicMock(), "shown")
+    time.sleep(0.01)
+
+    assert main.call(lambda: palette._models["status"].Label) == _t("palette.done")
+    main.close()
+
+
+def test_the_gauge_touches_the_window_only_on_the_main_thread(
+        palette_module, monkeypatch, thread_guard):
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    for name in ("status", "reasoning_toggle", palette_module.REASONING_PANE):
+        palette._models[name] = thread_guard(palette._models[name], main.thread, name)
+    palette.dialog = thread_guard(palette.dialog, main.thread, "dialog")
+    progress = palette_module.RunProgress()
+    progress.on_reasoning("Je pèse le ton.")
+
+    palette._start_pulse(progress)
+    time.sleep(0.02)
+    shown = main.call(lambda: palette._models["status"].Label)
+    palette._stop_pulse()
+    main.close()
+
+    assert _t("progress.thinking") in shown
+
+
+def test_a_stop_request_stays_on_the_status_line(palette_module, monkeypatch):
+    """« Arrêter » pendant que le modèle écrit encore : la ligne d'état
+    annonce l'arrêt jusqu'à la fin du run."""
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    palette._cancel = threading.Event()
+    progress = palette_module.RunProgress()
+    palette._start_pulse(progress)
+
+    main.call(palette._cancel_run)
+    progress.on_text("Encore un mot.")
+    time.sleep(0.02)
+    shown = main.call(lambda: palette._models["status"].Label)
+    palette._stop_pulse()
+    main.close()
+
+    assert _t("palette.stopping") in shown
+
+
+def test_opening_suggestions_during_a_run_keeps_the_run_on_the_status_line(
+        palette_module, monkeypatch):
+    """L'onglet Suggestions ouvert pendant un run n'analyse pas le document :
+    la ligne d'état continue de suivre le run."""
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    monkeypatch.setattr(palette, "_document_text", lambda: "Un texte. " * 60)
+    monkeypatch.setattr(palette_module, "LLMClient",
+                        _client(_Reponse(text="- Ajouter des intertitres")))
+    palette.busy = True
+    progress = palette_module.RunProgress()
+    progress.on_text("Le début de la réponse.")
+    palette._start_pulse(progress)
+
+    main.call(lambda: palette._on_tab_click("suggestions"))
+    time.sleep(0.02)
+    shown = main.call(lambda: palette._models["status"].Label)
+    palette._stop_pulse()
+    main.close()
+
+    assert _t("progress.writing") in shown
 
 
 # Lignes cliquables (Conversation et Suggestions)
