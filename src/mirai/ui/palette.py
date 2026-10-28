@@ -490,6 +490,7 @@ class AssistantPalette:
         self._tab_before_reasoning = None   # onglet à restaurer en refermant
         self._analysis_text = ""       # analyse du document, quand elle arrive
         self._analysis_running = False  # une seule analyse à la fois
+        self._analysis_generation = 0  # change à chaque invalidation
         self._analysis_base = ""       # socle statique, repli si l'analyse échoue
         self._title_shown = ""         # dernier titre posé (évite le clignotement)
         self.append_mode = self._restore_append_mode(shell)
@@ -1313,7 +1314,7 @@ class AssistantPalette:
         Rend True si l'analyse a démarré (lu par les tests).
         """
         # Pendant un run, la ligne d'état appartient à sa jauge et le document
-        # change encore : l'analyse attend la visite suivante de l'onglet.
+        # change encore : l'analyse attend la fin du run.
         if (self.busy or self._analysis_running or self._analysis_text
                 or self.current_app() != "writer"):
             return False
@@ -1333,15 +1334,17 @@ class AssistantPalette:
         # deux animations à deux endroits apprendraient deux habitudes.
         progress = RunProgress(activity=_t("analysis.phase"))
         self._start_pulse(progress)
-        threading.Thread(target=self._analyse_in_worker, args=(messages, progress),
+        threading.Thread(target=self._analyse_in_worker,
+                         args=(messages, progress, self._analysis_generation),
                          daemon=True, name="mirai-doc-analysis").start()
         return True
 
-    def _analyse_in_worker(self, messages, progress):
+    def _analyse_in_worker(self, messages, progress, generation):
         """Interroge le modèle et remplace l'onglet.
 
         Toute sortie anormale laisse les suggestions statiques en place : une
         analyse qui échoue ne doit jamais faire perdre ce qui marchait avant.
+        Une analyse dont le document a changé entre-temps est écartée.
         """
         try:
             step = LLMClient(self.shell,
@@ -1357,6 +1360,10 @@ class AssistantPalette:
                 self.shell.log("[palette] analyse du document : aucune "
                                "proposition exploitable")
                 return
+            if generation != self._analysis_generation:
+                self.shell.log("[palette] analyse du document écartée : "
+                               "le document a changé pendant l'analyse")
+                return
             self.shell.log(f"[palette] analyse du document : {len(items)} proposition(s)")
             self._analysis_text = doc_analysis.render(items)
         except DispatcherClosed:
@@ -1365,10 +1372,12 @@ class AssistantPalette:
             self.shell.log(f"[palette] analyse du document échouée : {exc}")
         finally:
             self._analysis_running = False
-            self._publish_analysis(progress)
+            self._publish_analysis(progress,
+                                   stale=generation != self._analysis_generation)
 
-    def _publish_analysis(self, progress):
-        """Affiche le résultat — ou rend la main au socle statique en cas d'échec."""
+    def _publish_analysis(self, progress, stale=False):
+        """Affiche le résultat — ou rend la main au socle statique en cas d'échec.
+        Une analyse périmée en relance une, si l'onglet est affiché."""
         final = self._analysis_text or self._analysis_base
         # La jauge n'est arrêtée que si elle est encore la NÔTRE : un run
         # démarré entre-temps a posé la sienne, et la couper afficherait un run
@@ -1381,6 +1390,8 @@ class AssistantPalette:
             # La pompe a été armée pour cette analyse : on l'éteint, sauf si un
             # run l'utilise encore — il la gère alors pour son propre compte.
             self.dispatcher.post(self._stop_pump_if_idle)
+            if stale:
+                self.dispatcher.post(self._refresh_if_shown)
         except DispatcherClosed:
             pass
 
@@ -1388,8 +1399,16 @@ class AssistantPalette:
         if not self.busy:
             self.dispatcher.stop_pump()
 
+    def _refresh_if_shown(self):
+        """Thread principal : l'onglet Suggestions affiché relance l'analyse
+        d'un document qui vient de changer."""
+        if self.active_tab == "suggestions":
+            self.refresh_suggestions()
+
     def invalidate_analysis(self):
-        """Le document a changé : l'analyse précédente ne le décrit plus."""
+        """Le document a changé : ni l'analyse précédente ni celle qui tourne
+        encore ne le décrivent."""
+        self._analysis_generation += 1
         self._analysis_text = ""
 
     def _current_suggestions(self):
@@ -1840,7 +1859,7 @@ class AssistantPalette:
             self._set_send_label(running=False)
             # Dernier drain, puis extinction : la pompe ne doit pas tourner
             # au repos.
-            self.dispatcher.post(self.dispatcher.stop_pump)
+            self.dispatcher.post(self._settle_after_run)
             self.shell.log("[palette] run: terminé, interface restaurée")
 
     def _emit_run_span(self, kind, preset, summary, started):
@@ -2222,8 +2241,8 @@ class AssistantPalette:
     def _finish_run(self):
         """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""
         # Un run touche presque toujours au document : l'analyse précédente
-        # décrit alors un état révolu. La suivante sera relancée à la prochaine
-        # visite de l'onglet, plutôt que d'afficher un constat périmé.
+        # décrit alors un état révolu. La suivante part dès la fin du run si
+        # l'onglet est affiché, sinon à sa prochaine visite.
         self.invalidate_analysis()
         if self._cancelled():
             self.set_status(_t("run.stopped"), tone="neutral")
@@ -2231,6 +2250,12 @@ class AssistantPalette:
         self.dispatcher.post(
             lambda: setattr(self._models["prompt"], "Text", ""))
         self.set_status(_t("palette.done"), tone="success")
+
+    def _settle_after_run(self):
+        """Thread principal, run libéré : la pompe s'éteint, et l'onglet
+        Suggestions affiché relance l'analyse du document que le run a modifié."""
+        self.dispatcher.stop_pump()
+        self._refresh_if_shown()
 
     def _set_input_enabled(self, enabled):
         """Grise le champ de saisie et les chips pendant un run.

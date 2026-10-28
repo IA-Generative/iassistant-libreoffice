@@ -1582,6 +1582,81 @@ def test_a_run_invalidates_a_previous_analysis(palette_module):
     assert palette._analysis_text == ""
 
 
+def _hold_analyses(palette, palette_module, monkeypatch, client, doc="Un texte. " * 60):
+    """Les analyses lancées attendent `_finish_analyses` : le test place un
+    run pendant qu'elles tournent."""
+    monkeypatch.setattr(palette, "_document_text", lambda: doc)
+    monkeypatch.setattr(palette_module, "LLMClient", client)
+    held = []
+    monkeypatch.setattr(
+        palette_module.threading, "Thread",
+        lambda target=None, args=(), **kw: type(
+            "T", (), {"start": lambda _s: held.append((target, args))})())
+    return held
+
+
+def _finish_analyses(palette, held):
+    """Termine les analyses lancées jusqu'ici. Rend leur nombre."""
+    analyses = [(t, a) for t, a in held if t == palette._analyse_in_worker]
+    held.clear()
+    for target, args in analyses:
+        target(*args)
+    return len(analyses)
+
+
+def _run_to_the_end(palette, monkeypatch):
+    monkeypatch.setattr(palette, "_run_pipeline", lambda *_a: {"ok": True})
+    palette._run_in_worker(_fake_preset(), "", MagicMock(), "shown")
+
+
+def test_an_analysis_overtaken_by_a_run_is_dropped(palette_module, monkeypatch):
+    """Le run a modifié le document pendant l'analyse : son constat décrit un
+    texte qui n'existe plus, l'onglet garde les suggestions statiques."""
+    palette = _build(palette_module)
+    held = _hold_analyses(palette, palette_module, monkeypatch,
+                          _client(_Reponse(text="- Ajouter des intertitres")))
+    assert palette.start_document_analysis() is True
+
+    _run_to_the_end(palette, monkeypatch)
+    _finish_analyses(palette, held)
+
+    assert palette._analysis_text == ""
+    assert "Ajouter des intertitres" not in palette._models["suggestions"].Text
+
+
+def test_suggestions_left_open_during_a_run_are_analysed_after_it(palette_module, monkeypatch):
+    """L'onglet Suggestions affiché pendant un run : l'analyse du document
+    modifié part dès la fin du run, sans attendre une nouvelle visite."""
+    palette = _build(palette_module)
+    held = _hold_analyses(palette, palette_module, monkeypatch,
+                          _client(_Reponse(text="- Ajouter des intertitres")))
+    palette.busy = True
+    palette._on_tab_click("suggestions")
+    assert _finish_analyses(palette, held) == 0
+
+    _run_to_the_end(palette, monkeypatch)
+
+    assert _finish_analyses(palette, held) == 1
+    assert "Ajouter des intertitres" in palette._models["suggestions"].Text
+
+
+def test_an_overtaken_analysis_is_replaced_while_suggestions_are_shown(
+        palette_module, monkeypatch):
+    """L'analyse écartée laisse place à celle du document modifié, tant que
+    l'onglet Suggestions reste affiché."""
+    palette = _build(palette_module)
+    held = _hold_analyses(palette, palette_module, monkeypatch,
+                          _client(_Reponse(text="- Ajouter des intertitres")))
+    palette._on_tab_click("suggestions")
+    palette.busy = True
+
+    _run_to_the_end(palette, monkeypatch)
+    assert _finish_analyses(palette, held) == 1
+
+    assert _finish_analyses(palette, held) == 1
+    assert "Ajouter des intertitres" in palette._models["suggestions"].Text
+
+
 def test_wait_is_shown_in_the_status_line_like_a_run(palette_module, monkeypatch):
     """Même endroit, même format que le run — une seule habitude à prendre.
 
