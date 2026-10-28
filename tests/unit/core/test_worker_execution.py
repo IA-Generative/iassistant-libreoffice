@@ -13,7 +13,7 @@ from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.orchestrator import Orchestrator, RunObserver
 from src.mirai.core.registry import ToolRegistry
-from src.mirai.core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSink
+from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
 from src.mirai.core.ui_thread import DirectDispatcher
 from tests.stubs.fake_docs import FakeWriterDoc
@@ -124,39 +124,6 @@ def test_undo_context_is_closed_through_the_dispatcher():
 
     assert dispatcher.calls, "undo_end doit passer par le dispatcher"
 
-
-
-def test_writer_sink_never_touches_the_document_from_a_worker(thread_guard):
-    """Le test qui donne son sens à la refonte.
-
-    Le run tourne dans un thread worker ; le document note tout accès venu
-    d'ailleurs que du thread principal simulé. La liste des violations doit
-    rester vide — c'est exactement la garantie que l'ancien code n'avait pas.
-    """
-    dispatcher = ThreadPinnedDispatcher()
-    fake = FakeDoc()
-    doc = thread_guard(fake, dispatcher.thread)
-    ctx = _context(FakeShell(), dispatcher, doc=doc)
-
-    class DocSink(WriterInsertSink):
-        def _start_on_main(self):
-            self._started = True
-
-        def _insert_on_main(self, text):
-            doc.write(text)
-
-    sink = DocSink(ctx, "", "")
-
-    def worker():
-        sink.stream_delta("bon")
-        sink.stream_delta("jour")
-
-    thread = threading.Thread(target=worker, name="mirai-run")
-    thread.start()
-    thread.join(timeout=5)
-    dispatcher.close()
-
-    assert fake.text == "bonjour"
 
 
 def test_undo_context_is_opened_on_the_main_thread(thread_guard):
@@ -336,47 +303,6 @@ def test_closed_dispatcher_interrupts_the_run():
     except DispatcherClosed:
         return
     raise AssertionError("un dispatcher fermé doit lever DispatcherClosed")
-
-
-def test_replace_sink_writes_on_the_main_thread():
-    """Le remplacement de la sélection ne doit jamais partir du worker."""
-    dispatcher = ThreadPinnedDispatcher()
-    written = {}
-
-    class _Target:
-        def setString(self, text):
-            written["text"] = text
-            written["thread"] = threading.current_thread()
-
-    target = _Target()
-
-    class _Selection:
-        def getByIndex(self, _index):
-            return target
-
-    class _Controller:
-        def getSelection(self):
-            return _Selection()
-
-        def select(self, _range):
-            pass
-
-    ctx = _context(FakeShell(), dispatcher)
-    ctx.controller = _Controller()
-    sink = WriterReplaceSink(ctx)
-
-    def worker():
-        sink.stream_delta("texte final")
-        sink.finish("", streamed=True)
-
-    thread = threading.Thread(target=worker, name="mirai-run")
-    thread.start()
-    thread.join(timeout=5)
-    dispatcher.close()
-
-    assert written["text"] == "texte final"
-    assert written["thread"] is dispatcher.thread, (
-        "setString a été appelé depuis le worker au lieu du thread principal")
 
 
 def test_observer_interface_is_optional():

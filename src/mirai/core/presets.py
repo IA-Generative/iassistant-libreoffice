@@ -22,7 +22,7 @@ from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
 from .prompts import PIPELINE_TEXT_SYSTEM
-from .sinks import CalcCellSink, WriterInsertSink, WriterReplaceSink, WriterTargetSink
+from .sinks import CalcCellSink, WriterTargetSink
 from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
     SIMPLIFY_QUESTION_PATTERNS,
@@ -44,7 +44,6 @@ class Preset:
     #               dispatcher=None, append_mode=…, progress=None) -> str
     runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
-    sink_spec: str = "palette"    # agentic : "palette" | "replace_selection" | "auto_edit"
     prompt_template: object = None  # agentic : fn(user_text) -> prompt utilisateur
 
     @property
@@ -114,7 +113,7 @@ def _text_client(shell, max_tokens):
     return LLMClient(shell, max_tokens=max_tokens)
 
 
-def text_sink(ctx, append_mode, header, footer, tee=None, target=None,
+def text_sink(ctx, append_mode, header, footer, target, tee=None,
               cancel_event=None, **kwargs):
     """Où va le texte produit : à la suite entre marqueurs, ou en remplacement.
 
@@ -124,22 +123,11 @@ def text_sink(ctx, append_mode, header, footer, tee=None, target=None,
     le SEUL endroit qui le traduit en destination, pour qu'aucun preset ne
     puisse l'ignorer.
 
-    Avec `target` (plage lue par `_read_target`), le texte ne fait que
-    s'afficher pendant le flux et n'est écrit qu'une fois la réponse complète.
+    `target` est la plage lue avant le run : le texte ne fait que s'afficher
+    pendant le flux et n'est écrit qu'une fois la réponse complète.
     """
-    if target is not None:
-        return WriterTargetSink(ctx, target, append_mode, header, footer,
-                                tee=tee, cancel_event=cancel_event, **kwargs)
-    if append_mode:
-        return WriterInsertSink(ctx, header, footer, tee=tee, **kwargs)
-    return WriterReplaceSink(ctx, tee=tee, **kwargs)
-
-
-def report_question(sink):
-    """Le modèle a posé une question au lieu de produire le texte. Le message
-    de repli suit la destination du sink : dans le document après la sélection
-    pour l'ancien sink d'ajout, dans la palette pour les autres."""
-    sink.insert_message("[Le modèle a posé une question. Veuillez réessayer.]")
+    return WriterTargetSink(ctx, target, append_mode, header, footer,
+                            tee=tee, cancel_event=cancel_event, **kwargs)
 
 
 def _outcome(sink, done_message):

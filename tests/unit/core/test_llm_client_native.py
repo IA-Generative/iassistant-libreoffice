@@ -3,6 +3,8 @@
 import io
 import urllib.error
 
+import pytest
+
 from src.mirai.core.llm_client import LLMClient, StepResult
 from src.mirai.core.tool_calls import ToolCall, ToolResult
 from tests.stubs.fake_shell import (
@@ -27,6 +29,38 @@ def test_text_only_streams_live():
     assert step.text == "Bonjour"
     assert step.streamed and deltas == ["Bon", "jour"]
     assert step.tool_calls == []
+
+
+@pytest.mark.parametrize("tools", [None, TOOLS], ids=["text", "native"])
+def test_a_leading_reasoning_block_never_reaches_the_deltas(tools):
+    """Un modèle qui raisonne dans le contenu de sa réponse : seul ce qui suit
+    son bloc <think> est livré, même quand les balises arrivent coupées."""
+    shell = FakeShell(config={"llm_tool_mode": "native"},
+                      responses=[FakeSSEResponse(text_chunks(
+                          "<thi", "nk>Should I keep the tone?</th", "ink>\n",
+                          "Texte ", "simple."))])
+    deltas = []
+    step = LLMClient(shell).step([{"role": "user", "content": "x"}], tools=tools,
+                                 on_text_delta=deltas.append)
+    assert "".join(deltas) == "Texte simple."
+    assert step.text == "Texte simple." and step.streamed
+
+
+def test_a_reply_cut_inside_its_reasoning_has_no_text():
+    """Plafond atteint pendant le raisonnement : la réponse n'existe pas."""
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "<think>Je pèse chaque mot", finish="length"))])
+    deltas = []
+    step = LLMClient(shell).step([{"role": "user", "content": "x"}],
+                                 on_text_delta=deltas.append)
+    assert deltas == [] and step.text == ""
+
+
+def test_a_reply_that_opens_with_another_tag_streams_live():
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("<b>Gras</b>", " et suite."))])
+    deltas = []
+    LLMClient(shell).step([{"role": "user", "content": "x"}], on_text_delta=deltas.append)
+    assert deltas == ["<b>Gras</b>", " et suite."]
 
 
 def test_native_fragmented_tool_call_assembled():

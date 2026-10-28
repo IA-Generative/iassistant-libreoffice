@@ -1,17 +1,11 @@
-"""La case « Ajouter à la suite » doit piloter TOUTES les destinations.
-
-Elle avait été branchée sur un seul chemin — celui du preset « Modifier » —
-et ce preset a ensuite été retiré des chips. La case est alors restée à
-l'écran sans plus rien commander : cochée ou non, le résultat était le même.
-
-Le remède est structurel : un helper UNIQUE traduit le choix en destination,
-et chaque preset le traverse obligatoirement.
+"""La case « Ajouter à la suite » pilote TOUTES les destinations : un helper
+UNIQUE traduit le choix en destination, et chaque preset le traverse
+obligatoirement.
 """
 
 from unittest.mock import MagicMock
 
 from src.mirai.core.presets import text_sink
-from src.mirai.core.sinks import WriterInsertSink, WriterReplaceSink
 
 
 def _ctx():
@@ -19,22 +13,22 @@ def _ctx():
 
 
 def test_checked_appends_between_markers():
-    sink = text_sink(_ctx(), True, "\n---début---\n", "\n---fin---\n")
+    sink = text_sink(_ctx(), True, "\n---début---\n", "\n---fin---\n", MagicMock())
 
-    assert isinstance(sink, WriterInsertSink)
+    assert sink.append is True
     assert sink.header_marker == "\n---début---\n"
     assert sink.footer_marker == "\n---fin---\n"
 
 
 def test_unchecked_replaces_the_selection():
-    sink = text_sink(_ctx(), False, "\n---début---\n", "\n---fin---\n")
+    sink = text_sink(_ctx(), False, "\n---début---\n", "\n---fin---\n", MagicMock())
 
-    assert isinstance(sink, WriterReplaceSink)
+    assert sink.append is False
 
 
 def test_extra_options_survive_in_append_mode():
     """Stop phrases et détection de question ne doivent pas être perdues."""
-    sink = text_sink(_ctx(), True, "a", "b",
+    sink = text_sink(_ctx(), True, "a", "b", MagicMock(),
                      stop_phrases=["stop"], question_patterns=["?"])
 
     assert sink.stop_phrases == ["stop"]

@@ -415,15 +415,6 @@ def test_simplify_question_in_append_mode_writes_nothing():
     assert doc.undo.entered == []
 
 
-def test_a_sink_without_deltas_writes_the_final_reply_in_append_mode():
-    """Une demande libre sur une sélection streame vers la palette, puis ne
-    passe au sink que le texte final (streamed=True)."""
-    doc = FakeWriterDoc(selection_text="Texte.")
-    sink = presets.text_sink(_ctx(doc, FakeShell()), True, "<début>", "<fin>")
-    sink.finish("Texte modifié.", True)
-    assert doc.inserted == "<début>Texte modifié.<fin>"
-
-
 def test_simplify_question_in_replace_mode_keeps_the_selection():
     doc = FakeWriterDoc(selection_text="Texte complexe.")
     shell = FakeShell(responses=[FakeSSEResponse(
@@ -463,21 +454,6 @@ def test_summarize_replace_mode_stops_at_the_stop_phrase():
     message = presets.run_summarize(_ctx(doc, shell), shell, "", None, append_mode=False)
     assert doc.replaced == "Résumé concis."
     assert message == presets._t("preset.done_summarize_replaced")
-
-
-def test_replace_mode_filters_a_reply_received_in_one_block():
-    doc = FakeWriterDoc(selection_text="Texte.")
-    sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "",
-                             stop_phrases=["[END]"])
-    sink.finish("Résumé. [END] reste", streamed=False)
-    assert doc.replaced == "Résumé."
-
-
-def test_a_sink_without_deltas_writes_the_final_reply_in_replace_mode():
-    doc = FakeWriterDoc(selection_text="Texte.")
-    sink = presets.text_sink(_ctx(doc, FakeShell()), False, "", "")
-    sink.finish("Texte modifié.", True)
-    assert doc.replaced == "Texte modifié."
 
 
 def test_simplify_replace_mode_says_the_selection_was_replaced():
@@ -563,6 +539,20 @@ def test_simplify_normal_flow():
     assert "---reformulation-du-texte---" in doc.inserted
     assert "Texte simple." in doc.inserted
     assert "---fin-de-reformulation---" in doc.inserted
+
+
+@MODES
+def test_the_reasoning_of_a_model_is_never_written_on_a_selection(append_mode):
+    """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
+    qui suit son bloc <think> est écrit, et une question posée dans ce
+    raisonnement n'est pas une question du modèle."""
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "<think>Should I keep the tone?</think>\n", "Texte simple."))])
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=append_mode)
+    written = (doc.inserted if append_mode else doc.replaced) or ""
+    assert "Texte simple." in written
+    assert "Should I" not in written
 
 
 def test_shorten_replaces_selection_and_reselects():
@@ -716,16 +706,6 @@ def test_nothing_is_written_when_the_target_changed_during_the_run(append_mode):
     assert doc.undo.entered == []
     assert "".join(shown) == "Résumé concis."
     assert message == _t("preset.target_changed")
-
-
-@MODES
-def test_the_outcome_reads_the_legacy_sinks_too(append_mode):
-    """Sans cible lue d'avance, `text_sink` rend un ancien sink : le bilan du
-    runner le lit sans erreur."""
-    doc = FakeWriterDoc(selection_text="Texte.")
-    sink = presets.text_sink(_ctx(doc, FakeShell()), append_mode, "", "")
-    sink.stream_delta("Résumé.")
-    assert presets._outcome(sink, "fait") == "fait"
 
 
 def test_a_reply_received_in_one_block_is_filtered_before_the_final_write():
