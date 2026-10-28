@@ -1141,14 +1141,16 @@ def test_a_question_from_the_model_leaves_the_document_alone(palette_module, mon
 
 def test_the_reasoning_of_a_model_never_reaches_the_document(palette_module, monkeypatch):
     """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
-    qui suit son bloc <think> est écrit."""
+    qui suit son bloc <think> est écrit et affiché."""
     from tests.stubs.fake_writer_body import FakeBodyDoc
 
     doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
-    _rewrite_document(palette_module, monkeypatch, doc,
-                      ["<think>\nDeux blocs suffisent.\n</think>\nPremier bloc.\nSecond bloc."])
+    palette, _, _ = _rewrite_document(
+        palette_module, monkeypatch, doc,
+        ["<think>\nDeux blocs suffisent.\n</think>\nPremier bloc.\nSecond bloc."])
 
     assert doc.paragraphs == ["Rapport", "Premier bloc.", "Second bloc."]
+    assert "Deux blocs suffisent." not in "\n".join(palette._current_exchange)
 
 
 def test_a_heading_the_model_keeps_stays_a_heading(palette_module, monkeypatch):

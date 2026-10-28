@@ -11,7 +11,6 @@ import dataclasses
 
 from . import doc_rewrite
 from .sinks import DraftSink
-from .text_filters import strip_think_blocks
 from .tools.writer_tools import (
     PARAGRAPH_BREAK,
     document_paragraphs,
@@ -124,9 +123,7 @@ class Model:
         sink.finish(step.text, step.streamed)
         if sink.question_detected:
             return Outcome(question=True)
-        # Les deltas arrivent bruts : un modèle qui raisonne dans le contenu y
-        # laisse ses blocs <think>.
-        text = strip_think_blocks(sink.accumulated)
+        text = sink.accumulated
         if not text.strip():
             return Outcome(error="empty_response", step=step)
         if step.finish_reason == "length":

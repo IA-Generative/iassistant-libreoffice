@@ -547,6 +547,20 @@ def test_simplify_normal_flow():
     assert "---fin-de-reformulation---" in doc.inserted
 
 
+@MODES
+def test_the_reasoning_of_a_model_is_never_written_on_a_selection(append_mode):
+    """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
+    qui suit son bloc <think> est écrit, et une question posée dans ce
+    raisonnement n'est pas une question du modèle."""
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(
+        "<think>Should I keep the tone?</think>\n", "Texte simple."))])
+    presets.run_simplify(_ctx(doc, shell), shell, "", None, append_mode=append_mode)
+    written = (doc.inserted if append_mode else doc.replaced) or ""
+    assert "Texte simple." in written
+    assert "Should I" not in written
+
+
 def test_shorten_replaces_selection_and_reselects():
     words = " ".join(f"mot{i}" for i in range(20))
     doc = FakeWriterDoc(selection_text=words)

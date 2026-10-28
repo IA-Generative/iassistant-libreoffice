@@ -260,6 +260,9 @@ comme « la demande porte sur le document entier ».
   (fences, `<think>`, virgules traînantes, quotes typographiques) ; deltas
   retenus tant que la réponse ressemble à un tool call, **flush intégral si le
   parse échoue** — la sortie du modèle n'est jamais perdue.
+- Modes texte et natif : un bloc `<think>` en tête de réponse est retenu, les
+  deltas ne livrent que ce qui suit `</think>` ; `StepResult.text` retire tous
+  les blocs, y compris un bloc que le plafond de tokens a laissé ouvert.
 - Clamps max_tokens par modèle réappliqués par la façade
   (`shell_facade.MODEL_TOKEN_LIMITS`) car `make_chat_request` ne les a pas.
 
