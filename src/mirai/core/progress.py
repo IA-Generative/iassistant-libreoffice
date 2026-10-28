@@ -6,8 +6,8 @@ cours, nombre de jetons, durée — sans rien connaître d'UNO : la palette se
 contente de l'afficher.
 
 Comptage des jetons : estimation locale (caractères ÷ 4, contrainte no-pip),
-**remplacée par la valeur exacte** si le relais envoie spontanément un bloc
-`usage`. On ne le réclame jamais — ajouter `stream_options` au corps de la
+**remplacée appel par appel par la valeur exacte** si le relais envoie
+spontanément un bloc `usage`. On ne le réclame jamais — ajouter `stream_options` au corps de la
 requête fait rejeter celle-ci par certains relais.
 """
 
@@ -101,9 +101,13 @@ class RunProgress:
                 self._phase = _t("progress.thinking")
 
     def exact_tokens(self, count):
-        """Valeur faisant autorité, transmise par le relais."""
+        """Jetons comptés par le relais depuis son décompte précédent : ils
+        s'ajoutent au total et remplacent l'estimation de ce qui est arrivé
+        entre-temps."""
         with self._lock:
-            self._exact = int(count)
+            self._exact = (self._exact or 0) + int(count)
+            self._chars = 0
+            self._reasoning_chars = 0
 
     def set_phase(self, phase):
         with self._lock:
@@ -113,14 +117,13 @@ class RunProgress:
     @property
     def tokens(self):
         with self._lock:
-            if self._exact is not None:
-                return self._exact
-            return (self._chars + self._reasoning_chars) // CHARS_PER_TOKEN
+            estimate = (self._chars + self._reasoning_chars) // CHARS_PER_TOKEN
+            return (self._exact or 0) + estimate
 
     @property
     def is_exact(self):
         with self._lock:
-            return self._exact is not None
+            return self._exact is not None and not (self._chars or self._reasoning_chars)
 
     @property
     def tooltip(self):

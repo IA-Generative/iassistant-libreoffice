@@ -225,6 +225,23 @@ def test_the_gauge_follows_the_reply_of_a_calc_action(runner, instruction):
     assert progress.tokens > 0
 
 
+def test_the_gauge_adds_up_what_the_relay_counts_for_each_row():
+    """Un relais qui envoie `usage` compte chaque ligne transformée : la jauge
+    affiche leur total, comme une mesure."""
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[
+        FakeSSEResponse(text_chunks("POMME") + [{"usage": {"completion_tokens": 3}}]),
+        FakeSSEResponse(text_chunks("POIRE") + [{"usage": {"completion_tokens": 4}}])])
+    progress = RunProgress()
+
+    presets.run_transform(_ctx(doc, shell), shell, "en majuscules", None,
+                          progress=progress)
+
+    assert progress.tokens == 7
+    assert progress.is_exact
+
+
 def test_analyze_empty_selection():
     sheet = FakeCalcSheet()
     doc = FakeCalcDoc(sheet, selection_ref="A1:B2")

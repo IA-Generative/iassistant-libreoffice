@@ -257,6 +257,7 @@ class LLMClient:
         finish = [""]
         reasoning_chars = [0]
         chunks = [0]                  # chunks SSE effectivement traités
+        counted = [0]                 # jetons de ce flux déjà comptés par le relais
 
         def _handle_text(content):
             text_parts.append(content)
@@ -287,16 +288,8 @@ class LLMClient:
         def _on_event(event):
             chunks[0] += 1
             chunk = event.chunk
-            # Le relais peut envoyer un bloc `usage` en fin de flux — on le LIT
-            # s'il vient, sans jamais le réclamer : ajouter `stream_options` au
-            # corps ferait rejeter la requête par certains relais.
-            usage = chunk.get("usage")
-            if isinstance(usage, dict) and usage.get("completion_tokens"):
-                progress.exact_tokens(int(usage["completion_tokens"]))
             choices = chunk.get("choices") or []
-            if not choices:
-                return
-            choice = choices[0]
+            choice = choices[0] if choices else {}
             delta = choice.get("delta") or {}
             for fragment in delta.get("tool_calls") or []:
                 index = int(fragment.get("index", 0))
@@ -321,6 +314,17 @@ class LLMClient:
                 progress.on_reasoning(reasoning)
             if choice.get("finish_reason"):
                 finish[0] = choice["finish_reason"]
+            # Le relais peut envoyer un bloc `usage` en fin de flux — on le LIT
+            # s'il vient, sans jamais le réclamer : ajouter `stream_options` au
+            # corps ferait rejeter la requête par certains relais. Son décompte
+            # est cumulé sur la réponse et inclut le texte de son chunk : la
+            # jauge, qui additionne les appels du run, n'en reçoit que la part
+            # nouvelle, une fois ce texte lu.
+            usage = chunk.get("usage")
+            if isinstance(usage, dict) and usage.get("completion_tokens"):
+                total = int(usage["completion_tokens"])
+                progress.exact_tokens(total - counted[0])
+                counted[0] = total
 
         outcome = sse_pump.run_stream(self.shell, _build_request, _on_event,
                                       cancel_event=cancel_event)
