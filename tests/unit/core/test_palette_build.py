@@ -1630,6 +1630,30 @@ def test_the_gauge_follows_the_reply_of_an_action_button(palette_module):
     assert palette._progress.phase == _t("progress.writing")
 
 
+def test_a_reply_cut_by_the_network_is_never_written(palette_module):
+    """La connexion tombe pendant la rédaction : le début de la réponse n'est
+    pas pris pour une réponse complète, la sélection reste intacte et la
+    palette annonce la panne."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from src.mirai.core.orchestrator import error_message
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse
+
+    palette = _build(palette_module)
+    cut = [b'data: {"choices":[{"delta":{"content":"Texte sim"}}]}']
+    palette.shell = FakeShell(responses=[FakeSSEResponse(None, raw_lines=cut)])
+    palette._progress = palette_module.RunProgress()
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    simplify = next(p for p in presets.PRESETS if p.id == "simplify")
+
+    palette._run_in_worker(simplify, "", ctx, "shown")
+
+    assert doc.replaced is None and doc.inserted == ""
+    assert error_message("network_error") in palette._current_exchange[-1]
+
+
 def _pinned_main_thread(palette):
     """Les mises à jour de la fenêtre passent par un vrai thread principal,
     comme sous LibreOffice : une tâche postée y attend son tour."""
