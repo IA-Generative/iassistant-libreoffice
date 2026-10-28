@@ -1828,6 +1828,7 @@ class AssistantPalette:
             else:
                 summary = self._run_agentic(preset, prompt_text, ctx)
             self._delta_buffer.flush()
+            self._stop_pulse()
             self._finish_run()
         except DispatcherClosed:
             summary = {"ok": False, "reason": "palette_closed"}
@@ -1836,6 +1837,7 @@ class AssistantPalette:
             summary = {"ok": False, "reason": "exception"}
             self.shell.log(f"[palette] run error: {exc}")
             self._delta_buffer.flush()
+            self._stop_pulse()
             message = _friendly_error(exc)
             self.set_status(message, tone="error")
             self._append_response(_t("palette.assistant_prefix"), f"⚠ {message}")
@@ -2282,12 +2284,24 @@ class AssistantPalette:
                 progress = self._progress
                 if progress is None:
                     return
-                self.set_reasoning(progress.tooltip)
-                self.set_status(progress.render(), tone="neutral")
+                self._post_pulse_frame(progress, stop)
 
         thread = threading.Thread(target=_tick, daemon=True, name="mirai-pulse")
         self._pulse = (thread, stop)
         thread.start()
+
+    def _post_pulse_frame(self, progress, stop):
+        """Une image de la jauge, appliquée sur le thread principal. Une image
+        publiée juste avant l'arrêt de sa jauge y arrive après l'état final :
+        elle est alors écartée."""
+        tooltip, line = progress.tooltip, progress.render()
+
+        def _apply():
+            if stop.is_set():
+                return
+            self.set_reasoning(tooltip)
+            self.set_status(line, tone="neutral")
+        self.dispatcher.post(_apply)
 
     def _close_reasoning(self):
         """Fin de run : on quitte le panneau et le « ⓘ » s'efface.

@@ -13,6 +13,7 @@ méthode inexistante, mauvaise signature.
 
 import gc
 import threading
+import time
 import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -1546,6 +1547,59 @@ def test_analysis_gauge_is_not_stopped_by_a_run_that_took_over(palette_module, m
     palette._progress = palette_module.RunProgress()      # le run a pris la main
     palette._publish_analysis(ancienne)
     assert arrets == []
+
+
+def _pinned_main_thread(palette):
+    """Les mises à jour de la fenêtre passent par un vrai thread principal,
+    comme sous LibreOffice : une tâche postée y attend son tour."""
+    from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
+
+    dispatcher = ThreadPinnedDispatcher()
+    dispatcher.stop_pump = lambda: None
+    palette.dispatcher = dispatcher
+    return dispatcher
+
+
+def test_the_final_status_outlasts_the_gauge_frames(palette_module, monkeypatch):
+    """La jauge tourne encore pendant que le run se termine, ici le temps
+    d'envoyer sa télémétrie : la ligne d'état finit sur « Terminé »."""
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    palette.shell.telemetry.side_effect = lambda *_a: time.sleep(0.02)
+    palette._progress = palette_module.RunProgress()
+
+    def _slow_run(*_args):
+        time.sleep(0.02)
+        return {"ok": True}
+
+    monkeypatch.setattr(palette, "_run_pipeline", _slow_run)
+    palette._start_pulse()
+    palette._run_in_worker(_fake_preset(), "", MagicMock(), "shown")
+    time.sleep(0.01)
+
+    assert main.call(lambda: palette._models["status"].Label) == _t("palette.done")
+    main.close()
+
+
+def test_the_gauge_touches_the_window_only_on_the_main_thread(
+        palette_module, monkeypatch, thread_guard):
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    for name in ("status", "reasoning_toggle", palette_module.REASONING_PANE):
+        palette._models[name] = thread_guard(palette._models[name], main.thread, name)
+    palette.dialog = thread_guard(palette.dialog, main.thread, "dialog")
+    progress = palette_module.RunProgress()
+    progress.on_reasoning("Je pèse le ton.")
+
+    palette._start_pulse(progress)
+    time.sleep(0.02)
+    shown = main.call(lambda: palette._models["status"].Label)
+    palette._stop_pulse()
+    main.close()
+
+    assert _t("progress.thinking") in shown
 
 
 # Lignes cliquables (Conversation et Suggestions)
