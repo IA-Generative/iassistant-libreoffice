@@ -125,8 +125,7 @@ mutant, fermé en finally) → l'action complète s'annule d'un Ctrl+Z.
 
 Principe clé (petits modèles) : **la prose longue ne transite jamais en
 argument JSON** — elle est streamée en réponse finale vers un *sink*
-(`sinks.py` : PaletteSink, WriterInsertSink, WriterReplaceSink,
-WriterTargetSink, CalcCellSink).
+(`sinks.py` : PaletteSink, WriterTargetSink, CalcCellSink).
 
 **Les capacités du modèle sont MESURÉES, pas supposées** (`core/capabilities.py`).
 Trois capacités distinctes : le relais accepte `tools` (A), le modèle appelle un
@@ -260,6 +259,9 @@ comme « la demande porte sur le document entier ».
   (fences, `<think>`, virgules traînantes, quotes typographiques) ; deltas
   retenus tant que la réponse ressemble à un tool call, **flush intégral si le
   parse échoue** — la sortie du modèle n'est jamais perdue.
+- Modes texte et natif : un bloc `<think>` en tête de réponse est retenu, les
+  deltas ne livrent que ce qui suit `</think>` ; `StepResult.text` retire tous
+  les blocs, y compris un bloc que le plafond de tokens a laissé ouvert.
 - Clamps max_tokens par modèle réappliqués par la façade
   (`shell_facade.MODEL_TOKEN_LIMITS`) car `make_chat_request` ne les a pas.
 

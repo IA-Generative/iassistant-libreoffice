@@ -3,7 +3,10 @@ question des presets."""
 
 import re
 
-_RE_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# Un bloc jamais fermé (plafond de tokens atteint en raisonnant) court jusqu'au
+# bout du texte : il n'y a pas de réponse après lui.
+_RE_THINK = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL | re.IGNORECASE)
+_THINK_OPEN, _THINK_CLOSE = "<think>", "</think>"
 _RE_THINK_DANGLING = re.compile(r"^.*?</think>", re.DOTALL | re.IGNORECASE)
 
 STOP_PHRASES = ["[END]", "---END---"]
@@ -28,6 +31,20 @@ SIMPLIFY_QUESTION_PATTERNS = [
 def strip_think_blocks(text):
     """Retire les blocs <think>…</think> (deepseek-r1 et similaires)."""
     return _RE_THINK.sub("", text).lstrip("\n")
+
+
+def after_leading_think(text):
+    """Ce qu'un flux encore incomplet peut montrer : le texte tel quel s'il
+    ne commence pas par un bloc <think>, ce qui suit le bloc une fois fermé,
+    None tant que le bloc ou sa balise d'ouverture n'est pas fini."""
+    head = text.lstrip()
+    lowered = head.lower()
+    if not lowered.startswith(_THINK_OPEN):
+        return None if _THINK_OPEN.startswith(lowered) else text
+    end = lowered.find(_THINK_CLOSE)
+    if end == -1:
+        return None
+    return head[end + len(_THINK_CLOSE):].lstrip("\n") or None
 
 
 def strip_markdown(text):

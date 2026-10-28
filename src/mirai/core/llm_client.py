@@ -17,7 +17,7 @@ import re
 
 from . import sse_pump, telemetry_steps
 from .progress import NullProgress
-from .text_filters import strip_think_blocks
+from .text_filters import after_leading_think, strip_think_blocks
 from .tool_calls import ToolCall
 
 DEFAULT_STEP_MAX_TOKENS = 4000
@@ -262,12 +262,16 @@ class LLMClient:
             text_parts.append(content)
             if on_text_delta is None:
                 return
-            if not withhold:
-                live[0] = True
-                on_text_delta(content)
-                return
             if live[0]:
                 on_text_delta(content)
+                return
+            if not withhold:
+                # Un modèle qui raisonne dans le contenu commence par un bloc
+                # <think> : rien n'en sort, le flux démarre après lui.
+                visible = after_leading_think("".join(text_parts))
+                if visible is not None:
+                    live[0] = True
+                    on_text_delta(visible)
                 return
             if not decided[0]:
                 accumulated = "".join(text_parts).lstrip()

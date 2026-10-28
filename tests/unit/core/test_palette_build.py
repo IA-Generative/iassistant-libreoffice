@@ -492,21 +492,6 @@ def test_append_mode_is_remembered(palette_module):
     palette.shell.set_config.assert_called_with("assistant_append_mode", "1")
 
 
-def test_sink_follows_the_choice(palette_module):
-    from src.mirai.core.sinks import WriterInsertSink, WriterReplaceSink
-
-    palette = _build(palette_module)
-    ctx = MagicMock()
-
-    palette.append_mode = False
-    assert isinstance(palette._document_sink(ctx), WriterReplaceSink)
-
-    palette.append_mode = True
-    sink = palette._document_sink(ctx)
-    assert isinstance(sink, WriterInsertSink)
-    assert "début-du-texte-modifié" in sink.header_marker
-
-
 # Journal d'actions
 
 def test_journal_receives_lines_outside_agentic_mode(palette_module):
@@ -697,7 +682,7 @@ def test_worker_emits_exactly_one_run_span(palette_module, monkeypatch):
 def test_selection_rewrite_branch_has_its_kind(palette_module, monkeypatch):
     palette = _build(palette_module)
     monkeypatch.setattr(palette, "_run_selection_rewrite",
-                        lambda ctx, prompt, selection: {"ok": True})
+                        lambda ctx, prompt, selection, target: {"ok": True})
     palette._run_in_worker(None, "réécris ce passage", MagicMock(), "shown",
                            snapshot={"rewrite_selection": True,
                                      "selection": "du texte"})
@@ -789,7 +774,8 @@ def test_a_rewrite_stopped_mid_stream_says_stopped(palette_module, monkeypatch, 
     doc = FakeWriterDoc(selection_text="Un paragraphe.",
                         paragraphs=["Un paragraphe."])
     ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
-    snapshot = ({"rewrite_selection": True, "selection": "Un paragraphe."}
+    snapshot = ({"rewrite_selection": True, "selection": "Un paragraphe.",
+                 "target": doc.selection_range}
                 if kind == "selection" else
                 {"rewrite": True, "document": _snapshot(["Un paragraphe."])})
 
@@ -955,7 +941,7 @@ def test_rewrites_keep_the_document_language(palette_module, monkeypatch):
     i18n.set_locale("en")
     palette = _build(palette_module)
     palette._progress = palette_module.RunProgress()
-    palette._run_selection_rewrite(MagicMock(), "shorten", "Some English text.")
+    palette._run_selection_rewrite(MagicMock(), "shorten", "Some English text.", MagicMock())
     palette._run_document_rewrite(
         MagicMock(), "shorten", _snapshot(["First paragraph.", "Second paragraph."]))
 
@@ -985,7 +971,7 @@ def test_rewrites_present_the_document_as_data(palette_module, monkeypatch):
     monkeypatch.setattr(palette_module, "LLMClient", _Client)
     palette = _build(palette_module)
     palette._progress = palette_module.RunProgress()
-    palette._run_selection_rewrite(MagicMock(), "raccourcis", injection)
+    palette._run_selection_rewrite(MagicMock(), "raccourcis", injection, MagicMock())
     palette._run_document_rewrite(
         MagicMock(), "raccourcis", _snapshot(["Premier paragraphe.", injection]))
 
@@ -1141,14 +1127,16 @@ def test_a_question_from_the_model_leaves_the_document_alone(palette_module, mon
 
 def test_the_reasoning_of_a_model_never_reaches_the_document(palette_module, monkeypatch):
     """Un modèle qui raisonne dans le contenu de sa réponse : seul le texte
-    qui suit son bloc <think> est écrit."""
+    qui suit son bloc <think> est écrit et affiché."""
     from tests.stubs.fake_writer_body import FakeBodyDoc
 
     doc = FakeBodyDoc(ARTICLE, ARTICLE_STYLES)
-    _rewrite_document(palette_module, monkeypatch, doc,
-                      ["<think>\nDeux blocs suffisent.\n</think>\nPremier bloc.\nSecond bloc."])
+    palette, _, _ = _rewrite_document(
+        palette_module, monkeypatch, doc,
+        ["<think>\nDeux blocs suffisent.\n</think>\nPremier bloc.\nSecond bloc."])
 
     assert doc.paragraphs == ["Rapport", "Premier bloc.", "Second bloc."]
+    assert "Deux blocs suffisent." not in "\n".join(palette._current_exchange)
 
 
 def test_a_heading_the_model_keeps_stays_a_heading(palette_module, monkeypatch):
@@ -1231,31 +1219,104 @@ def test_a_document_longer_than_the_limit_is_rewritten_section_by_section(
     assert _t("palette.rewrite_by_section") in palette._models["response"].Text
 
 
-def test_a_free_prompt_question_keeps_the_selection(palette_module, monkeypatch):
+# Demande libre sur une sélection : la cible est lue au lancement, la réponse
+# écrite une fois complète, en une seule action d'annulation.
+
+def _rewrite_selection(palette_module, monkeypatch, replies, append=False,
+                       during_request=None):
+    """Lance une demande libre sur la sélection « Un paragraphe. » ; le modèle
+    répond `replies` delta par delta, `during_request(doc)` s'exécute pendant
+    l'appel."""
     from src.mirai.core.context import ToolContext
+    from src.mirai.core.llm_client import LLMClient
     from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
-    reply = "Pouvez-vous préciser le ton souhaité ?"
+    doc = FakeWriterDoc(selection_text="Un paragraphe.")
+    relay = FakeShell(responses=[FakeSSEResponse(text_chunks(*replies))])
+    urlopen = relay.urlopen
 
-    class _Client:
-        def __init__(self, _shell, max_tokens=None):
-            pass
+    def _urlopen(request, timeout=None):
+        if during_request:
+            during_request(doc)
+        return urlopen(request, timeout)
 
-        def step(self, messages, on_text_delta=None, **_kwargs):
-            on_text_delta(reply)
-            return SimpleNamespace(error=None, text=reply, streamed=True)
-
-    monkeypatch.setattr(palette_module, "LLMClient", _Client)
+    relay.urlopen = _urlopen
+    monkeypatch.setattr(palette_module, "LLMClient",
+                        lambda _shell, max_tokens=None: LLMClient(relay))
     palette = _build(palette_module)
     palette._progress = palette_module.RunProgress()
-    palette.append_mode = False
-    doc = FakeWriterDoc(selection_text="Un paragraphe.")
+    palette.append_mode = append
     ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    summary = palette._run_selection_rewrite(ctx, "reformule", "Un paragraphe.",
+                                             doc.selection_range)
+    palette._delta_buffer.flush()
+    return palette, doc, summary
 
-    summary = palette._run_selection_rewrite(ctx, "reformule", "Un paragraphe.")
 
-    assert doc.replaced is None
+@pytest.mark.parametrize("append", [True, False], ids=["append", "replace"])
+def test_a_free_request_on_a_selection_is_one_undo_action_after_the_reply(
+        palette_module, monkeypatch, append):
+    """Rien n'est ouvert dans l'annulation pendant l'appel au modèle : la
+    réponse s'écrit ensuite, en une seule action."""
+    undo_during_call = []
+    _, doc, summary = _rewrite_selection(
+        palette_module, monkeypatch, ["Un ", "texte."], append=append,
+        during_request=lambda doc: undo_during_call.append(list(doc.undo.entered)))
+
+    assert undo_during_call == [[]]
+    assert doc.undo.entered == [_t("preset.undo_edit_selection")]
+    assert doc.undo.left == 1
+    assert "Un texte." in (doc.inserted if append else doc.replaced)
+    assert summary == {"ok": True}
+
+
+def test_a_free_request_writes_to_the_selection_read_at_launch(palette_module, monkeypatch):
+    """L'utilisateur sélectionne un autre passage pendant l'appel : la réponse
+    remplace le passage de départ, l'autre reste intact."""
+    from tests.stubs.fake_docs import FakeTextRange
+
+    ranges = {}
+
+    def _select_elsewhere(doc):
+        ranges["start"] = doc.selection_range
+        ranges["other"] = doc.selection_range = FakeTextRange(doc, "Autre passage.")
+
+    _rewrite_selection(palette_module, monkeypatch, ["Un texte."],
+                       during_request=_select_elsewhere)
+
+    assert ranges["start"].getString() == "Un texte."
+    assert ranges["other"].getString() == "Autre passage."
+
+
+def test_a_selection_edited_during_the_run_is_left_alone(palette_module, monkeypatch):
+    palette, doc, summary = _rewrite_selection(
+        palette_module, monkeypatch, ["Un texte."],
+        during_request=lambda doc: doc.selection_range.setString("Mon ajout."))
+
+    assert doc.selection_range.getString() == "Mon ajout."
+    assert summary == {"ok": False, "reason": "target_changed"}
+    assert _t("preset.target_changed") in "\n".join(palette._current_exchange)
+
+
+@pytest.mark.parametrize("append", [True, False], ids=["append", "replace"])
+def test_a_free_prompt_question_keeps_the_selection(palette_module, monkeypatch, append):
+    """Une question du modèle n'écrit rien dans le document, ni à la place de
+    la sélection ni après elle."""
+    palette, doc, summary = _rewrite_selection(
+        palette_module, monkeypatch, ["Pouvez-vous préciser le ton souhaité ?"],
+        append=append)
+
+    assert doc.replaced is None and doc.inserted == ""
     assert summary == {"ok": False, "reason": "model_question"}
+    assert _t("preset.question_asked") in "\n".join(palette._current_exchange)
+
+
+def test_a_free_request_never_writes_the_reasoning_of_a_model(palette_module, monkeypatch):
+    _, doc, _ = _rewrite_selection(
+        palette_module, monkeypatch, ["<think>Faut-il garder le ton ?</think>\n", "Un texte."])
+
+    assert doc.replaced == "Un texte."
 
 
 # Refus de lancement
