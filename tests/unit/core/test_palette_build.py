@@ -1636,7 +1636,7 @@ def _pinned_main_thread(palette):
     from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
 
     dispatcher = ThreadPinnedDispatcher()
-    dispatcher.stop_pump = lambda: None
+    dispatcher.start_pump = dispatcher.stop_pump = lambda: None
     palette.dispatcher = dispatcher
     return dispatcher
 
@@ -1701,6 +1701,30 @@ def test_a_stop_request_stays_on_the_status_line(palette_module, monkeypatch):
     main.close()
 
     assert _t("palette.stopping") in shown
+
+
+def test_opening_suggestions_during_a_run_keeps_the_run_on_the_status_line(
+        palette_module, monkeypatch):
+    """L'onglet Suggestions ouvert pendant un run n'analyse pas le document :
+    la ligne d'état continue de suivre le run."""
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    monkeypatch.setattr(palette, "_document_text", lambda: "Un texte. " * 60)
+    monkeypatch.setattr(palette_module, "LLMClient",
+                        _client(_Reponse(text="- Ajouter des intertitres")))
+    palette.busy = True
+    progress = palette_module.RunProgress()
+    progress.on_text("Le début de la réponse.")
+    palette._start_pulse(progress)
+
+    main.call(lambda: palette._on_tab_click("suggestions"))
+    time.sleep(0.02)
+    shown = main.call(lambda: palette._models["status"].Label)
+    palette._stop_pulse()
+    main.close()
+
+    assert _t("progress.writing") in shown
 
 
 # Lignes cliquables (Conversation et Suggestions)

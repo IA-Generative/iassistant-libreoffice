@@ -1312,7 +1312,10 @@ class AssistantPalette:
 
         Rend True si l'analyse a démarré (lu par les tests).
         """
-        if self._analysis_running or self._analysis_text or self.current_app() != "writer":
+        # Pendant un run, la ligne d'état appartient à sa jauge et le document
+        # change encore : l'analyse attend la visite suivante de l'onglet.
+        if (self.busy or self._analysis_running or self._analysis_text
+                or self.current_app() != "writer"):
             return False
         try:
             text = self._document_text()
