@@ -1775,10 +1775,11 @@ class AssistantPalette:
         `_run_selection_rewrite`) seulement si le modèle n'a pas prouvé savoir
         enchaîner les outils (`_model_can_chain_tools`).
         """
-        snapshot = {"selection": "", "document": None,
+        snapshot = {"selection": "", "target": None, "document": None,
                     "rewrite": False, "rewrite_selection": False}
         try:
-            snapshot["selection"] = _selection_string(ctx) or ""
+            snapshot["target"] = ctx.controller.getSelection().getByIndex(0)
+            snapshot["selection"] = snapshot["target"].getString() or ""
         except Exception:
             pass
         wants_edit = (preset is None and ctx.app == "writer"
@@ -1820,7 +1821,8 @@ class AssistantPalette:
             elif snapshot.get("rewrite_selection"):
                 kind = "selection_rewrite"
                 summary = self._run_selection_rewrite(ctx, prompt_text,
-                                                      snapshot["selection"])
+                                                      snapshot["selection"],
+                                                      snapshot["target"])
             elif snapshot.get("rewrite"):
                 kind = "document_rewrite"
                 summary = self._run_document_rewrite(ctx, prompt_text,
@@ -1941,15 +1943,16 @@ class AssistantPalette:
                 "mode": orchestrator.llm.effective_mode(),
                 "iterations": result.iterations}
 
-    def _run_selection_rewrite(self, ctx, instruction, selection):
+    def _run_selection_rewrite(self, ctx, instruction, selection, target):
         """Applique une demande libre À LA SÉLECTION, par un chemin sûr.
 
-        Même principe que la réécriture du document : Python tient le texte, le
-        LLM n'est qu'une fonction texte, et le résultat est écrit par le sink
-        choisi dans la palette — remplacement, ou ajout entre marqueurs si la
-        case « Ajouter à la suite » est cochée.
+        Comme les boutons d'action : Python tient le texte, le LLM n'est qu'une
+        fonction texte. La réponse s'affiche au fil du flux et n'est écrite
+        qu'une fois complète, en une seule action d'annulation : à la place de
+        la sélection lue au lancement, ou après elle entre marqueurs si la case
+        « Ajouter à la suite » est cochée.
         """
-        from ..core.presets import report_question, text_sink
+        from ..core.presets import text_sink
         from ..core.text_filters import EXTEND_QUESTION_PATTERNS, STOP_PHRASES, patterns_absent_from
 
         self.journal_line(_t("palette.journal_selection_start", chars=len(selection)),
@@ -1957,46 +1960,38 @@ class AssistantPalette:
                           **{"selection.chars": len(selection),
                              "append.mode": bool(self.append_mode)})
         self._append_response(_t("palette.assistant_prefix"))
-        sink = self.dispatcher.call(
-            lambda: text_sink(ctx, self.append_mode,
-                              "\n\n---début-du-texte-modifié---\n",
-                              "\n---fin-du-texte-modifié---\n",
-                              stop_phrases=STOP_PHRASES,
-                              question_patterns=patterns_absent_from(
-                                  selection, EXTEND_QUESTION_PATTERNS),
-                              on_question=report_question),
-            timeout=10)
+        sink = text_sink(ctx, self.append_mode,
+                         "\n\n---début-du-texte-modifié---\n",
+                         "\n---fin-du-texte-modifié---\n",
+                         tee=self._stream_response, target=target,
+                         original=selection, cancel_event=self._cancel,
+                         undo_label=_t("preset.undo_edit_selection"),
+                         stop_phrases=STOP_PHRASES,
+                         question_patterns=patterns_absent_from(
+                             selection, EXTEND_QUESTION_PATTERNS))
 
         llm = LLMClient(self.shell)
-        self.dispatcher.call(
-            lambda: ctx.undo_begin(_t("preset.undo_edit_selection")),
-            timeout=10)
-        try:
-            step = llm.step(
-                [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
-                 {"role": "user",
-                  "content": (f"TEXTE :\n{selection}\n\n"
-                              f"DEMANDE : {instruction}\n\n"
-                              "Réponds UNIQUEMENT avec le texte modifié, sans "
-                              "introduction ni commentaire.")}],
-                on_text_delta=self._stream_response,
-                cancel_event=self._cancel,
-                progress=self._progress)
-            self._delta_buffer.flush()
-            if self._cancelled():
-                self._report_stop()
-                return {"ok": False, "reason": "cancelled"}
-            if step.error:
-                self._stream_response("⚠ " + error_message(step.error))
-                return {"ok": False, "reason": step.error}
-            self.dispatcher.call(
-                lambda: sink.finish(step.text, step.streamed), timeout=30)
-        finally:
-            self.dispatcher.call(ctx.undo_end, timeout=10)
-
-        if sink.question_detected:
-            self._stream_response("\n" + _t("preset.question_asked"))
-            return {"ok": False, "reason": "model_question"}
+        step = llm.step(
+            [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
+             {"role": "user",
+              "content": (f"TEXTE :\n{selection}\n\n"
+                          f"DEMANDE : {instruction}\n\n"
+                          "Réponds UNIQUEMENT avec le texte modifié, sans "
+                          "introduction ni commentaire.")}],
+            on_text_delta=sink.stream_delta,
+            cancel_event=self._cancel,
+            progress=self._progress)
+        self._delta_buffer.flush()
+        if self._cancelled():
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if step.error:
+            self._stream_response("⚠ " + error_message(step.error))
+            return {"ok": False, "reason": step.error}
+        sink.finish(step.text, step.streamed)
+        unwritten = self._selection_unwritten(sink)
+        if unwritten:
+            return unwritten
         how = (_t("palette.how_appended_selection") if self.append_mode
                else _t("palette.how_replaced"))
         self.journal_line(_t("palette.journal_selection_done", how=how),
@@ -2006,6 +2001,24 @@ class AssistantPalette:
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
         return {"ok": True}
+
+    def _selection_unwritten(self, sink):
+        """Résumé du run quand la réponse n'a pas été écrite sur la sélection :
+        arrêt, question, réponse vide ou sélection modifiée. None sinon."""
+        self._delta_buffer.flush()
+        if sink.stopped:
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if sink.question_detected:
+            reason, message = "model_question", _t("preset.question_asked")
+        elif not sink.accumulated.strip():
+            reason, message = "empty_response", error_message("empty_response")
+        elif sink.target_changed:
+            reason, message = "target_changed", _t("preset.target_changed")
+        else:
+            return None
+        self._stream_response(("\n" if self._line_is_open() else "") + message)
+        return {"ok": False, "reason": reason}
 
     def _run_document_rewrite(self, ctx, instruction, document):
         """Réécrit le document : Python lit, le LLM rédige, Python écrit une
@@ -2223,9 +2236,12 @@ class AssistantPalette:
         else:
             observer.on_stop()
         # La ligne d'arrêt ne s'accroche pas au texte déjà streamé.
+        self._stream_response(("\n" if self._line_is_open() else "") + _stop_line())
+
+    def _line_is_open(self):
+        """La dernière ligne de l'échange en cours porte déjà du texte."""
         line = self._current_exchange[-1] if self._current_exchange else ""
-        ends_line = not line or line.endswith(("\n", _t("palette.assistant_prefix")))
-        self._stream_response(("" if ends_line else "\n") + _stop_line())
+        return bool(line) and not line.endswith(("\n", _t("palette.assistant_prefix")))
 
     def _finish_run(self):
         """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""
