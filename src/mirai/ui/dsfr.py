@@ -32,6 +32,7 @@ TOKENS = {
     "text_inverted":  0xFFFFFF,
     "border":         0xDDDDDD,
     "error":          0xCE0500,
+    "warning":        0xB34000,   # warning-425-625
     "success":        0x18753C,
 }
 

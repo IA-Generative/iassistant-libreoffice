@@ -66,6 +66,12 @@ def error_message(code):
     return _t(key) if key else _t("run.err_generic", code=code)
 
 
+def is_outage(code):
+    """Le réseau ou le service IA est en panne, par opposition à une réponse
+    que l'assistant n'a pas pu exploiter."""
+    return code == "network_error" or code.startswith("http_")
+
+
 DEFAULT_MAX_ITERATIONS = 6
 
 

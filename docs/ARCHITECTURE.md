@@ -177,6 +177,16 @@ avant que l'état final ne s'affiche. « Arrêter » passe par elle aussi : elle
 tient la phase « Arrêt en cours… » jusqu'à la fin du run. Chaque chemin de run reçoit la jauge et
 la passe à `llm.step`, les presets par leur paramètre `progress`.
 
+**Bilan d'un run — ligne d'état.** À la fin d'un run, la ligne d'état montre son
+bilan en gras, coloré selon l'issue : vert quand le document a été modifié,
+orange quand le résultat n'a pas été écrit (question du modèle, texte visé
+modifié, réponse vide ou refusée), rouge pour une panne du réseau ou du service
+IA (`orchestrator.is_outage`). Elle n'en affiche qu'un libellé court ; le texte
+complet est dans l'infobulle et dans le fil. Un bouton d'action le dit par le
+type de son message (`presets.Written`, `presets.Failed`). Le bilan reste jusqu'au
+run suivant ou à « Nouvelle conversation » ; une analyse du document qui finit
+après lui le remet à sa place au lieu d'afficher « Prêt ».
+
 **Le corps ne prend jamais le style d'un titre.** Préserver le style de chaque
 paragraphe ne suffit pas : écrite position par position, une plage qui contient
 un titre y déverse du corps de texte, qui s'affiche en style Titre. La demande

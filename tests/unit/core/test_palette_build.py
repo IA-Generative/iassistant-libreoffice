@@ -989,6 +989,11 @@ ARTICLE = ["Rapport", "Le contexte.", "Analyse", "Les chiffres.", "Les causes."]
 ARTICLE_STYLES = ["Heading 1", "Standard", "Heading 2", "Standard", "Standard"]
 
 
+def _issue(summary):
+    """L'issue d'un run, sans le texte de son bilan."""
+    return {key: summary[key] for key in ("ok", "reason", "written") if key in summary}
+
+
 def _rewrite_document(palette_module, monkeypatch, doc, replies, append=False,
                       during_request=None, config=None, instruction="mets en majuscules",
                       finish="stop"):
@@ -1037,7 +1042,7 @@ def test_an_empty_document_receives_the_text_it_asks_for(palette_module, monkeyp
         palette_module, monkeypatch, doc, [ABEILLES], append=append,
         instruction="Rédige un texte sur les abeilles")
 
-    assert summary == {"ok": True}
+    assert _issue(summary) == {"ok": True, "written": True}
     assert doc.paragraphs == ABEILLES.split("\n")
     assert doc.styles == ["Standard", "Standard"]
     assert doc.undo.entered == [_t("preset.undo_compose_document")]
@@ -1072,7 +1077,7 @@ def test_a_global_request_applies_to_the_whole_document(palette_module, monkeypa
     _, relay, summary = _rewrite_document(
         palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."])
 
-    assert summary == {"ok": True}
+    assert _issue(summary) == {"ok": True, "written": True}
     assert doc.paragraphs == ["Rapport", "Premier bloc.", "Second bloc."]
     assert doc.styles == ["Heading 1", "Standard", "Standard"]
     assert len(relay.requests) == 1
@@ -1107,7 +1112,7 @@ def test_a_reply_cut_at_the_token_cap_leaves_the_document_alone(palette_module, 
         palette_module, monkeypatch, doc, ["LE CONTEXTE.\n# Analyse\nLES CHIF"],
         finish="length")
 
-    assert summary == {"ok": False, "reason": "truncated"}
+    assert _issue(summary) == {"ok": False, "reason": "truncated"}
     assert doc.paragraphs == ARTICLE
     assert doc.writes == 0
     assert error_message("truncated") in palette._models["response"].Text
@@ -1120,7 +1125,7 @@ def test_a_question_from_the_model_leaves_the_document_alone(palette_module, mon
     palette, _, summary = _rewrite_document(
         palette_module, monkeypatch, doc, ["Pouvez-vous préciser le ton souhaité ?"])
 
-    assert summary == {"ok": False, "reason": "model_question"}
+    assert _issue(summary) == {"ok": False, "reason": "model_question"}
     assert doc.paragraphs == ARTICLE
     assert doc.writes == 0
     assert _t("preset.question_asked") in palette._models["response"].Text
@@ -1179,7 +1184,7 @@ def test_a_document_edited_during_the_rewrite_is_left_alone(palette_module, monk
         palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."],
         during_request=_user_types)
 
-    assert summary == {"ok": False, "reason": "target_changed"}
+    assert _issue(summary) == {"ok": False, "reason": "target_changed"}
     assert doc.paragraphs[1] == "Le contexte."
     assert doc.undo.entered == []
     assert _t("preset.target_changed") in palette._models["response"].Text
@@ -1269,7 +1274,7 @@ def test_a_free_request_on_a_selection_is_one_undo_action_after_the_reply(
     assert doc.undo.entered == [_t("preset.undo_edit_selection")]
     assert doc.undo.left == 1
     assert "Un texte." in (doc.inserted if append else doc.replaced)
-    assert summary == {"ok": True}
+    assert _issue(summary) == {"ok": True, "written": True}
 
 
 def test_a_free_request_writes_to_the_selection_read_at_launch(palette_module, monkeypatch):
@@ -1296,7 +1301,7 @@ def test_a_selection_edited_during_the_run_is_left_alone(palette_module, monkeyp
         during_request=lambda doc: doc.selection_range.setString("Mon ajout."))
 
     assert doc.selection_range.getString() == "Mon ajout."
-    assert summary == {"ok": False, "reason": "target_changed"}
+    assert _issue(summary) == {"ok": False, "reason": "target_changed"}
     assert _t("preset.target_changed") in "\n".join(palette._current_exchange)
 
 
@@ -1309,7 +1314,7 @@ def test_a_free_prompt_question_keeps_the_selection(palette_module, monkeypatch,
         append=append)
 
     assert doc.replaced is None and doc.inserted == ""
-    assert summary == {"ok": False, "reason": "model_question"}
+    assert _issue(summary) == {"ok": False, "reason": "model_question"}
     assert _t("preset.question_asked") in "\n".join(palette._current_exchange)
 
 
@@ -1578,7 +1583,7 @@ def test_a_run_invalidates_a_previous_analysis(palette_module):
     """Le document a changé : le constat précédent ne le décrit plus."""
     palette = _build(palette_module)
     palette._analysis_text = "constat périmé"
-    palette._finish_run()
+    palette._finish_run({"ok": True})
     assert palette._analysis_text == ""
 
 
@@ -1800,6 +1805,146 @@ def test_opening_suggestions_during_a_run_keeps_the_run_on_the_status_line(
     main.close()
 
     assert _t("progress.writing") in shown
+
+
+def _status(palette):
+    """Libellé, couleur, graisse et infobulle de la ligne d'état ; un contrôle
+    UNO a une graisse normale et une infobulle vide tant qu'on n'y écrit pas."""
+    model = palette._models["status"]
+    return (model.Label, model.TextColor, getattr(model, "FontWeight", 100.0),
+            getattr(model, "HelpText", ""))
+
+
+def _bold(palette_module, label_key, tone):
+    return _t(label_key), palette_module.STATUS_COLORS[tone], 150.0
+
+
+@pytest.mark.parametrize("reply, label, tone", [
+    ("Texte simple.", "palette.status_written", "success"),
+    ("Pouvez-vous préciser le ton voulu ?", "palette.status_unwritten", "warning"),
+    (OSError("timed out"), "palette.status_failed", "error"),
+], ids=["written", "question", "outage"])
+def test_an_action_button_ends_on_its_bilan_in_bold(palette_module, reply, label, tone):
+    """Le bilan reste repérable après un long texte : en gras dans la ligne
+    d'état, coloré selon ce que l'action a fait du document, entier dans
+    l'infobulle."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    palette = _build(palette_module)
+    response = reply if isinstance(reply, Exception) else FakeSSEResponse(text_chunks(reply))
+    palette.shell = FakeShell(responses=[response])
+    palette._progress = palette_module.RunProgress()
+    doc = FakeWriterDoc(selection_text="Texte alambiqué.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    simplify = next(p for p in presets.PRESETS if p.id == "simplify")
+
+    palette._run_in_worker(simplify, "", ctx, "shown")
+
+    shown, color, weight, tooltip = _status(palette)
+    assert (shown, color, weight) == _bold(palette_module, label, tone)
+    assert tooltip and tooltip in palette._current_exchange[-1]
+
+
+@pytest.mark.parametrize("result, label, tone", [
+    (dict(ok=True, text="Voici la réponse."), "palette.done", "success"),
+    (dict(ok=False, reason="max_iterations_after_changes", text="Appliqué, non conclu."),
+     "palette.status_written", "success"),
+    (dict(ok=False, reason="max_iterations", text="Pas de conclusion."),
+     "palette.status_unwritten", "warning"),
+    (dict(ok=False, reason="http_429", text="Quota atteint."), "palette.status_failed", "error"),
+], ids=["answered", "changed_unfinished", "unfinished", "outage"])
+def test_a_free_request_ends_on_the_bilan_of_its_outcome(palette_module, monkeypatch,
+                                                         result, label, tone):
+    """Une réponse de l'assistant finit sur « Terminé » ; un document qu'il a
+    modifié sans conclure se dit modifié."""
+    from src.mirai.core.orchestrator import RunResult
+
+    class _Orchestrator:
+        def __init__(self, *_a, **_k):
+            self.llm = SimpleNamespace(effective_mode=lambda: "native")
+
+        def run_agentic(self, *_a, **_k):
+            return RunResult(**result)
+
+    palette = _build(palette_module)
+    monkeypatch.setattr(palette_module, "Orchestrator", _Orchestrator)
+    palette._run_in_worker(None, "demande libre", MagicMock(), "shown")
+
+    assert _status(palette)[:3] == _bold(palette_module, label, tone)
+
+
+def test_a_crashed_run_ends_on_a_failure_with_its_cause_in_the_tooltip(palette_module,
+                                                                      monkeypatch):
+    def _boom(preset, prompt, ctx):
+        raise RuntimeError("panne interne")
+    palette = _build(palette_module)
+    monkeypatch.setattr(palette, "_run_agentic", _boom)
+    palette._run_in_worker(None, "demande", MagicMock(), "shown")
+
+    shown, color, weight, tooltip = _status(palette)
+    assert (shown, color, weight) == _bold(palette_module, "palette.status_failed", "error")
+    assert "panne interne" in tooltip
+
+
+def test_a_stopped_run_ends_on_its_stop_in_bold(palette_module, monkeypatch):
+    palette = _build(palette_module)
+    palette._cancel = threading.Event()
+    palette._cancel.set()
+    monkeypatch.setattr(palette, "_run_pipeline",
+                        lambda *_a: {"ok": False, "reason": "cancelled"})
+    palette._run_in_worker(_fake_preset(), "", MagicMock(), "shown")
+
+    assert _status(palette)[:3] == _bold(palette_module, "run.stopped", "neutral")
+
+
+def _run_that_wrote(palette, monkeypatch):
+    monkeypatch.setattr(palette, "_run_pipeline", lambda *_a: {
+        "ok": True, "written": True, "bilan": "Résumé inséré après la sélection."})
+    palette._run_in_worker(_fake_preset(), "", MagicMock(), "shown")
+
+
+def test_the_next_run_puts_the_bilan_away(palette_module, monkeypatch):
+    palette = _build(palette_module)
+    _run_that_wrote(palette, monkeypatch)
+    monkeypatch.setattr(palette_module.threading, "Thread",
+                        lambda **kw: type("T", (), {"start": lambda _s: None})())
+    palette._models["prompt"].Text = "Une autre demande"
+
+    palette._start_run()
+
+    shown, _color, weight, tooltip = _status(palette)
+    assert (shown, weight, tooltip) == (_t("palette.working"), 100.0, "")
+
+
+def test_a_new_conversation_puts_the_bilan_away(palette_module, monkeypatch):
+    palette = _build(palette_module)
+    _run_that_wrote(palette, monkeypatch)
+
+    palette._on_clear()
+
+    shown, _color, weight, tooltip = _status(palette)
+    assert (shown, weight, tooltip) == (_t("palette.cleared"), 100.0, "")
+
+
+def test_an_analysis_after_a_run_gives_the_status_line_back_to_its_bilan(
+        palette_module, monkeypatch):
+    """L'analyse relancée à la fin du run affiche sa jauge, puis rend la ligne
+    d'état au bilan du run plutôt qu'à « Prêt »."""
+    palette = _build(palette_module)
+    held = _hold_analyses(palette, palette_module, monkeypatch,
+                          _client(_Reponse(text="- Ajouter des intertitres")))
+    palette.busy = True
+    palette._on_tab_click("suggestions")
+    _run_that_wrote(palette, monkeypatch)
+
+    assert _finish_analyses(palette, held) == 1
+
+    shown, color, weight, tooltip = _status(palette)
+    assert (shown, color, weight) == _bold(palette_module, "palette.status_written", "success")
+    assert tooltip == "Résumé inséré après la sélection."
 
 
 # Lignes cliquables (Conversation et Suggestions)
