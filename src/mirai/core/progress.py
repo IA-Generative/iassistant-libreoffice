@@ -114,6 +114,12 @@ class RunProgress:
             if self._activity is None:
                 self._phase = phase
 
+    def hold_phase(self, phase):
+        """Phase tenue jusqu'à la fin : ni le texte qui arrive encore ni une
+        autre phase ne la remplacent."""
+        with self._lock:
+            self._activity = self._phase = phase
+
     @property
     def tokens(self):
         with self._lock:

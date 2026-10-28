@@ -1640,10 +1640,11 @@ class AssistantPalette:
         self._defer(lambda: self._start_run(preset=None))
 
     def _cancel_run(self):
-        """Demande l'arrêt du run en cours. Le worker s'arrête entre deux chunks."""
+        """Demande l'arrêt du run en cours. Le worker s'arrête entre deux chunks ;
+        d'ici là, c'est la jauge, seule à écrire la ligne d'état, qui l'annonce."""
         if self._cancel is not None:
             self._cancel.set()
-            self.set_status(_t("palette.stopping"))
+            self._progress.hold_phase(_t("palette.stopping"))
 
     def _start_run(self, preset=None):
         """Valide la demande sur le thread principal, puis lance le worker.

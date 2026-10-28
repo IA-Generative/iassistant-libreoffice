@@ -1683,6 +1683,26 @@ def test_the_gauge_touches_the_window_only_on_the_main_thread(
     assert _t("progress.thinking") in shown
 
 
+def test_a_stop_request_stays_on_the_status_line(palette_module, monkeypatch):
+    """« Arrêter » pendant que le modèle écrit encore : la ligne d'état
+    annonce l'arrêt jusqu'à la fin du run."""
+    monkeypatch.setattr(palette_module, "PULSE_INTERVAL_S", 0.001)
+    palette = _build(palette_module)
+    main = _pinned_main_thread(palette)
+    palette._cancel = threading.Event()
+    progress = palette_module.RunProgress()
+    palette._start_pulse(progress)
+
+    main.call(palette._cancel_run)
+    progress.on_text("Encore un mot.")
+    time.sleep(0.02)
+    shown = main.call(lambda: palette._models["status"].Label)
+    palette._stop_pulse()
+    main.close()
+
+    assert _t("palette.stopping") in shown
+
+
 # Lignes cliquables (Conversation et Suggestions)
 
 def _clic(palette, name, offset):
