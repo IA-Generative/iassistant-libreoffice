@@ -164,10 +164,11 @@ fin ; les questions forment un ensemble fermé. Attention à l'ordre poli
 (« peux-tu restructurer… ? ») : seule l'ouverture compte, pas le « ? ».
 
 **Règle de portée : l'IHM annonce, le modèle n'infère pas.** L'orchestrateur
-préfixe chaque demande d'une ligne de PORTÉE calculée sur le document —
+préfixe chaque demande d'une ligne de PORTÉE calculée sur le document. Writer :
 sélection courante, ou « aucune sélection ⇒ document entier, de [P1] au
-dernier ». Ce qui va de soi pour l'utilisateur n'est visible nulle part pour le
-modèle. Le rappel d'action vit en outre DANS le résultat de l'outil de lecture,
+dernier ». Calc : la plage ou les plages sélectionnées ; une cellule seule est
+un point de départ, Calc en sélectionnant toujours une. Ce qui va de soi pour
+l'utilisateur n'est visible nulle part pour le modèle. Le rappel d'action vit en outre DANS le résultat de l'outil de lecture,
 là où il arrive juste avant la décision, plutôt que dilué dans le préambule.
 Diagnostic : `assistant.iterations` = 1 ⇒ aucun outil appelé ; = 2 ⇒ lecture
 sans écriture.

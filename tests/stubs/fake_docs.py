@@ -347,16 +347,21 @@ class _FakeFormulaParser:
 
 
 class FakeCalcDoc:
-    """Document Calc factice : ActiveSheet + sélection rectangulaire."""
+    """Document Calc factice : ActiveSheet + sélection d'une plage, ou de
+    plusieurs (Ctrl) écrites « A1:A5,C2:D4 »."""
 
     def __init__(self, sheet, selection_ref="A1:A1"):
         self.sheet = sheet
         self.undo = FakeUndoManager()
-        area = _parse_ref(selection_ref)
+        areas = [_parse_ref(ref) for ref in selection_ref.split(",")]
         controller = SimpleNamespace()
         controller.ActiveSheet = sheet
-        controller.getSelection = lambda: SimpleNamespace(
-            getRangeAddress=lambda: area)
+        if len(areas) == 1:
+            controller.getSelection = lambda: SimpleNamespace(
+                getRangeAddress=lambda: areas[0])
+        else:
+            controller.getSelection = lambda: SimpleNamespace(
+                getRangeAddresses=lambda: areas)
         self.controller = controller
         self.CurrentController = controller
         self.Sheets = MagicMock()
