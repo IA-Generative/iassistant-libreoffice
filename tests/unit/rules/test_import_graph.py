@@ -15,6 +15,7 @@ import os
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _SRC = os.path.join(_REPO_ROOT, "src", "mirai")
+_TESTS = os.path.join(_REPO_ROOT, "tests")
 
 COMMON = {"local_config", "credentials", "log_setup", "feed_rewrite", "i18n"}
 LEGACY = {"menu_actions", "formatting", "security_flow"}
@@ -218,6 +219,34 @@ def test_common_shell_and_addin_modules_never_pump_events():
         tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
         offenders += [f"{module}:{node.lineno}" for node in ast.walk(tree)
                       if isinstance(node, ast.Attribute) and node.attr == "processEventsToIdle"]
+    assert offenders == []
+
+
+def _imports_a_test_module(node):
+    if isinstance(node, ast.Import):
+        names = [alias.name for alias in node.names]
+    else:
+        module = node.module or ""
+        names = [module] + [f"{module}.{alias.name}" for alias in node.names]
+    return any(part.startswith("test_") or part == "conftest"
+               for name in names for part in name.split("."))
+
+
+def test_test_files_share_code_only_through_the_stubs():
+    """Un fichier de tests n'importe ni un module de test ni un conftest : ce
+    qu'ils partagent vit dans tests/stubs/, les fixtures dans un conftest."""
+    offenders = []
+    for root, dirs, files in os.walk(_TESTS):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, _REPO_ROOT).replace(os.sep, "/")
+            tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+            offenders += [f"{rel}:{node.lineno}" for node in ast.walk(tree)
+                          if isinstance(node, (ast.Import, ast.ImportFrom))
+                          and _imports_a_test_module(node)]
     assert offenders == []
 
 
