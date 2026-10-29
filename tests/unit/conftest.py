@@ -111,27 +111,6 @@ def thread_guard():
     assert violations == [], f"UNO touché hors du thread principal : {violations}"
 
 
-@pytest.fixture
-def palette_module(monkeypatch):
-    from src.mirai.core.ui_thread import DirectDispatcher
-    from src.mirai.ui import dsfr
-    from src.mirai.ui import palette as palette_module
-    from tests.stubs.fake_palette_dialog import FakeDialog
-
-    dialog = FakeDialog()
-    monkeypatch.setattr(dsfr, "make_dialog",
-                        lambda *_a, **_k: (dialog, dialog.model))
-    monkeypatch.setattr(dsfr, "probe_font", lambda _toolkit: "Arial")
-    monkeypatch.setattr(palette_module, "_open_palette", [None])
-    # Dispatcher SYNCHRONE : avec le vrai, le service AsyncCallback est un
-    # MagicMock qui accepte les tâches sans jamais les exécuter — les
-    # assertions porteraient alors sur un affichage jamais mis à jour.
-    monkeypatch.setattr(palette_module, "MainThreadDispatcher",
-                        lambda _ctx, log=None: DirectDispatcher())
-    monkeypatch.setattr(palette_module, "_fake_dialog", dialog, raising=False)
-    return palette_module
-
-
 @pytest.fixture(autouse=True)
 def _isolate_mainjob_state():
     _reset_process_state()
