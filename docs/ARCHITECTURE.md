@@ -127,7 +127,9 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
 | calc_fill_formula_down | C | ✔ | recopie, Calc décale les références relatives |
 
 Un run d'orchestrateur = **un seul contexte undo** (ouvert par le premier tool
-mutant, fermé en finally) → l'action complète s'annule d'un Ctrl+Z.
+mutant, fermé en finally) → l'action complète s'annule d'un Ctrl+Z. La palette
+fermée pendant un run le referme elle-même avant de rendre le dispatcher
+inerte : sans cela, Ctrl+Z resterait refusé jusqu'à la réouverture du document.
 
 Principe clé (petits modèles) : **la prose longue ne transite jamais en
 argument JSON** — elle est streamée en réponse finale vers un *sink*

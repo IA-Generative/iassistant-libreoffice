@@ -537,6 +537,7 @@ class AssistantPalette:
         self.dispatcher = MainThreadDispatcher(uno_ctx, log=shell.log)
         self._worker = None
         self._cancel = None
+        self._run_ctx = None                # ToolContext du dernier run lancé
         self._delta_buffer = _DeltaCoalescer(self._flush_deltas)
         self._selection_watcher = None      # (listener, contrôleur) — garde vivante
         # Usage de la session : compté en mémoire, envoyé en UNE fois à la
@@ -992,6 +993,13 @@ class AssistantPalette:
                 self.dialog.removeTopWindowListener(closer)
             except Exception:
                 pass          # peer déjà parti : rien à retirer
+        # Le dispatcher inerte, le worker ne pourra plus refermer le contexte
+        # undo de son run : close() est sur le thread principal, il le fait.
+        if self._run_ctx is not None:
+            try:
+                self._run_ctx.close_undo()
+            except Exception:
+                pass          # document déjà fermé
         self.dispatcher.close()
         try:
             self.dialog.setVisible(False)
@@ -1738,6 +1746,7 @@ class AssistantPalette:
         self._bilan = None
         self.busy = True
         self._cancel = threading.Event()
+        self._run_ctx = ctx
         self._delta_buffer.reset()
         self._current_exchange = []    # nouvel échange : le précédent est persisté
         self._history_cache = None     # le tour précédent a rejoint l'historique

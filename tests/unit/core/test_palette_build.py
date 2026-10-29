@@ -102,6 +102,43 @@ def test_close_removes_listeners_before_dispose(palette_module):
     assert palette_module._fake_dialog.top_listeners == []
 
 
+def test_closing_the_palette_during_an_action_leaves_undo_working(palette_module):
+    """La fenêtre fermée pendant qu'un Transformer attend sa deuxième ligne :
+    le contexte d'annulation ouvert par la première se referme, une seule
+    fois, et Ctrl+Z reste utilisable dans le classeur."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    palette = _build(palette_module, "calc")
+    second_row, closed = threading.Event(), threading.Event()
+
+    class _SecondRowAwaited(FakeShell):
+        def urlopen(self, request, timeout=None):
+            if self.urlopen_calls == 1:
+                second_row.set()
+                closed.wait(5)
+            return super().urlopen(request, timeout)
+
+    palette.shell = _SecondRowAwaited(responses=[
+        FakeSSEResponse(text_chunks("APPLE")), FakeSSEResponse(text_chunks("PEAR"))])
+    doc = FakeCalcDoc(FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"}),
+                      selection_ref="A1:A2")
+    palette._current_context = lambda: ToolContext(
+        doc, doc.controller, "calc", palette.shell, dispatcher=palette.dispatcher)
+    palette._models["prompt"].Text = "traduire en anglais"
+    transform = next(p for p in presets.PRESETS if p.id == "transform")
+
+    palette._start_run(preset=transform)
+    worker = palette._worker
+    assert second_row.wait(5)
+    palette.close()
+    closed.set()
+    worker.join(5)
+
+    assert (len(doc.undo.entered), doc.undo.left) == (1, 1)
+
 
 def test_conversation_shows_most_recent_first(palette_module):
     """Main courante : le dernier échange doit apparaître EN HAUT."""
