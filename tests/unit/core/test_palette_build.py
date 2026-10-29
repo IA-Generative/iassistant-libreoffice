@@ -1662,6 +1662,7 @@ def test_an_overtaken_analysis_is_replaced_while_suggestions_are_shown(
     assert "Ajouter des intertitres" in palette._models["suggestions"].Text
 
 
+
 def test_wait_is_shown_in_the_status_line_like_a_run(palette_module, monkeypatch):
     """Même endroit, même format que le run — une seule habitude à prendre.
 
@@ -1850,16 +1851,21 @@ def test_an_action_button_ends_on_its_bilan_in_bold(palette_module, reply, label
 
 @pytest.mark.parametrize("result, label, tone", [
     (dict(ok=True, text="Voici la réponse."), "palette.done", "success"),
-    (dict(ok=False, reason="max_iterations_after_changes", text="Appliqué, non conclu."),
+    (dict(ok=True, changed=True, text="Formule posée."), "palette.status_written", "success"),
+    (dict(ok=False, reason="max_iterations_after_changes", changed=True,
+          text="Appliqué, non conclu."),
+     "palette.status_written", "success"),
+    (dict(ok=False, reason="network_error", changed=True, text="Réseau coupé."),
      "palette.status_written", "success"),
     (dict(ok=False, reason="max_iterations", text="Pas de conclusion."),
      "palette.status_unwritten", "warning"),
     (dict(ok=False, reason="http_429", text="Quota atteint."), "palette.status_failed", "error"),
-], ids=["answered", "changed_unfinished", "unfinished", "outage"])
+], ids=["answered", "changed", "changed_unfinished", "changed_then_outage", "unfinished",
+        "outage"])
 def test_a_free_request_ends_on_the_bilan_of_its_outcome(palette_module, monkeypatch,
                                                          result, label, tone):
     """Une réponse de l'assistant finit sur « Terminé » ; un document qu'il a
-    modifié sans conclure se dit modifié."""
+    modifié se dit modifié, même quand le run échoue ensuite."""
     from src.mirai.core.orchestrator import RunResult
 
     class _Orchestrator:

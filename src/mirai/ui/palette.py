@@ -1983,7 +1983,7 @@ class AssistantPalette:
         return {"ok": result.ok, "reason": result.reason,
                 "mode": orchestrator.llm.effective_mode(),
                 "iterations": result.iterations,
-                "written": result.reason == "max_iterations_after_changes",
+                "written": result.changed,
                 "bilan": "" if result.ok else result.text or result.reason}
 
     def _run_selection_rewrite(self, ctx, instruction, selection, target):

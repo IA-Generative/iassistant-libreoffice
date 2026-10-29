@@ -183,7 +183,8 @@ orange quand le résultat n'a pas été écrit (question du modèle, texte visé
 modifié, réponse vide ou refusée), rouge pour une panne du réseau ou du service
 IA (`orchestrator.is_outage`). Elle n'en affiche qu'un libellé court ; le texte
 complet est dans l'infobulle et dans le fil. Un bouton d'action le dit par le
-type de son message (`presets.Written`, `presets.Failed`). Le bilan reste jusqu'au
+type de son message (`presets.Written`, `presets.Failed`), un run agentique par
+`RunResult.changed`, vrai dès qu'un outil mutant a abouti. Le bilan reste jusqu'au
 run suivant ou à « Nouvelle conversation » ; une analyse du document qui finit
 après lui le remet à sa place au lieu d'afficher « Prêt ».
 

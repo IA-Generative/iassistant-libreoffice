@@ -176,6 +176,27 @@ def test_turn_limit_after_a_write_says_the_changes_were_applied():
     assert ("error", "max_iterations_after_changes") in observer.events
 
 
+@pytest.mark.parametrize("steps, write_ok, changed", [
+    ([StepResult(text="Réponse.")], True, False),
+    ([_calls("writer_write"), StepResult(text="Fait.")], True, True),
+    ([_calls("writer_write"), StepResult(text="Formule refusée.")], False, False),
+    ([_calls("writer_write"), StepResult(error="network_error")], True, True),
+], ids=["answered", "written", "write_refused", "outage_after_a_write"])
+def test_a_run_says_whether_it_changed_the_document(steps, write_ok, changed):
+    """Seul un outil d'écriture qui aboutit modifie le document, et une panne
+    qui suit ne défait pas ce qu'il a écrit."""
+    registry = _registry()
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=lambda ctx, args: ToolResult(call_id="", ok=write_ok, content="",
+                                             error="" if write_ok else "refusé"),
+        apps=("writer",), mutates=True,
+    ))
+    orchestrator = Orchestrator(FakeLLM(steps), registry, _Ctx(FakeShell()))
+    assert orchestrator.run_agentic("demande", PaletteSink()).changed is changed
+
+
 def test_stop_during_the_tools_of_the_last_turn_ends_the_run_as_stopped():
     """« Arrêter » pendant les outils du dernier tour : un arrêt voulu, pas un
     plafond de tours atteint."""

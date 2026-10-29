@@ -39,6 +39,7 @@ class RunResult:
     iterations: int = 0
     text: str = ""
     reason: str = ""
+    changed: bool = False    # un outil mutant a abouti sur le document
 
 
 ERROR_KEYS = {
@@ -123,23 +124,27 @@ class Orchestrator:
 
         self.observer.on_run_start(self.llm.effective_mode())
         acted = False    # un outil mutant a-t-il déjà agi sur le document ?
+        changed = False  # l'un d'eux a-t-il abouti ?
         try:
             for iteration in range(self.max_iterations):
                 if self.cancelled:
                     return RunResult(ok=False, iterations=iteration,
-                                     reason="cancelled", text=_t("run.stopped"))
+                                     reason="cancelled", text=_t("run.stopped"),
+                                     changed=changed)
                 step = self.llm.step(messages, tools=tools,
                                      on_text_delta=sink.stream_delta,
                                      cancel_event=self.cancel_event,
                                      progress=self.progress)
                 if self.cancelled:
                     return RunResult(ok=False, iterations=iteration + 1,
-                                     reason="cancelled", text=_t("run.stopped"))
+                                     reason="cancelled", text=_t("run.stopped"),
+                                     changed=changed)
                 if step.error:
                     message = error_message(step.error)
                     self.observer.on_error(step.error, message)
                     result = RunResult(ok=False, iterations=iteration + 1,
-                                       reason=step.error, text=message)
+                                       reason=step.error, text=message,
+                                       changed=changed)
                     return result
                 if step.tool_calls:
                     self.progress.set_phase(_t("progress.action"))
@@ -148,6 +153,10 @@ class Orchestrator:
                     messages.extend(self.llm.encode_tool_exchange(step, results))
                     acted = acted or any(call.name in mutating
                                          for call in step.tool_calls)
+                    # « Arrêter » peut couper la série : moins de résultats que d'appels.
+                    changed = changed or any(
+                        call.name in mutating and result.ok
+                        for call, result in zip(step.tool_calls, results, strict=False))
                     continue
 
                 final_text = step.text.strip()
@@ -167,17 +176,18 @@ class Orchestrator:
                     self.conversation.append("user", user_prompt, self.ctx.app)
                     self.conversation.append("assistant", final_text, self.ctx.app)
                 result = RunResult(ok=True, iterations=iteration + 1,
-                                   text=final_text)
+                                   text=final_text, changed=changed)
                 return result
 
             if self.cancelled:
                 return RunResult(ok=False, iterations=self.max_iterations,
-                                 reason="cancelled", text=_t("run.stopped"))
+                                 reason="cancelled", text=_t("run.stopped"),
+                                 changed=changed)
             reason = "max_iterations_after_changes" if acted else "max_iterations"
             message = error_message(reason)
             self.observer.on_error(reason, message)
             return RunResult(ok=False, iterations=self.max_iterations,
-                             reason=reason, text=message)
+                             reason=reason, text=message, changed=changed)
         finally:
             # Le span AssistantRun est émis par le worker de la palette — point
             # unique couvrant les QUATRE chemins d'exécution. Le RunResult
