@@ -138,7 +138,7 @@ def test_the_run_duration_is_measured_and_not_hardcoded():
     from src.mirai.core.ui_thread import DirectDispatcher
     from src.mirai.ui import dsfr
     from src.mirai.ui import palette as palette_module
-    from tests.unit.core.test_palette_build import FakeDialog
+    from tests.stubs.fake_palette_dialog import FakeDialog
 
     dialog = FakeDialog()
     dsfr.make_dialog = lambda *_a, **_k: (dialog, dialog.model)

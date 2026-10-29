@@ -22,190 +22,10 @@ import pytest
 
 from src.mirai import i18n
 from src.mirai.i18n import t as _t
+from tests.stubs.fake_palette_dialog import _build
 from tests.stubs.uno_stubs import install
 
 install()
-
-
-class FakeSize:
-    def __init__(self, width=60, height=16):
-        self.Width = width
-        self.Height = height
-
-
-class FakePosSize:
-    X = 0
-    Y = 0
-    Width = 900
-    Height = 700
-
-
-class FakeControlModel:
-    """Modèle de contrôle à état réel : `Text`/`Label` sont de vraies chaînes.
-
-    Un MagicMock rendrait `.Text` incomparable, et masquerait les assertions
-    portant sur le contenu affiché.
-    """
-
-    def __init__(self):
-        self.Text = ""
-        self.Label = ""
-        self.TextColor = 0
-        self.FontWeight = 100.0
-
-
-class FakeControl:
-    """Contrôle UNO minimal : accepte tout, mesure une taille plausible."""
-
-    def __init__(self, name):
-        self.name = name
-        self.visible = True
-        self.model = FakeControlModel()
-        self.listeners = []
-        # Ce que l'écran affiche : écrire `model.Text` ne repeint pas un
-        # contrôle doté d'un peer, seul `setText()` le fait.
-        self.shown_text = ""
-
-    def setPosSize(self, *_args):
-        pass
-
-    def getPosSize(self):
-        return FakePosSize()
-
-    def getPreferredSize(self):
-        return FakeSize()
-
-    def setVisible(self, value):
-        self.visible = value
-
-    def setFocus(self):
-        pass
-
-    def addMouseListener(self, listener):
-        self.listeners.append(listener)
-
-    def addKeyListener(self, listener):
-        self.listeners.append(listener)
-
-    def addItemListener(self, listener):
-        self.listeners.append(listener)
-
-    def setText(self, text):
-        self.model.Text = text
-        self.shown_text = text
-
-    def isVisible(self):
-        return self.visible
-
-
-class FakePeer:
-    """Peer minimal : `toFront()` est ce qui remonte une fenêtre non modale."""
-
-    def __init__(self):
-        self.front_calls = 0
-
-    def toFront(self):
-        self.front_calls += 1
-
-
-class FakeDialog:
-    def __init__(self):
-        self.controls = {}
-        self.model = FakeDialogModel(self)
-        self.top_listeners = []
-        self.window_listeners = []
-        self.visible = False
-        self.title = ""
-        self.peer = FakePeer()
-
-    def setModel(self, _model):
-        pass
-
-    def getControl(self, name):
-        return self.controls.setdefault(name, FakeControl(name))
-
-    def getControls(self):
-        return list(self.controls.values())
-
-    def setVisible(self, value):
-        self.visible = value
-
-    def setTitle(self, title):
-        self.title = title
-
-    def getPeer(self):
-        return self.peer
-
-    def setPosSize(self, *_args):
-        pass
-
-    def getPosSize(self):
-        return FakePosSize()
-
-    def createPeer(self, *_args):
-        pass
-
-    def addTopWindowListener(self, listener):
-        self.top_listeners.append(listener)
-
-    def removeTopWindowListener(self, listener):
-        self.top_listeners.remove(listener)
-
-    def addWindowListener(self, listener):
-        self.window_listeners.append(listener)
-
-    def dispose(self):
-        pass
-
-    def setFocus(self):
-        pass
-
-
-class FakeDialogModel:
-    def __init__(self, dialog):
-        self._dialog = dialog
-        self.names = []
-
-    def createInstance(self, _service):
-        return FakeControlModel()
-
-    def insertByName(self, name, model):
-        self.names.append(name)
-        # Le contrôle et son modèle doivent être le MÊME objet des deux côtés,
-        # sinon une écriture via _models[...] ne se voit pas via getControl().
-        control = self._dialog.getControl(name)
-        control.model = model
-
-
-@pytest.fixture
-def palette_module(monkeypatch):
-    from src.mirai.core.ui_thread import DirectDispatcher
-    from src.mirai.ui import dsfr
-    from src.mirai.ui import palette as palette_module
-
-    dialog = FakeDialog()
-    monkeypatch.setattr(dsfr, "make_dialog",
-                        lambda *_a, **_k: (dialog, dialog.model))
-    monkeypatch.setattr(dsfr, "probe_font", lambda _toolkit: "Arial")
-    monkeypatch.setattr(palette_module, "_open_palette", [None])
-    # Dispatcher SYNCHRONE : avec le vrai, le service AsyncCallback est un
-    # MagicMock qui accepte les tâches sans jamais les exécuter — les
-    # assertions porteraient alors sur un affichage jamais mis à jour.
-    monkeypatch.setattr(palette_module, "MainThreadDispatcher",
-                        lambda _ctx, log=None: DirectDispatcher())
-    monkeypatch.setattr(palette_module, "_fake_dialog", dialog, raising=False)
-    return palette_module
-
-
-def _build(palette_module, app="writer"):
-    shell = MagicMock()
-    shell.toolkit.return_value = MagicMock()
-    shell.data_dir.return_value = "/tmp/mirai-test-palette"
-    shell.get_config.side_effect = lambda key, default=None: default
-    shell.log = lambda _m: None
-
-    uno_ctx = MagicMock()
-    return palette_module.AssistantPalette(uno_ctx, shell, app)
 
 
 def test_palette_builds_for_writer(palette_module):
@@ -280,6 +100,7 @@ def test_close_removes_listeners_before_dispose(palette_module):
     palette.show()
     palette.close()
     assert palette_module._fake_dialog.top_listeners == []
+
 
 
 def test_conversation_shows_most_recent_first(palette_module):
@@ -400,7 +221,7 @@ def test_a_queued_end_of_run_render_does_not_overwrite_the_switched_thread(
     activer la palette sur l'autre application entre-temps ne doit pas laisser
     ce rendu recouvrir le fil nouvellement affiché."""
     from src.mirai.core.ui_thread import MainThreadDispatcher
-    from tests.unit.core.test_ui_thread import FakeAsyncCallback, FakeUnoContext
+    from tests.stubs.fake_async_callback import FakeAsyncCallback, FakeUnoContext
 
     callback = FakeAsyncCallback()
     monkeypatch.setattr(palette_module, "MainThreadDispatcher",

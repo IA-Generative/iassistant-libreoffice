@@ -10,7 +10,7 @@ import threading
 from unittest.mock import MagicMock
 
 # ── Stubs must be installed before importing entrypoint ──────────────
-from tests.stubs.helpers import http_response
+from tests.stubs.helpers import _enriched_v2, _make_update_directive, http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -18,31 +18,6 @@ install()
 from src.mirai.shell import runtime as shell_runtime
 
 # ── helpers ──────────────────────────────────────────────────────────
-
-def _enriched_v2(features=None, update=None):
-    """Build a minimal EnrichedConfigResponse (schema_version=2)."""
-    return {
-        "meta": {"schema_version": 2, "generated_at": "2026-03-15T00:00:00Z"},
-        "config": {},
-        "features": features or {},
-        "update": update,
-    }
-
-
-def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
-                            checksum=None, artifact_url="/binaries/lo/2.0.0/mirai.oxt",
-                            urgency="normal", campaign_id=1):
-    d = {
-        "action": action,
-        "target_version": target,
-        "current_version": current,
-        "artifact_url": artifact_url,
-        "checksum": checksum or "",
-        "urgency": urgency,
-        "campaign_id": campaign_id,
-    }
-    return d
-
 
 def _dm_job(payload):
     """Job dont le fetch de config reçoit *payload* du DM."""

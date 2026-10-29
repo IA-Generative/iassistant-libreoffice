@@ -14,17 +14,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.stubs.helpers import http_response
+from tests.stubs.helpers import _enriched_v2, _make_update_directive, http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
 
 from src.mirai import entrypoint, feed_rewrite
 from src.mirai.entrypoint import MainJob
-from tests.unit.test_update_features import (
-    _enriched_v2,
-    _make_update_directive,
-)
 
 SRC_TAG = "{http://openoffice.org/extensions/description/2006}src"
 XLINK_HREF = "{http://www.w3.org/1999/xlink}href"

@@ -9,7 +9,7 @@ import urllib.error
 from unittest.mock import MagicMock, patch
 
 # ── Install UNO stubs FIRST so the module can be imported outside LibreOffice ──
-from tests.stubs.helpers import http_response
+from tests.stubs.helpers import _base_config, http_response
 from tests.stubs.uno_stubs import install
 
 install()
@@ -54,18 +54,6 @@ def _completions_response(text: str) -> MagicMock:
         "choices": [{"text": text, "finish_reason": "stop"}]
     }
     return http_response(payload)
-
-
-def _base_config() -> dict:
-    return {
-        "llm_base_urls": "http://localhost:11434",
-        "llm_api_tokens": "test-token",
-        "authHeaderName": "Authorization",
-        "authHeaderPrefix": "Bearer ",
-        "llm_default_models": "llama3",
-        "llm_request_timeout_seconds": 30,
-        "proxy_allow_insecure_ssl": False,
-    }
 
 
 # Tests for call_llm()

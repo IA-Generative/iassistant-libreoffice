@@ -18,22 +18,7 @@ from src.mirai.core.ui_thread import (
     MainThreadDispatcher,
     is_main_thread,
 )
-
-
-class FakeAsyncCallback:
-    """Imite com.sun.star.awt.AsyncCallback : accumule, exécute sur demande."""
-
-    def __init__(self):
-        self.queued = []
-
-    def addCallback(self, task, _data):
-        self.queued.append(task)
-
-    def drain(self):
-        """Joue les tâches en attente — ce que ferait la boucle d'événements."""
-        pending, self.queued = self.queued, []
-        for task in pending:
-            task.run()
+from tests.stubs.fake_async_callback import FakeAsyncCallback, FakeUnoContext
 
 
 class RefusingAsyncCallback(FakeAsyncCallback):
@@ -41,21 +26,6 @@ class RefusingAsyncCallback(FakeAsyncCallback):
 
     def addCallback(self, task, _data):
         raise RuntimeError("tâche refusée par la boucle d'événements")
-
-
-class FakeUnoContext:
-    def __init__(self, callback=None, fail=False):
-        self._callback = callback
-        self._fail = fail
-
-    def getServiceManager(self):
-        return self
-
-    def createInstanceWithContext(self, name, _ctx):
-        assert name == "com.sun.star.awt.AsyncCallback"
-        if self._fail:
-            raise RuntimeError("service indisponible")
-        return self._callback
 
 
 class _DispatcherStoppedUnderAWorker(MainThreadDispatcher):

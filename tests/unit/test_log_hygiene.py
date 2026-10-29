@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from unittest.mock import MagicMock, patch
 
-from tests.stubs.helpers import http_response
+from tests.stubs.helpers import _base_config, http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -15,10 +15,9 @@ from src.mirai.calc_prompt_function import call_llm
 from src.mirai.core import sse_pump
 from src.mirai.entrypoint import _send_telemetry_trace_impl
 from src.mirai.menu_actions.calc import _generate_formula, _transform_to_column
+from tests.stubs.fake_palette_dialog import _build
 from tests.stubs.fake_shell import FakeShell
-from tests.unit.core.test_palette_build import _build, palette_module  # noqa: F401
-from tests.unit.test_calc_menu_actions import _make_cell, _make_job, _make_sheet
-from tests.unit.test_calc_prompt_function import _base_config
+from tests.stubs.legacy_calc import _make_cell, _make_job, _make_sheet
 
 SECRET = "SECRET-llmToken-0123456789"
 DOCUMENT = "Texte confidentiel du document"
@@ -69,7 +68,7 @@ def test_llm_request_body_is_not_logged(tmp_path):
     assert leaked == []
 
 
-def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_module):  # noqa: F811
+def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_module):
     palette = _build(palette_module)
     lines = []
     palette.shell.log = lines.append
