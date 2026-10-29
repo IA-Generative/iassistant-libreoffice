@@ -537,7 +537,7 @@ class AssistantPalette:
         self.dispatcher = MainThreadDispatcher(uno_ctx, log=shell.log)
         self._worker = None
         self._cancel = None
-        self._run_ctx = None                # ToolContext du dernier run lancé
+        self._run_ctx = None                # ToolContext du run en cours
         self._delta_buffer = _DeltaCoalescer(self._flush_deltas)
         self._selection_watcher = None      # (listener, contrôleur) — garde vivante
         # Usage de la session : compté en mémoire, envoyé en UNE fois à la
@@ -995,9 +995,10 @@ class AssistantPalette:
                 pass          # peer déjà parti : rien à retirer
         # Le dispatcher inerte, le worker ne pourra plus refermer le contexte
         # undo de son run : close() est sur le thread principal, il le fait.
-        if self._run_ctx is not None:
+        run_ctx = self._run_ctx
+        if run_ctx is not None:
             try:
-                self._run_ctx.close_undo()
+                run_ctx.close_undo()
             except Exception:
                 pass          # document déjà fermé
         self.dispatcher.close()
@@ -1899,6 +1900,9 @@ class AssistantPalette:
             self._emit_run_span(kind, preset, summary, started)
             # Ordre important : libérer l'état AVANT de poster les mises à
             # jour, pour qu'un filet déclenché entre-temps voie un run terminé.
+            # Le contexte avant `busy` : le run suivant pose le sien dès que
+            # `busy` retombe.
+            self._run_ctx = None
             self.busy = False
             self._cancel = None
             self._worker = None
