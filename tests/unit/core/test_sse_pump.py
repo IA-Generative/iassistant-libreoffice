@@ -41,6 +41,27 @@ def test_invalid_json_lines_skipped():
     assert outcome.ok and len(seen) == 1
 
 
+def test_a_stream_cut_before_its_end_is_a_network_error():
+    """La connexion tombe pendant la réponse : la lecture s'arrête sans erreur,
+    mais le flux n'a livré ni `[DONE]` ni `finish_reason`, il a été coupé."""
+    lines = [b'data: {"choices":[{"delta":{"reasoning_content":"Je compare."}}]}',
+             b'data: {"choices":[{"delta":{"content":"Le texte"}}]}']
+    shell = FakeShell(responses=[FakeSSEResponse(None, raw_lines=lines)])
+    seen = []
+    outcome = sse_pump.run_stream(shell, object(), seen.append)
+    assert len(seen) == 2
+    assert not outcome.ok
+    assert isinstance(outcome.error, sse_pump.StreamNetworkError)
+    assert shell.llm_errors and shell.llm_errors[0][0] == 0
+
+
+def test_a_finished_reply_is_complete_without_done():
+    lines = [b'data: {"choices":[{"delta":{"content":"ok"}}]}',
+             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}']
+    shell = FakeShell(responses=[FakeSSEResponse(None, raw_lines=lines)])
+    assert sse_pump.run_stream(shell, object(), lambda e: None).ok
+
+
 def test_http_error_reported_to_shell():
     shell = FakeShell(responses=[_http_error(429)])
     outcome = sse_pump.run_stream(shell, object(), lambda e: None)
