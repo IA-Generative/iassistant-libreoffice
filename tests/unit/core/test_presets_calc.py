@@ -569,6 +569,62 @@ def test_a_selection_without_values_asks_for_filled_cells(selection):
     assert sheet.cells_asked < 30
 
 
+# Une sélection partielle est lue telle quelle, quelle que soit sa taille.
+
+@pytest.mark.parametrize("selection,rows,cols", [("A1:A501", 501, 1),
+                                                 ("A1:CW500", 500, 101)],
+                         ids=["rows", "cells"])
+def test_a_transform_over_its_cap_is_refused_before_any_cell_is_read(selection, rows, cols):
+    sheet = _full_size_sheet({(0, 0): "pomme"})
+    doc = FakeCalcDoc(sheet, selection_ref=selection)
+    shell = FakeShell()
+    message = presets.run_transform(_ctx(doc, shell), shell, "majuscules", None)
+    assert message == _t("preset.transform_too_large", rows=rows, cols=cols,
+                         max_rows=500, max_cells=50000)
+    assert shell.requests == []
+    assert sheet.grid == {(0, 0): "pomme"}
+    assert sheet.cells_asked == 0
+
+
+def test_a_transform_of_500_rows_runs():
+    sheet = _full_size_sheet({(0, 499): "pomme"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A500")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=1, col="B")
+    assert sheet.grid[(1, 499)] == "APPLE"
+
+
+def test_an_analysis_over_its_budget_sends_the_first_rows_and_says_so():
+    """Le budget est celui d'un envoi Writer, `document_chunk_max_chars` ;
+    l'analyse s'écrit toujours sous tout le tableau, et sa cellule dit en
+    première ligne qu'elle ne porte que sur un extrait."""
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
+                                (0, 1): "Paris", (1, 1): "100",
+                                (0, 2): "Lyon", (1, 2): "60",
+                                (0, 3): "Nice", (1, 3): "40"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B4")
+    shell = FakeShell(config={"document_chunk_max_chars": 30},
+                      responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    prompt = shell.requests[0]["messages"][-1]["content"]
+    assert ("DONNÉES :\nVille | Ventes\nParis | 100\n"
+            "[... tableau tronqué : seules les 2 premières lignes sur 4 sont fournies ...]\n\n"
+            in prompt)
+    assert "Lyon" not in prompt
+    assert message == _t("preset.done_analyze_partial", rows=2, total=4)
+    assert sheet.grid[(0, 5)] == (_t("preset.analysis_excerpt", rows=2, total=4)
+                                  + "\nParis domine.")
+
+
+def test_an_analysis_stops_reading_once_its_budget_is_spent():
+    sheet = _full_size_sheet({(0, row): f"valeur {row}" for row in range(5000)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A1048576")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Croissant."))])
+    presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert sheet.cells_asked < 2000
+
+
 # Les presets Calc lancés comme par la palette, dans un worker : la feuille
 # n'est touchée que depuis le thread principal simulé.
 

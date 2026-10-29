@@ -513,6 +513,13 @@ def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mo
                           _t("preset.resized", target=max(1, int(round(body_words * ratio)))))
 
 
+# Transformer fait un appel au modèle par ligne (500 lignes : 10 à 15 min), et
+# lit toute la plage d'un seul appel qui fige l'interface (50 000 cellules :
+# environ 1 s).
+TRANSFORM_MAX_ROWS = 500
+TRANSFORM_MAX_CELLS = 50000
+
+
 @dataclasses.dataclass
 class _TransformPlan:
     """Ce que Transformer lit de la feuille avant le premier appel au modèle."""
@@ -523,23 +530,30 @@ class _TransformPlan:
     out_col: int
     header: str          # en-tête à poser avec la première écriture, puis ""
 
+    @property
+    def too_large(self):
+        return (self.row_count > TRANSFORM_MAX_ROWS
+                or self.row_count * len(self.col_range) > TRANSFORM_MAX_CELLS)
+
 
 def _read_transform(ctx):
-    """Feuille, lignes sources et colonne de sortie. Thread principal exclusivement."""
+    """Feuille, lignes sources et colonne de sortie, sans rien lire d'une plage
+    trop grande. Thread principal exclusivement."""
     sheet = ctx.controller.ActiveSheet
     col_range, row_range = calc_tools.used_part(
         sheet, ctx.controller.getSelection().getRangeAddress())
-    sources = []
+    plan = _TransformPlan(sheet, col_range, len(row_range), [], col_range.stop, "")
+    if plan.too_large:
+        return plan
     for row in row_range:
         source_text = _row_text(sheet, col_range, row)
         if source_text:
-            sources.append((row, source_text))
-    out_col, header = col_range.stop, ""
-    if sources:
-        out_col, needs_header = calc_tools.find_free_output_column(
+            plan.sources.append((row, source_text))
+    if plan.sources:
+        plan.out_col, needs_header = calc_tools.find_free_output_column(
             sheet, col_range, row_range)
-        header = calc_tools.next_result_header(sheet) if needs_header else ""
-    return _TransformPlan(sheet, col_range, len(row_range), sources, out_col, header)
+        plan.header = calc_tools.next_result_header(sheet) if needs_header else ""
+    return plan
 
 
 SOURCE_CHANGED = "source modifiée pendant le run"
@@ -606,6 +620,14 @@ def _transform_message(out_col, transformed, refused, skipped):
     return Written(message) if transformed else message
 
 
+def _no_source_message(plan):
+    if plan.too_large:
+        return _t("preset.transform_too_large", rows=plan.row_count,
+                  cols=len(plan.col_range), max_rows=TRANSFORM_MAX_ROWS,
+                  max_cells=TRANSFORM_MAX_CELLS)
+    return _t("preset.need_transform_values")
+
+
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                   dispatcher=None, append_mode=True, progress=None):
     if not user_text.strip():
@@ -614,7 +636,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
     _legacy_telemetry(ctx, "TransformToColumn",
                       {"context": "calc", "rows": str(plan.row_count)})
     if not plan.sources:
-        return _t("preset.need_transform_values")
+        return _no_source_message(plan)
 
     system_prompt = _system(
         "Tu es un assistant de transformation de données. "
@@ -664,24 +686,47 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
     return _transform_message(plan.out_col, transformed, refused, skipped)
 
 
-def _read_table(ctx):
-    """Feuille, colonnes et lignes utilisées de la sélection, texte du tableau
-    et présence de données. Thread principal exclusivement."""
+def _read_table(ctx, max_chars):
+    """Feuille, colonnes et lignes utilisées de la sélection, lignes du tableau
+    tant qu'elles tiennent dans `max_chars` (la première toujours) et présence
+    de données. Thread principal exclusivement."""
     sheet = ctx.controller.ActiveSheet
     cols, rows = calc_tools.used_part(
         sheet, ctx.controller.getSelection().getRangeAddress())
     lines = []
     has_data = False
+    size = 0
     for r in rows:
         cells = [sheet.getCellByPosition(c, r).getString() for c in cols]
+        line = " | ".join(cells)
+        if lines and size + len(line) > max_chars:
+            break
+        size += len(line) + 1
         has_data = has_data or any(cells)
-        lines.append(" | ".join(cells))
-    return sheet, cols, rows, "\n".join(lines).strip(), has_data
+        lines.append(line)
+    return sheet, cols, rows, lines, has_data
 
 
-def _write_analysis(sheet, cols, rows, text):
-    """Écrit l'analyse dans une cellule fusionnée deux lignes sous le tableau
-    et rend la raison d'un refus. Thread principal exclusivement."""
+def _table_text(lines, total):
+    text = "\n".join(lines).strip()
+    if len(lines) < total:
+        text += (f"\n[... tableau tronqué : seules les {len(lines)} premières lignes "
+                 f"sur {total} sont fournies ...]")
+    return text
+
+
+def _excerpt_note(read, total):
+    """Première ligne de la cellule d'analyse quand le tableau n'a été envoyé
+    qu'en partie : la cellule le dit encore une fois la palette fermée."""
+    if read < total:
+        return _t("preset.analysis_excerpt", rows=read, total=total) + "\n"
+    return ""
+
+
+def _write_analysis(sheet, cols, rows, note, text):
+    """Écrit l'analyse dans une cellule fusionnée deux lignes sous le tableau,
+    précédée de `note`, et rend la raison d'un refus. Thread principal
+    exclusivement."""
     out_row = rows.stop + 1
     target_cell = sheet.getCellByPosition(cols.start, out_row)
     try:
@@ -694,7 +739,7 @@ def _write_analysis(sheet, cols, rows, text):
         target_cell.setPropertyValue("IsTextWrapped", True)
     except Exception:
         pass
-    refusal = calc_tools.safe_set_string(target_cell, text)
+    refusal = calc_tools.safe_set_string(target_cell, note + text)
     try:
         sheet.getRows().getByIndex(out_row).OptimalHeight = True
     except Exception:
@@ -704,13 +749,14 @@ def _write_analysis(sheet, cols, rows, text):
 
 def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
                 dispatcher=None, append_mode=True, progress=None):
-    sheet, cols, rows, table_text, has_data = ctx.on_main(lambda: _read_table(ctx))
+    limit = whole_document.max_chars(shell)
+    sheet, cols, rows, lines, has_data = ctx.on_main(lambda: _read_table(ctx, limit))
     _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
     if not has_data:
         return _t("preset.need_range")
 
     prompt = (
-        "DONNÉES :\n" + table_text + "\n\n"
+        "DONNÉES :\n" + _table_text(lines, len(rows)) + "\n\n"
         "Analyse ces données : tendances, anomalies, points remarquables.\n"
         "Sois concis et factuel. Réponds dans la même langue que les données.\n"
         + (("Question de l'utilisateur : " + user_text + "\n") if user_text.strip() else "")
@@ -722,7 +768,8 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     max_tokens = int(shell.get_config("analyze_range_max_tokens", 4000))
     llm = _text_client(shell, max_tokens)
 
-    sink = CalcCellSink(ctx, partial(_write_analysis, sheet, cols, rows), tee=tee)
+    note = _excerpt_note(len(lines), len(rows))
+    sink = CalcCellSink(ctx, partial(_write_analysis, sheet, cols, rows, note), tee=tee)
     step = llm.step([{"role": "system", "content": system_prompt},
                      {"role": "user", "content": prompt}],
                     on_text_delta=sink.stream_delta,
@@ -738,6 +785,8 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
         return _t("preset.refused_analyze")
     if not sink.written:
         return error_message("empty_response")
+    if note:
+        return Written(_t("preset.done_analyze_partial", rows=len(lines), total=len(rows)))
     return Written(_t("preset.done_analyze"))
 
 

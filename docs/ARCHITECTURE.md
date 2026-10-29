@@ -262,9 +262,13 @@ comme « la demande porte sur le document entier ».
   avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
   zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis
   l'écrivent en un seul passage sur le thread principal (`CalcCellSink`).
-  Transformer écrit chaque ligne dès que sa réponse est complète, dans une
-  seule action d'annulation qui comprend l'en-tête ; un arrêt garde les lignes
-  finies ; une ligne dont la source a changé pendant le run n'est pas écrite,
+  Cette lecture est bornée : Transformer refuse, avant de lire une cellule,
+  une partie utile de plus de 500 lignes ou 50 000 cellules ; Analyser
+  s'arrête aux lignes qui tiennent dans `document_chunk_max_chars`, et le dit
+  au modèle, en tête de la cellule d'analyse et dans le bilan. Transformer
+  écrit chaque ligne dès que sa réponse est complète, dans une seule action
+  d'annulation qui comprend l'en-tête ; un arrêt garde les lignes finies ;
+  une ligne dont la source a changé pendant le run n'est pas écrite,
   et une réponse refusée par la garde des formules est comptée et signalée.
 - **agentique** (le LLM pilote les tools) : Formule (Calc — contexte de feuille
   + retrieval `config/calc-functions.json`) et le **prompt libre**, qui couvre

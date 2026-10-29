@@ -219,7 +219,7 @@ Applique une instruction IA sur une plage de cellules et écrit les résultats d
 >
 > *Exemple : vous avez 50 descriptions de produits en français ? Sélectionnez la colonne, Ctrl+Alt+Espace, tapez "Traduire en anglais", et la traduction apparaît à côté.*
 
-> 🔵 **Expert** — L'extension détecte automatiquement la première colonne libre à droite de la sélection. L'en-tête de la colonne de résultat reprend le style de la ligne d'en-tête existante. Le traitement est séquentiel (cellule par cellule) avec le contexte de chaque ligne.
+> 🔵 **Expert** — L'extension détecte automatiquement la première colonne libre à droite de la sélection. L'en-tête de la colonne de résultat reprend le style de la ligne d'en-tête existante. Le traitement est séquentiel (cellule par cellule) avec le contexte de chaque ligne. Transformer traite au plus 500 lignes et 50 000 cellules à la fois : au-delà, rien n'est lu ni écrit, et l'assistant demande une sélection plus petite.
 
 ### 4.2 🧮 Générer une formule (Ctrl+Alt+Espace)
 
@@ -248,7 +248,7 @@ Analyse une plage de cellules et produit un résumé des tendances, anomalies et
 >
 > *Exemple : sélectionnez un tableau trimestriel, Ctrl+Alt+Espace, et obtenez "Hausse de 12% au T3, baisse notable en juillet, valeur aberrante en cellule C7".*
 
-> 🔵 **Expert** — Le résultat est inséré deux lignes sous la sélection. La cellule de résultat est fusionnée sur la largeur de la sélection pour une meilleure lisibilité.
+> 🔵 **Expert** — Le résultat est inséré deux lignes sous la sélection. La cellule de résultat est fusionnée sur la largeur de la sélection pour une meilleure lisibilité. Un tableau plus long que `document_chunk_max_chars` (20 000 caractères par défaut) n'est envoyé qu'en partie, ses premières lignes : le modèle le sait, la cellule de résultat le dit en première ligne, et l'assistant annonce combien de lignes ont été analysées.
 
 ---
 
