@@ -9,7 +9,7 @@ import urllib.error
 from unittest.mock import MagicMock, patch
 
 # ── Install UNO stubs FIRST so the module can be imported outside LibreOffice ──
-from tests.stubs.helpers import _base_config, http_response
+from tests.stubs.helpers import base_config, http_response
 from tests.stubs.uno_stubs import install
 
 install()
@@ -62,7 +62,7 @@ class TestCallLlmSuccess(unittest.TestCase):
     """Happy-path: the LLM returns a chat-completions response."""
 
     def setUp(self):
-        self.config = _base_config()
+        self.config = base_config()
         self.ssl_ctx = ssl.create_default_context()
 
     def _patch_urlopen(self, response):
@@ -212,7 +212,7 @@ class TestCallLlmSuccess(unittest.TestCase):
 class TestCallLlmErrors(unittest.TestCase):
 
     def setUp(self):
-        self.config = _base_config()
+        self.config = base_config()
         self.ssl_ctx = ssl.create_default_context()
 
     def _patch_urlopen(self, side_effect):
@@ -283,7 +283,7 @@ class TestPromptFunction(unittest.TestCase):
     def _make_fn(self, config_overrides=None):
         ctx = _make_ctx()
         fn = PromptFunction(ctx)
-        config = _base_config()
+        config = base_config()
         if config_overrides:
             config.update(config_overrides)
         fn._config = config  # bypass file I/O
@@ -310,7 +310,7 @@ class TestPromptFunction(unittest.TestCase):
         with patch("src.mirai.calc_prompt_function.call_llm", side_effect=fake_call_llm):
             fn.prompt("Hello")
 
-        self.assertEqual(captured[0]["model"], "llama3")  # from _base_config
+        self.assertEqual(captured[0]["model"], "llama3")  # from base_config
 
     def test_prompt_uses_explicit_model_when_given(self):
         fn = self._make_fn()

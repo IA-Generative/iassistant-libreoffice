@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.stubs.helpers import _enriched_v2, _make_update_directive, http_response
+from tests.stubs.helpers import enriched_v2, http_response, make_update_directive
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -220,9 +220,9 @@ def test_fetch_config_rewrites_before_deciding_anything(installed, target):
     job._persist_bootstrap_config = MagicMock()
     seen = []
     job._schedule_update = MagicMock(side_effect=lambda d: seen.append(_hrefs(_read(installed))[0]))
-    directive = _make_update_directive()
+    directive = make_update_directive()
     directive["target_version"] = target
-    job._urlopen = MagicMock(return_value=http_response(_enriched_v2(features={}, update=directive)))
+    job._urlopen = MagicMock(return_value=http_response(enriched_v2(features={}, update=directive)))
     job._fetch_config(force=True)
     assert _hrefs(_read(installed))[0] == BASE_1 + f"?version={target}"
     assert seen == ([] if target == "0.0.1.0.31" else [BASE_1 + "?version=0.0.1.0.32"])

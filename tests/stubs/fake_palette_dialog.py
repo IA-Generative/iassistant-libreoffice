@@ -153,7 +153,7 @@ class FakeDialogModel:
         control.model = model
 
 
-def _build(palette_module, app="writer"):
+def build_palette(palette_module, app="writer"):
     shell = MagicMock()
     shell.toolkit.return_value = MagicMock()
     shell.data_dir.return_value = "/tmp/mirai-test-palette"

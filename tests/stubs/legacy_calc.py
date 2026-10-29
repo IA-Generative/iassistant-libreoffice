@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 
-def _make_cell(text=""):
+def make_cell(text=""):
     """Stateful fake cell: getString/setString mirror a real cell."""
     cell = MagicMock()
     cell._text = text
@@ -12,17 +12,17 @@ def _make_cell(text=""):
     return cell
 
 
-def _make_sheet(cells: dict):
+def make_sheet(cells: dict):
     """cells: {(col, row): text}  →  getCellByPosition returns a fake cell."""
-    cell_map = {pos: _make_cell(t) for pos, t in cells.items()}
+    cell_map = {pos: make_cell(t) for pos, t in cells.items()}
     sheet = MagicMock()
     sheet.getCellByPosition.side_effect = lambda c, r: cell_map.setdefault(
-        (c, r), _make_cell()
+        (c, r), make_cell()
     )
     return sheet, cell_map
 
 
-def _make_job(stream_chunks=None):
+def make_streaming_job(stream_chunks=None):
     """Fake job whose stream_request calls the callback with each chunk."""
     job = MagicMock()
     chunks = stream_chunks or ["hello"]

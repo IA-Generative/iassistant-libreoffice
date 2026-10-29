@@ -10,7 +10,7 @@ import threading
 from unittest.mock import MagicMock
 
 # ── Stubs must be installed before importing entrypoint ──────────────
-from tests.stubs.helpers import _enriched_v2, _make_update_directive, http_response
+from tests.stubs.helpers import enriched_v2, http_response, make_update_directive
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -41,7 +41,7 @@ def _dm_job(payload):
 # ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
 
 def test_lo04_fetch_v2_populates_features_cache():
-    job = _dm_job(_enriched_v2(features={"writer_assistant": True, "calc_assistant": False}))
+    job = _dm_job(enriched_v2(features={"writer_assistant": True, "calc_assistant": False}))
 
     result = job._fetch_config(force=True)
 
@@ -52,8 +52,8 @@ def test_lo04_fetch_v2_populates_features_cache():
 # ── TC-LO-05 : fetch v2 schedule_update appelé si action présente ────
 
 def test_lo05_fetch_v2_calls_schedule_update():
-    directive = _make_update_directive()
-    job = _dm_job(_enriched_v2(features={}, update=directive))
+    directive = make_update_directive()
+    job = _dm_job(enriched_v2(features={}, update=directive))
 
     job._fetch_config(force=True)
 
@@ -63,7 +63,7 @@ def test_lo05_fetch_v2_calls_schedule_update():
 # ── TC-LO-06 : fetch v2 update=null → schedule_update non appelé ────
 
 def test_lo06_fetch_v2_no_update_directive():
-    job = _dm_job(_enriched_v2(features={}, update=None))
+    job = _dm_job(enriched_v2(features={}, update=None))
 
     job._fetch_config(force=True)
 
@@ -97,7 +97,7 @@ def test_lo08_update_not_retriggered_if_in_progress():
 
     job._perform_update = fake_perform
     before = set(threading.enumerate())
-    job._schedule_update(_make_update_directive())
+    job._schedule_update(make_update_directive())
     for thread in set(threading.enumerate()) - before:
         thread.join(5)
 
@@ -122,7 +122,7 @@ def test_lo09_perform_update_checksum_ok_stages(fast_clock):
     job._report_update_status = MagicMock()
     job._install_and_restart_in_process = MagicMock()  # ne doit PAS être appelé au staging
 
-    directive = _make_update_directive(
+    directive = make_update_directive(
         action="update",
         target="2.0.0",
         checksum=expected_checksum,
@@ -164,7 +164,7 @@ def test_lo09b_download_fails_over_to_next_bootstrap(fast_clock):
 
     job._urlopen = _fake_urlopen
 
-    directive = _make_update_directive(
+    directive = make_update_directive(
         action="update", target="0.0.1.0.23", checksum=checksum,
         artifact_url="/catalog/mirai-libreoffice/download",
     )
@@ -201,7 +201,7 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
 
     job._install_and_restart_in_process = MagicMock()
 
-    directive = _make_update_directive(checksum=wrong_checksum)
+    directive = make_update_directive(checksum=wrong_checksum)
     job._urlopen = MagicMock(return_value=http_response(fake_binary))
 
     job._perform_update(directive)
@@ -219,7 +219,7 @@ def test_lo11_perform_update_releases_flag_on_exception(fast_clock):
     import urllib.error
     job._urlopen = MagicMock(side_effect=urllib.error.URLError("connection refused"))
 
-    directive = _make_update_directive()
+    directive = make_update_directive()
     # _perform_update must not raise and must not leave update_in_progress True
     job._perform_update(directive)
     # _schedule_update sets/clears the flag; here we test perform directly

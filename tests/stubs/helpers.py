@@ -38,7 +38,7 @@ def refuse_settings_writes(monkeypatch, refusals=None):
     monkeypatch.setattr(local_config, "write_json_atomic", write)
 
 
-def _enriched_v2(features=None, update=None):
+def enriched_v2(features=None, update=None):
     """Build a minimal EnrichedConfigResponse (schema_version=2)."""
     return {
         "meta": {"schema_version": 2, "generated_at": "2026-03-15T00:00:00Z"},
@@ -48,9 +48,9 @@ def _enriched_v2(features=None, update=None):
     }
 
 
-def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
-                            checksum=None, artifact_url="/binaries/lo/2.0.0/mirai.oxt",
-                            urgency="normal", campaign_id=1):
+def make_update_directive(action="update", target="2.0.0", current="1.0.0",
+                          checksum=None, artifact_url="/binaries/lo/2.0.0/mirai.oxt",
+                          urgency="normal", campaign_id=1):
     d = {
         "action": action,
         "target_version": target,
@@ -63,7 +63,7 @@ def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
     return d
 
 
-def _base_config() -> dict:
+def base_config() -> dict:
     return {
         "llm_base_urls": "http://localhost:11434",
         "llm_api_tokens": "test-token",
