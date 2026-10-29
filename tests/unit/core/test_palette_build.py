@@ -102,16 +102,22 @@ def test_close_removes_listeners_before_dispose(palette_module):
     assert palette_module._fake_dialog.top_listeners == []
 
 
-def test_closing_the_palette_during_an_action_leaves_undo_working(palette_module):
+def test_closing_the_palette_during_an_action_leaves_undo_working(
+        palette_module, thread_guard):
     """La fenêtre fermée pendant qu'un Transformer attend sa deuxième ligne :
     le contexte d'annulation ouvert par la première se referme, une seule
-    fois, et Ctrl+Z reste utilisable dans le classeur."""
+    fois et sur le thread principal, et Ctrl+Z reste utilisable dans le
+    classeur."""
     from src.mirai.core import presets
     from src.mirai.core.context import ToolContext
+    from src.mirai.core.ui_thread import MainThreadDispatcher
+    from tests.stubs.fake_async_callback import FakeAsyncCallback, FakeUnoContext
     from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet
     from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
     palette = _build(palette_module, "calc")
+    event_loop = FakeAsyncCallback()
+    palette.dispatcher = MainThreadDispatcher(FakeUnoContext(event_loop))
     second_row, closed = threading.Event(), threading.Event()
 
     class _SecondRowAwaited(FakeShell):
@@ -125,14 +131,20 @@ def test_closing_the_palette_during_an_action_leaves_undo_working(palette_module
         FakeSSEResponse(text_chunks("APPLE")), FakeSSEResponse(text_chunks("PEAR"))])
     doc = FakeCalcDoc(FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"}),
                       selection_ref="A1:A2")
+    guarded = thread_guard(doc, threading.main_thread())
     palette._current_context = lambda: ToolContext(
-        doc, doc.controller, "calc", palette.shell, dispatcher=palette.dispatcher)
+        guarded, guarded.controller, "calc", palette.shell,
+        dispatcher=palette.dispatcher)
     palette._models["prompt"].Text = "traduire en anglais"
     transform = next(p for p in presets.PRESETS if p.id == "transform")
 
     palette._start_run(preset=transform)
     worker = palette._worker
-    assert second_row.wait(5)
+    for _ in range(500):
+        if second_row.wait(0.01):
+            break
+        event_loop.drain()
+    assert second_row.is_set()
     palette.close()
     closed.set()
     worker.join(5)
