@@ -12,6 +12,7 @@ import time
 from ..i18n import t as _t
 from . import prompts
 from .progress import NullProgress
+from .tools.calc_tools import range_ref
 
 
 class RunObserver:
@@ -71,6 +72,39 @@ def is_outage(code):
     """Le réseau ou le service IA est en panne, par opposition à une réponse
     que l'assistant n'a pas pu exploiter."""
     return code == "network_error" or code.startswith("http_")
+
+
+def _selected_areas(selection):
+    """Plages sélectionnées dans Calc : plusieurs avec Ctrl, sinon une plage ou
+    une cellule. Une forme ou un graphique sélectionné n'en a pas : l'appel lève."""
+    if hasattr(selection, "getRangeAddresses"):
+        return list(selection.getRangeAddresses())
+    return [selection.getRangeAddress()]
+
+
+def _area_ref(area):
+    start, end = range_ref(area).split(":")
+    return start if start == end else f"{start}:{end}"
+
+
+def _calc_scope(areas):
+    """Portée d'une demande dans Calc. Une cellule seule est un point de départ :
+    Calc en sélectionne toujours une, celle du curseur."""
+    if not areas:
+        return ("PORTÉE : aucune plage sélectionnée — appuie-toi sur la vue "
+                "d'ensemble de la feuille avant d'agir.")
+    refs = ", ".join(_area_ref(area) for area in areas)
+    cells = sum((area.EndColumn - area.StartColumn + 1) * (area.EndRow - area.StartRow + 1)
+                for area in areas)
+    if cells == 1:
+        return (f"PORTÉE : la cellule {refs} est le point de départ. Un résultat "
+                f"unique s'écrit dans {refs} ; un résultat sur plusieurs cellules "
+                f"commence en {refs}.")
+    if len(areas) == 1:
+        return (f"PORTÉE : la plage sélectionnée {refs} ({cells} cellules). "
+                "N'agis que sur elle.")
+    return (f"PORTÉE : les plages sélectionnées {refs} ({cells} cellules). "
+            "N'agis que sur elles.")
 
 
 DEFAULT_MAX_ITERATIONS = 6
@@ -211,6 +245,8 @@ class Orchestrator:
         return f"{scope}\n\n{user_prompt}" if scope else user_prompt
 
     def _scope_line(self):
+        if self.ctx.app == "calc":
+            return self._calc_scope_line()
         selected = ""
         try:
             selected = self.ctx.on_main(
@@ -222,15 +258,20 @@ class Orchestrator:
         if selected.strip():
             return (f"PORTÉE : la sélection courante ({len(selected)} caractères). "
                     "N'agis que sur elle.")
-        if self.ctx.app == "writer":
-            return ("PORTÉE : aucune sélection — la demande porte sur le "
-                    "DOCUMENT ENTIER. Commence par lire sa carte "
-                    "(writer_get_document_map), puis APPLIQUE la modification "
-                    "avec writer_replace_paragraphs de [P1] au dernier "
-                    "paragraphe. Répondre le texte réécrit sans appeler l'outil "
-                    "ne modifierait rien.")
-        return ("PORTÉE : aucune plage sélectionnée — appuie-toi sur la vue "
-                "d'ensemble de la feuille avant d'agir.")
+        return ("PORTÉE : aucune sélection — la demande porte sur le "
+                "DOCUMENT ENTIER. Commence par lire sa carte "
+                "(writer_get_document_map), puis APPLIQUE la modification "
+                "avec writer_replace_paragraphs de [P1] au dernier "
+                "paragraphe. Répondre le texte réécrit sans appeler l'outil "
+                "ne modifierait rien.")
+
+    def _calc_scope_line(self):
+        try:
+            areas = self.ctx.on_main(
+                lambda: _selected_areas(self.ctx.controller.getSelection()))
+        except Exception:
+            areas = []
+        return _calc_scope(areas)
 
     @property
     def cancelled(self):
