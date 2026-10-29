@@ -1662,6 +1662,30 @@ def test_an_overtaken_analysis_is_replaced_while_suggestions_are_shown(
     assert "Ajouter des intertitres" in palette._models["suggestions"].Text
 
 
+def test_a_run_ending_while_the_analysis_is_written_up_still_drops_it(
+        palette_module, monkeypatch):
+    """Le run finit pendant que l'analyse met en forme son constat : celui-ci
+    décrit le texte d'avant le run, et l'onglet affiché relance l'analyse."""
+    palette = _build(palette_module)
+    held = _hold_analyses(palette, palette_module, monkeypatch,
+                          _client(_Reponse(text="- Ajouter des intertitres")))
+    palette._on_tab_click("suggestions")
+    render = palette_module.doc_analysis.render
+    runs = []
+
+    def _render_while_a_run_ends(items):
+        if not runs:
+            runs.append("run")
+            _run_to_the_end(palette, monkeypatch)
+        return render(items)
+
+    monkeypatch.setattr(palette_module.doc_analysis, "render", _render_while_a_run_ends)
+    assert _finish_analyses(palette, held) == 1
+    assert "Ajouter des intertitres" not in palette._models["suggestions"].Text
+
+    assert _finish_analyses(palette, held) == 1
+    assert "Ajouter des intertitres" in palette._models["suggestions"].Text
+
 
 def test_wait_is_shown_in_the_status_line_like_a_run(palette_module, monkeypatch):
     """Même endroit, même format que le run — une seule habitude à prendre.

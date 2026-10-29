@@ -1406,9 +1406,12 @@ class AssistantPalette:
         except Exception as exc:
             self.shell.log(f"[palette] analyse du document échouée : {exc}")
         finally:
+            # Le run a pu finir entre la vérification et l'écriture du constat.
+            stale = generation != self._analysis_generation
+            if stale:
+                self._analysis_text = ""
             self._analysis_running = False
-            self._publish_analysis(progress,
-                                   stale=generation != self._analysis_generation)
+            self._publish_analysis(progress, stale=stale)
 
     def _publish_analysis(self, progress, stale=False):
         """Affiche le résultat — ou rend la main au socle statique en cas d'échec.
