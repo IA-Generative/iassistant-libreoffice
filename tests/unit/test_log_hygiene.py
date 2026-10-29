@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from unittest.mock import MagicMock, patch
 
-from tests.stubs.helpers import http_response
+from tests.stubs.helpers import base_config, http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
@@ -15,10 +15,9 @@ from src.mirai.calc_prompt_function import call_llm
 from src.mirai.core import sse_pump
 from src.mirai.entrypoint import _send_telemetry_trace_impl
 from src.mirai.menu_actions.calc import _generate_formula, _transform_to_column
+from tests.stubs.fake_palette_dialog import build_palette
 from tests.stubs.fake_shell import FakeShell
-from tests.unit.core.test_palette_build import _build, palette_module  # noqa: F401
-from tests.unit.test_calc_menu_actions import _make_cell, _make_job, _make_sheet
-from tests.unit.test_calc_prompt_function import _base_config
+from tests.stubs.legacy_calc import make_cell, make_sheet, make_streaming_job
 
 SECRET = "SECRET-llmToken-0123456789"
 DOCUMENT = "Texte confidentiel du document"
@@ -69,8 +68,8 @@ def test_llm_request_body_is_not_logged(tmp_path):
     assert leaked == []
 
 
-def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_module):  # noqa: F811
-    palette = _build(palette_module)
+def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_module):
+    palette = build_palette(palette_module)
     lines = []
     palette.shell.log = lines.append
 
@@ -82,8 +81,8 @@ def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_mod
 
 
 def test_calc_transform_does_not_log_cell_text():
-    sheet, _ = _make_sheet({(0, 0): DOCUMENT})
-    job = _make_job(["résultat"])
+    sheet, _ = make_sheet({(0, 0): DOCUMENT})
+    job = make_streaming_job(["résultat"])
     _transform_to_column(job, sheet, range(0, 1), range(0, 1), "traduis")
     logged = " ".join(str(call) for call in job._log.call_args_list)
     assert "[transform]" in logged
@@ -92,8 +91,8 @@ def test_calc_transform_does_not_log_cell_text():
 
 def test_calc_formula_does_not_log_the_generated_formula():
     formula = "=SUM(A1:A9)+42424242"
-    job = _make_job([formula])
-    _generate_formula(job, _make_cell(), "somme")
+    job = make_streaming_job([formula])
+    _generate_formula(job, make_cell(), "somme")
     logged = " ".join(str(call) for call in job._log.call_args_list)
     assert "[formula]" in logged
     assert "42424242" not in logged
@@ -170,7 +169,7 @@ def test_telemetry_error_body_is_not_logged(tmp_path):
 def test_prompt_error_body_reaches_the_cell_but_not_the_log():
     with patch("src.mirai.calc_prompt_function._urlopen", side_effect=_http_error(502)), \
             patch("src.mirai.calc_prompt_function._log") as log:
-        cell = call_llm("msg", "", "", 10, _base_config(), None)
+        cell = call_llm("msg", "", "", 10, base_config(), None)
     logged = [str(call) for call in log.call_args_list]
     assert any("502" in line for line in logged)
     assert _leaks(logged) == []
@@ -181,7 +180,7 @@ def test_prompt_unexpected_reply_is_not_logged():
     reply = http_response({"output": DOCUMENT})
     with patch("src.mirai.calc_prompt_function._urlopen", return_value=reply), \
             patch("src.mirai.calc_prompt_function._log") as log:
-        cell = call_llm("msg", "", "", 10, _base_config(), None)
+        cell = call_llm("msg", "", "", 10, base_config(), None)
     logged = [str(call) for call in log.call_args_list]
     assert cell == "#PROMPT_ERROR: unexpected response structure"
     assert any("output" in line for line in logged)
