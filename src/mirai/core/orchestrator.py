@@ -79,9 +79,10 @@ DEFAULT_MAX_ITERATIONS = 6
 class Orchestrator:
     """Pilote un run complet. S'exécute dans le thread worker.
 
-    `dispatcher` (facultatif) marshalle vers le thread principal tout ce qui
-    touche UNO : exécution des tools et fermeture du contexte undo. Sans lui —
-    tests, ou contexte hors LibreOffice — les appels se font sur place.
+    `dispatcher` (facultatif) marshalle l'exécution des tools vers le thread
+    principal ; le contexte undo se ferme par `ctx`, qui sait reporter la
+    fermeture quand le thread principal ne répond pas. Sans lui — tests, ou
+    contexte hors LibreOffice — les appels se font sur place.
     `cancel_event` est consulté entre chaque étape et chaque tool.
     """
 
@@ -193,7 +194,7 @@ class Orchestrator:
             # unique couvrant les QUATRE chemins d'exécution. Le RunResult
             # retourné porte déjà tout ce que le span disait (ok, iterations,
             # reason) : un second émetteur ici ferait diverger deux formats.
-            self._on_main(self.ctx.undo_end)
+            self.ctx.undo_end()
 
     def _with_scope(self, user_prompt):
         """Préfixe la demande par sa PORTÉE, lue sur le document.
