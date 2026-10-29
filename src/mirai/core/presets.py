@@ -41,7 +41,8 @@ class Preset:
     needs_input: bool = False     # requiert une instruction tapée dans le prompt
     input_hint_key: str = ""
     # pipeline : fn(ctx, shell, user_text, tee, cancel_event=None,
-    #               dispatcher=None, append_mode=…, progress=None) -> str
+    #               dispatcher=None, append_mode=…, progress=None) -> str,
+    #            Written s'il a écrit son résultat, Failed si le modèle a échoué
     runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
     prompt_template: object = None  # agentic : fn(user_text) -> prompt utilisateur
@@ -130,6 +131,19 @@ def text_sink(ctx, append_mode, header, footer, target, tee=None,
                             tee=tee, cancel_event=cancel_event, **kwargs)
 
 
+class Written(str):
+    """Bilan d'un runner qui a écrit son résultat dans le document."""
+
+
+class Failed(str):
+    """Bilan d'un runner dont l'appel au modèle a échoué ; `code` nomme l'erreur."""
+
+    def __new__(cls, code):
+        failed = super().__new__(cls, error_message(code))
+        failed.code = code
+        return failed
+
+
 def _outcome(sink, done_message):
     """Message de fin d'un runner Writer, selon ce que le sink a retenu."""
     if sink.question_detected:
@@ -140,7 +154,7 @@ def _outcome(sink, done_message):
         return error_message("cancelled")
     if sink.target_changed:
         return _t("preset.target_changed")
-    return done_message
+    return Written(done_message)
 
 
 def _system(specific):
@@ -178,7 +192,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event, progress=progress)
     if step.error:
-        return error_message(step.error)
+        return Failed(step.error)
 
     if sink.question_detected:
         # Retry unique avec directive renforcée ; son texte ne se colle pas à
@@ -201,7 +215,7 @@ def run_extend(ctx, shell, user_text, tee, cancel_event=None,
                         on_text_delta=sink.stream_delta,
                         cancel_event=cancel_event, progress=progress)
         if step.error:
-            return error_message(step.error)
+            return Failed(step.error)
     sink.finish(step.text, step.streamed)
     return _outcome(sink, _t("preset.done_extend"))
 
@@ -255,7 +269,7 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event, progress=progress)
     if step.error:
-        return error_message(step.error)
+        return Failed(step.error)
     sink.finish(step.text, step.streamed)
     return _outcome(sink, _t("preset.done_summarize") if append_mode
                     else _t("preset.done_summarize_replaced"))
@@ -313,7 +327,7 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event, progress=progress)
     if step.error:
-        return error_message(step.error)
+        return Failed(step.error)
     sink.finish(step.text, step.streamed)
     return _outcome(sink, _t("preset.done_simplify") if append_mode
                     else _t("preset.done_simplify_replaced"))
@@ -360,7 +374,7 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event, progress=progress)
     if step.error:
-        return error_message(step.error)
+        return Failed(step.error)
     sink.finish(step.text, step.streamed)
     return _outcome(sink, _t("preset.resized", target=target))
 
@@ -396,14 +410,14 @@ def _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
     if result.question:
         return _t("preset.question_asked")
     if result.error:
-        return error_message(result.error)
+        return Failed(result.error)
     outcome = ctx.on_main(lambda: whole_document.write(
         ctx, snapshot, apply, undo_label, cancel_event))
     if outcome == "stopped":
         return error_message("cancelled")
     if outcome == "changed":
         return _t("preset.target_changed")
-    return done_message
+    return Written(done_message)
 
 
 def _write_rewrite(ctx, snapshot, result, append_mode, undo_label, markers,
@@ -589,7 +603,7 @@ def _transform_message(out_col, transformed, refused, skipped):
         message += " " + _t("preset.refused_transform", count=refused)
     if skipped:
         message += " " + _t("preset.skipped_transform", count=skipped)
-    return message
+    return Written(message) if transformed else message
 
 
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
@@ -646,7 +660,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
         ctx.undo_end()
 
     if interrupted:
-        return error_message(interrupted)
+        return Failed(interrupted)
     return _transform_message(plan.out_col, transformed, refused, skipped)
 
 
@@ -714,7 +728,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
                     on_text_delta=sink.stream_delta,
                     cancel_event=cancel_event, progress=progress)
     if step.error:
-        return error_message(step.error)
+        return Failed(step.error)
     ctx.undo_begin(_t("preset.undo_analyze"))
     try:
         sink.finish(step.text, step.streamed)
@@ -724,7 +738,7 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
         return _t("preset.refused_analyze")
     if not sink.written:
         return error_message("empty_response")
-    return _t("preset.done_analyze")
+    return Written(_t("preset.done_analyze"))
 
 
 FORMULA_RULES = (

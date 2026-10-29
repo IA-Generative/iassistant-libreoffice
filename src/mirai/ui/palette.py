@@ -60,7 +60,7 @@ from ..core import presets as presets_module
 from ..core.context import ToolContext
 from ..core.conversation import ConversationStore
 from ..core.llm_client import LLMClient
-from ..core.orchestrator import Orchestrator, RunObserver, error_message
+from ..core.orchestrator import Orchestrator, RunObserver, error_message, is_outage
 from ..core.progress import RunProgress
 from ..core.registry import ToolRegistry
 from ..core.sinks import PaletteSink
@@ -113,8 +113,29 @@ BOTTOM_PANES = tuple(tab_id for tab_id, _ in TABS)
 STATUS_COLORS = {
     "neutral": dsfr.TOKENS["text_mention"],
     "error":   dsfr.TOKENS["error"],
+    "warning": dsfr.TOKENS["warning"],
     "success": dsfr.TOKENS["success"],
 }
+
+
+def _bilan_line(summary):
+    """Libellé court et ton du bilan d'un run, selon son issue."""
+    if summary.get("written"):
+        return _t("palette.status_written"), "success"
+    if summary.get("ok"):
+        return _t("palette.done"), "success"
+    if is_outage(summary.get("reason") or ""):
+        return _t("palette.status_failed"), "error"
+    return _t("palette.status_unwritten"), "warning"
+
+
+def _pipeline_summary(message):
+    """Résumé d'un bouton d'action : son bilan dit s'il a écrit, et une
+    erreur du modèle porte son code."""
+    if isinstance(message, presets_module.Written):
+        return {"ok": True, "written": True, "bilan": message}
+    reason = message.code if isinstance(message, presets_module.Failed) else "not_written"
+    return {"ok": False, "reason": reason, "bilan": message}
 
 
 class _WindowCloser(unohelper.Base,
@@ -490,10 +511,12 @@ class AssistantPalette:
         self._tab_before_reasoning = None   # onglet à restaurer en refermant
         self._analysis_text = ""       # analyse du document, quand elle arrive
         self._analysis_running = False  # une seule analyse à la fois
+        self._analysis_generation = 0  # change à chaque invalidation
         self._analysis_base = ""       # socle statique, repli si l'analyse échoue
         self._title_shown = ""         # dernier titre posé (évite le clignotement)
         self.append_mode = self._restore_append_mode(shell)
         self._progress = None          # jauge du run en cours
+        self._bilan = None             # bilan du dernier run, tant qu'il est affiché
         self._pulse = None             # thread d'animation de la jauge
         self._width = 0                # largeur courante (0 = pas encore mesurée)
         self._height = 0
@@ -1000,24 +1023,37 @@ class AssistantPalette:
     # Ces méthodes sont appelées indifféremment depuis le thread principal et
     # depuis le worker : elles postent systématiquement, ce qui garantit que
     # l'écriture dans les contrôles VCL a bien lieu sur le thread principal.
-    def set_status(self, message, tone="neutral", tooltip=None):
+    def set_status(self, message, tone="neutral", tooltip="", bold=False):
         """Ligne de statut, colorée selon l'issue — le retour doit se VOIR.
 
-        `tooltip` alimente l'infobulle native : pendant que le modèle réfléchit,
-        survoler le statut affiche le fil de sa réflexion. C'est le seul moyen
-        de le montrer sans encombrer une fenêtre déjà dense — et il n'y a rien
-        à cliquer, donc rien à découvrir.
+        Le gras marque le bilan d'un run, et `tooltip` en porte le texte
+        complet quand la ligne n'en montre qu'un libellé court. Chaque appel
+        remplace les deux : l'image suivante de la jauge efface le bilan.
         """
         def _apply():
             status = self._models["status"]
             status.Label = message
             status.TextColor = STATUS_COLORS.get(tone, STATUS_COLORS["neutral"])
-            if tooltip is not None:
-                try:
-                    status.HelpText = tooltip
-                except Exception:
-                    pass          # modèle sans HelpText : sans gravité
+            status.FontWeight = 150.0 if bold else 100.0
+            try:
+                status.HelpText = tooltip
+            except Exception:
+                pass          # modèle sans HelpText : sans gravité
         self.dispatcher.post(_apply)
+
+    def _show_bilan(self, label, tone, detail=""):
+        """Le bilan d'un run reste en gras dans la ligne d'état jusqu'au run
+        suivant ou à « Nouvelle conversation » ; l'infobulle en donne le texte
+        complet, que la ligne n'a pas la place de montrer."""
+        self._bilan = (label, tone, detail)
+        self.set_status(label, tone=tone, tooltip=detail, bold=True)
+
+    def _restore_status(self):
+        """Ligne d'état au repos : le bilan du dernier run, sinon « Prêt »."""
+        if self._bilan is None:
+            self.set_status(_t("palette.ready"), tone="neutral")
+        else:
+            self._show_bilan(*self._bilan)
 
     def set_journal_text(self, text):
         self.dispatcher.post(lambda: self._set_text("journal", text))
@@ -1313,7 +1349,7 @@ class AssistantPalette:
         Rend True si l'analyse a démarré (lu par les tests).
         """
         # Pendant un run, la ligne d'état appartient à sa jauge et le document
-        # change encore : l'analyse attend la visite suivante de l'onglet.
+        # change encore : l'analyse attend la fin du run.
         if (self.busy or self._analysis_running or self._analysis_text
                 or self.current_app() != "writer"):
             return False
@@ -1333,15 +1369,17 @@ class AssistantPalette:
         # deux animations à deux endroits apprendraient deux habitudes.
         progress = RunProgress(activity=_t("analysis.phase"))
         self._start_pulse(progress)
-        threading.Thread(target=self._analyse_in_worker, args=(messages, progress),
+        threading.Thread(target=self._analyse_in_worker,
+                         args=(messages, progress, self._analysis_generation),
                          daemon=True, name="mirai-doc-analysis").start()
         return True
 
-    def _analyse_in_worker(self, messages, progress):
+    def _analyse_in_worker(self, messages, progress, generation):
         """Interroge le modèle et remplace l'onglet.
 
         Toute sortie anormale laisse les suggestions statiques en place : une
         analyse qui échoue ne doit jamais faire perdre ce qui marchait avant.
+        Une analyse dont le document a changé entre-temps est écartée.
         """
         try:
             step = LLMClient(self.shell,
@@ -1357,6 +1395,10 @@ class AssistantPalette:
                 self.shell.log("[palette] analyse du document : aucune "
                                "proposition exploitable")
                 return
+            if generation != self._analysis_generation:
+                self.shell.log("[palette] analyse du document écartée : "
+                               "le document a changé pendant l'analyse")
+                return
             self.shell.log(f"[palette] analyse du document : {len(items)} proposition(s)")
             self._analysis_text = doc_analysis.render(items)
         except DispatcherClosed:
@@ -1364,23 +1406,30 @@ class AssistantPalette:
         except Exception as exc:
             self.shell.log(f"[palette] analyse du document échouée : {exc}")
         finally:
+            # Le run a pu finir entre la vérification et l'écriture du constat.
+            stale = generation != self._analysis_generation
+            if stale:
+                self._analysis_text = ""
             self._analysis_running = False
-            self._publish_analysis(progress)
+            self._publish_analysis(progress, stale=stale)
 
-    def _publish_analysis(self, progress):
-        """Affiche le résultat — ou rend la main au socle statique en cas d'échec."""
+    def _publish_analysis(self, progress, stale=False):
+        """Affiche le résultat — ou rend la main au socle statique en cas d'échec.
+        Une analyse périmée en relance une, si l'onglet est affiché."""
         final = self._analysis_text or self._analysis_base
         # La jauge n'est arrêtée que si elle est encore la NÔTRE : un run
         # démarré entre-temps a posé la sienne, et la couper afficherait un run
         # figé alors qu'il travaille.
         if self._progress is progress:
             self._stop_pulse()
-            self.set_status(_t("palette.ready"), tone="neutral")
+            self._restore_status()
         try:
             self.dispatcher.post(lambda: self._set_text("suggestions", final))
             # La pompe a été armée pour cette analyse : on l'éteint, sauf si un
             # run l'utilise encore — il la gère alors pour son propre compte.
             self.dispatcher.post(self._stop_pump_if_idle)
+            if stale:
+                self.dispatcher.post(self._refresh_if_shown)
         except DispatcherClosed:
             pass
 
@@ -1388,8 +1437,16 @@ class AssistantPalette:
         if not self.busy:
             self.dispatcher.stop_pump()
 
+    def _refresh_if_shown(self):
+        """Thread principal : l'onglet Suggestions affiché relance l'analyse
+        d'un document qui vient de changer."""
+        if self.active_tab == "suggestions":
+            self.refresh_suggestions()
+
     def invalidate_analysis(self):
-        """Le document a changé : l'analyse précédente ne le décrit plus."""
+        """Le document a changé : ni l'analyse précédente ni celle qui tourne
+        encore ne le décrivent."""
+        self._analysis_generation += 1
         self._analysis_text = ""
 
     def _current_suggestions(self):
@@ -1584,6 +1641,7 @@ class AssistantPalette:
         self._history_cache = None
         self._set_text("response", "")
         self.set_journal_text("")
+        self._bilan = None
         self.set_status(_t("palette.cleared"))
 
     def _current_context(self):
@@ -1677,6 +1735,7 @@ class AssistantPalette:
                 preset)
 
         self._last_refusal = ""
+        self._bilan = None
         self.busy = True
         self._cancel = threading.Event()
         self._delta_buffer.reset()
@@ -1793,8 +1852,8 @@ class AssistantPalette:
         self._session["runs"] += 1
         self.shell.log("[palette] run: début")
         # Chaque branche rend un résumé {ok, reason, …} : c'est lui qui alimente
-        # le span de fin. Les valeurs par défaut couvrent le cas où la branche
-        # lève avant d'avoir rendu quoi que ce soit.
+        # le span de fin et le bilan de la ligne d'état. Les valeurs par défaut
+        # couvrent le cas où la branche lève avant d'avoir rendu quoi que ce soit.
         kind, summary = "agentic", {"ok": False, "reason": "exception"}
         try:
             if preset is not None and preset.mode == "pipeline":
@@ -1813,7 +1872,7 @@ class AssistantPalette:
                 summary = self._run_agentic(preset, prompt_text, ctx)
             self._delta_buffer.flush()
             self._stop_pulse()
-            self._finish_run()
+            self._finish_run(summary)
         except DispatcherClosed:
             summary = {"ok": False, "reason": "palette_closed"}
             self.shell.log("[palette] run interrompu : palette fermée")
@@ -1823,7 +1882,7 @@ class AssistantPalette:
             self._delta_buffer.flush()
             self._stop_pulse()
             message = _friendly_error(exc)
-            self.set_status(message, tone="error")
+            self._show_bilan(_t("palette.status_failed"), "error", message)
             self._append_response(_t("palette.assistant_prefix"), f"⚠ {message}")
         finally:
             # Le span AVANT de libérer l'état : `_cancel` est remis à None juste
@@ -1840,7 +1899,7 @@ class AssistantPalette:
             self._set_send_label(running=False)
             # Dernier drain, puis extinction : la pompe ne doit pas tourner
             # au repos.
-            self.dispatcher.post(self.dispatcher.stop_pump)
+            self.dispatcher.post(self._settle_after_run)
             self.shell.log("[palette] run: terminé, interface restaurée")
 
     def _emit_run_span(self, kind, preset, summary, started):
@@ -1900,7 +1959,7 @@ class AssistantPalette:
         self.conversation.append("user", shown, ctx.app)
         self.conversation.append("assistant", line.removeprefix(prefix) + new_line + message,
                                  ctx.app)
-        return {"ok": True}
+        return _pipeline_summary(message)
 
     def _run_agentic(self, preset, prompt_text, ctx):
         """Run piloté par le LLM, qui appelle les outils du registre."""
@@ -1926,7 +1985,9 @@ class AssistantPalette:
             self._stream_response(result.text or _t("palette.applied"))
         return {"ok": result.ok, "reason": result.reason,
                 "mode": orchestrator.llm.effective_mode(),
-                "iterations": result.iterations}
+                "iterations": result.iterations,
+                "written": result.changed,
+                "bilan": "" if result.ok else result.text or result.reason}
 
     def _run_selection_rewrite(self, ctx, instruction, selection, target):
         """Applique une demande libre À LA SÉLECTION, par un chemin sûr.
@@ -1971,8 +2032,9 @@ class AssistantPalette:
             self._report_stop()
             return {"ok": False, "reason": "cancelled"}
         if step.error:
-            self._stream_response("⚠ " + error_message(step.error))
-            return {"ok": False, "reason": step.error}
+            message = error_message(step.error)
+            self._stream_response("⚠ " + message)
+            return {"ok": False, "reason": step.error, "bilan": message}
         sink.finish(step.text, step.streamed)
         unwritten = self._selection_unwritten(sink)
         if unwritten:
@@ -1985,7 +2047,7 @@ class AssistantPalette:
         summary = _t("palette.selection_summary", how=how)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
-        return {"ok": True}
+        return {"ok": True, "written": True, "bilan": summary}
 
     def _selection_unwritten(self, sink):
         """Résumé du run quand la réponse n'a pas été écrite sur la sélection :
@@ -2003,7 +2065,7 @@ class AssistantPalette:
         else:
             return None
         self._stream_response(("\n" if self._line_is_open() else "") + message)
-        return {"ok": False, "reason": reason}
+        return {"ok": False, "reason": reason, "bilan": message}
 
     def _run_document_rewrite(self, ctx, instruction, document):
         """Réécrit le document : Python lit, le LLM rédige, Python écrit une
@@ -2056,7 +2118,7 @@ class AssistantPalette:
         self._stream_response(summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
-        return {"ok": True}
+        return {"ok": True, "written": True, "bilan": summary}
 
     def _compose_document(self, ctx, instruction, document):
         """Document sans texte de corps, vide ou fait de titres seuls : le
@@ -2088,7 +2150,7 @@ class AssistantPalette:
         self._stream_response(summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
-        return {"ok": True}
+        return {"ok": True, "written": True, "bilan": summary}
 
     def _document_model(self, document):
         from ..core.text_filters import EXTEND_QUESTION_PATTERNS, patterns_absent_from
@@ -2106,7 +2168,8 @@ class AssistantPalette:
             return {"ok": False, "reason": "cancelled"}
         if result.question:
             self._stream_response("\n" + _t("preset.question_asked"))
-            return {"ok": False, "reason": "model_question"}
+            return {"ok": False, "reason": "model_question",
+                    "bilan": _t("preset.question_asked")}
         if result.error:
             return self._report_rewrite_failure(result)
         return None
@@ -2122,7 +2185,8 @@ class AssistantPalette:
             return {"ok": False, "reason": "cancelled"}
         if outcome == "changed":
             self._stream_response(_t("preset.target_changed"))
-            return {"ok": False, "reason": "target_changed"}
+            return {"ok": False, "reason": "target_changed",
+                    "bilan": _t("preset.target_changed")}
         return None
 
     def _ask_rewrite(self, model, document, instruction):
@@ -2167,8 +2231,9 @@ class AssistantPalette:
     def _report_rewrite_failure(self, result):
         """Dit pourquoi le document n'a pas été réécrit."""
         if result.error != "empty_response":
-            self._stream_response("⚠ " + error_message(result.error))
-            return {"ok": False, "reason": result.error}
+            message = error_message(result.error)
+            self._stream_response("⚠ " + message)
+            return {"ok": False, "reason": result.error, "bilan": message}
         # Dire CE QUI s'est passé : « inexploitable » n'oriente vers aucune
         # action. Si le modèle a consommé son budget en raisonnement sans
         # rien répondre — et que la reprise élargie du client n'a pas suffi —
@@ -2181,14 +2246,15 @@ class AssistantPalette:
                 **{"reasoning.chars": int(step.reasoning_chars),
                    "finish.reason": "length"})
             self._stream_response(_t("palette.budget_starved"))
-            return {"ok": False, "reason": "reasoning_starved"}
+            return {"ok": False, "reason": "reasoning_starved",
+                    "bilan": _t("palette.budget_starved")}
         self.journal_line(
             _t("palette.journal_unusable"),
             step=telemetry_steps.DOCUMENT_EMPTY,
             **{"reply.chars": len(step.text or ""),
                "finish.reason": (step.finish_reason or "unknown")})
         self._stream_response(_t("palette.unusable"))
-        return {"ok": False, "reason": "empty_reply"}
+        return {"ok": False, "reason": "empty_reply", "bilan": _t("palette.unusable")}
 
     def _prepare_agentic_run(self, preset, prompt_text, ctx):
         """Résout prompt, contexte supplémentaire et destination de la sortie."""
@@ -2219,18 +2285,25 @@ class AssistantPalette:
         line = self._current_exchange[-1] if self._current_exchange else ""
         return bool(line) and not line.endswith(("\n", _t("palette.assistant_prefix")))
 
-    def _finish_run(self):
-        """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""
+    def _finish_run(self, summary):
+        """Bilan de fin : arrêté, ou l'issue du run avec le champ de prompt vidé."""
         # Un run touche presque toujours au document : l'analyse précédente
-        # décrit alors un état révolu. La suivante sera relancée à la prochaine
-        # visite de l'onglet, plutôt que d'afficher un constat périmé.
+        # décrit alors un état révolu. La suivante part dès la fin du run si
+        # l'onglet est affiché, sinon à sa prochaine visite.
         self.invalidate_analysis()
         if self._cancelled():
-            self.set_status(_t("run.stopped"), tone="neutral")
+            self._show_bilan(_t("run.stopped"), "neutral")
             return
         self.dispatcher.post(
             lambda: setattr(self._models["prompt"], "Text", ""))
-        self.set_status(_t("palette.done"), tone="success")
+        label, tone = _bilan_line(summary)
+        self._show_bilan(label, tone, summary.get("bilan", "").strip())
+
+    def _settle_after_run(self):
+        """Thread principal, run libéré : la pompe s'éteint, et l'onglet
+        Suggestions affiché relance l'analyse du document que le run a modifié."""
+        self.dispatcher.stop_pump()
+        self._refresh_if_shown()
 
     def _set_input_enabled(self, enabled):
         """Grise le champ de saisie et les chips pendant un run.
