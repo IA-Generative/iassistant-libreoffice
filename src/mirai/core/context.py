@@ -63,10 +63,12 @@ class ToolContext:
             pass
 
     def close_undo(self):
-        """Referme le contexte undo s'il est ouvert. Thread principal seulement.
+        """Referme le contexte undo s'il est ouvert.
 
-        Son état ne change que sur le thread principal : la palette qui se
-        ferme pendant un run et le run lui-même ne le referment qu'une fois.
+        À appeler sur le thread principal, comme `_enter_undo` : la palette
+        qui se ferme pendant un run et le run lui-même le referment alors une
+        seule fois. Sans dispatcher ni AsyncCallback, le repli exécute les deux
+        sur le thread appelant.
         """
         if not self._undo_open:
             return
