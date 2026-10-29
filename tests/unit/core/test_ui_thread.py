@@ -330,6 +330,33 @@ def test_call_leve_closed_apres_fermeture():
         dispatcher.call(lambda: 1, timeout=1)
 
 
+def test_a_call_still_queued_when_the_palette_closes_never_runs():
+    """La palette se ferme pendant qu'une tâche du worker attend la boucle
+    d'événements : la tâche ne s'exécute plus, le worker reçoit DispatcherClosed."""
+    dispatcher, callback = _dispatcher()
+    seen = []
+    captured = {}
+
+    def worker():
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=5)
+        except DispatcherClosed as exc:
+            captured["exc"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(300):
+        if callback.queued:
+            break
+        threading.Event().wait(0.005)
+    dispatcher.close()
+    callback.drain()
+    thread.join(timeout=5)
+
+    assert isinstance(captured.get("exc"), DispatcherClosed)
+    assert seen == []
+
+
 def test_direct_dispatcher_est_synchrone():
     dispatcher = DirectDispatcher()
     seen = []
