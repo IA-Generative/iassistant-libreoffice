@@ -234,7 +234,9 @@ def _imports_a_test_module(node):
 
 def test_test_files_share_code_only_through_the_stubs():
     """Un fichier de tests n'importe ni un module de test ni un conftest : ce
-    qu'ils partagent vit dans tests/stubs/, les fixtures dans un conftest."""
+    qu'ils partagent vit dans tests/stubs/, les fixtures dans un conftest. Un
+    nom en test_ importé est refusé lui aussi, d'où qu'il vienne : pytest le
+    collecterait et le jouerait comme un test du fichier qui l'importe."""
     offenders = []
     for root, dirs, files in os.walk(_TESTS):
         dirs[:] = [d for d in dirs if d != "__pycache__"]
