@@ -7,6 +7,7 @@ faux qui garde les tâches en file et ne les exécute que lorsqu'on le lui deman
 """
 
 import threading
+import time
 
 import pytest
 
@@ -33,6 +34,13 @@ class FakeAsyncCallback:
         pending, self.queued = self.queued, []
         for task in pending:
             task.run()
+
+
+class RefusingAsyncCallback(FakeAsyncCallback):
+    """AsyncCallback d'un LibreOffice dégradé : chaque tâche est refusée."""
+
+    def addCallback(self, task, _data):
+        raise RuntimeError("tâche refusée par la boucle d'événements")
 
 
 class FakeUnoContext:
@@ -213,6 +221,33 @@ def test_call_propage_lexception_de_fn():
     assert isinstance(captured.get("exc"), KeyError)
 
 
+def test_call_relays_an_exception_outside_the_exception_family():
+    """fn lève une BaseException (SystemExit, KeyboardInterrupt) : l'appelant
+    la reçoit au lieu d'attendre sans fin un résultat qui ne viendra pas."""
+    dispatcher, _callback = _dispatcher()
+    captured = {}
+
+    class Aborted(BaseException):
+        pass
+
+    def abort():
+        raise Aborted()
+
+    def worker():
+        try:
+            dispatcher.call(abort, timeout=5)
+        except Aborted as exc:
+            captured["exc"] = exc
+
+    # Démon : si l'exception se perd, le worker reste bloqué sans retenir pytest.
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    _pump_until(dispatcher.drain, thread)
+    thread.join(timeout=10)
+
+    assert isinstance(captured.get("exc"), Aborted)
+
+
 def test_call_leve_timeout_si_personne_ne_draine():
     """Pompe arrêtée ou thread principal retenu : on abandonne, on ne gèle pas.
 
@@ -233,6 +268,82 @@ def test_call_leve_timeout_si_personne_ne_draine():
     thread.join(timeout=5)
 
     assert isinstance(captured.get("exc"), DispatcherTimeout)
+
+
+def test_a_call_given_up_on_is_never_run_later():
+    """Le worker a renoncé sur le délai et annoncé l'échec : la tâche restée
+    en file ne s'exécute plus quand la boucle d'événements la rattrape."""
+    dispatcher, callback = _dispatcher()
+    seen = []
+    captured = {}
+
+    def worker():
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=0.05)
+        except DispatcherTimeout as exc:
+            captured["exc"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=5)
+    callback.drain()
+    dispatcher.drain()
+
+    assert isinstance(captured.get("exc"), DispatcherTimeout)
+    assert seen == []
+
+
+def test_a_call_started_just_before_its_deadline_reports_its_result():
+    """La tâche démarre avant l'expiration du délai et finit après : le worker
+    reçoit son résultat, et non un échec suivi d'une modification."""
+    dispatcher, callback = _dispatcher()
+    result = {}
+
+    def slow():
+        threading.Event().wait(1.5)
+        return 42
+
+    def worker():
+        try:
+            result["value"] = dispatcher.call(slow, timeout=1.0)
+        except DispatcherTimeout as exc:
+            result["value"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(300):
+        if callback.queued:
+            break
+        threading.Event().wait(0.005)
+    callback.drain()
+    thread.join(timeout=5)
+
+    assert result["value"] == 42
+
+
+def test_a_call_whose_pump_cannot_be_armed_fails_at_once():
+    """AsyncCallback refuse la tâche : l'échec est connu tout de suite, le
+    worker n'attend pas tout le délai, et la tâche ne s'exécute plus."""
+    dispatcher = MainThreadDispatcher(FakeUnoContext(RefusingAsyncCallback()))
+    seen = []
+    captured = {}
+
+    def worker():
+        started = time.monotonic()
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=5)
+        except DispatcherTimeout as exc:
+            captured["exc"] = exc
+        captured["elapsed"] = time.monotonic() - started
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=10)
+    dispatcher.drain()
+
+    assert isinstance(captured.get("exc"), DispatcherTimeout)
+    assert captured["elapsed"] < 1
+    assert seen == []
 
 
 def test_call_from_the_main_thread_runs_immediately():

@@ -15,7 +15,7 @@ from src.mirai.core.orchestrator import Orchestrator, RunObserver
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
-from src.mirai.core.ui_thread import DirectDispatcher
+from src.mirai.core.ui_thread import DirectDispatcher, DispatcherTimeout
 from tests.stubs.fake_docs import FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 from tests.stubs.fake_writer_body import FakeBodyDoc
@@ -36,6 +36,35 @@ class RecordingDispatcher(DirectDispatcher):
     def call(self, fn, timeout=30.0):
         self.calls.append(threading.current_thread().name)
         return super().call(fn, timeout=timeout)
+
+
+class HeldMainThread(DirectDispatcher):
+    """Thread principal retenu par une boîte de dialogue modale.
+
+    Comme le vrai dispatcher : un call() qui dépasse son délai renonce sans
+    jamais exécuter sa tâche, un post() attend que la main revienne.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.held = False
+        self._posted = []
+
+    def call(self, fn, timeout=30.0):
+        if self.held:
+            raise DispatcherTimeout("le thread principal n'a pas répondu")
+        return super().call(fn, timeout=timeout)
+
+    def post(self, fn):
+        if self.held:
+            self._posted.append(fn)
+            return True
+        return super().post(fn)
+
+    def release(self):
+        self.held = False
+        for fn in self._posted:
+            fn()
 
 
 class FakeDoc:
@@ -79,13 +108,14 @@ class ScriptedLLM:
         return [{"role": "tool", "content": r.content} for r in results]
 
 
-def _registry(on_call=None):
+def _registry(on_call=None, mutates=False):
     registry = ToolRegistry()
     registry.register(ToolSpec(
         name="writer_insert_text", description="test", apps=("writer",),
         parameters={"type": "object", "properties": {}},
         handler=on_call or (
-            lambda ctx, args: ToolResult(call_id="", ok=True, content="ok"))))
+            lambda ctx, args: ToolResult(call_id="", ok=True, content="ok")),
+        mutates=mutates))
     return registry
 
 
@@ -114,15 +144,28 @@ def test_tools_are_executed_through_the_dispatcher():
     assert dispatcher.calls, "l'exécution du tool doit passer par dispatcher.call"
 
 
-def test_undo_context_is_closed_through_the_dispatcher():
-    dispatcher = RecordingDispatcher()
-    ctx = _context(FakeShell(), dispatcher)
-    llm = ScriptedLLM([_StepResult(text="ok")])
+def test_a_run_ending_while_the_main_thread_is_held_closes_its_undo_context_later():
+    """Une boîte de dialogue modale retient le thread principal quand le run
+    se termine : le contexte undo se referme à son retour au lieu de rester
+    ouvert pour le reste de la session."""
+    dispatcher = HeldMainThread()
+    fake = FakeWriterDoc()
 
-    Orchestrator(llm, _registry(), ctx, dispatcher=dispatcher).run_agentic(
-        "x", PaletteSink())
+    def write_then_dialog(_ctx, _args):
+        dispatcher.held = True
+        return ToolResult(call_id="", ok=True, content="ok")
 
-    assert dispatcher.calls, "undo_end doit passer par le dispatcher"
+    llm = ScriptedLLM([
+        _StepResult(tool_calls=[ToolCall(id="1", name="writer_insert_text",
+                                         arguments={})]),
+        _StepResult(text="Fini."),
+    ])
+    ctx = _context(FakeShell(), dispatcher, doc=fake)
+    Orchestrator(llm, _registry(write_then_dialog, mutates=True), ctx,
+                 dispatcher=dispatcher).run_agentic("x", PaletteSink())
+    dispatcher.release()
+
+    assert fake.undo.entered and fake.undo.left == 1
 
 
 

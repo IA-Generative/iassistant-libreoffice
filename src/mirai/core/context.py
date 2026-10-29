@@ -12,6 +12,8 @@ thread principal. Un run vit dans un thread worker ; toucher `model` ou
 
 from __future__ import annotations
 
+from .ui_thread import DispatcherTimeout
+
 
 class ToolContext:
     def __init__(self, model, controller, app, shell, dispatcher=None):
@@ -50,6 +52,11 @@ class ToolContext:
             return
         try:
             self.on_main(self._undo_manager.leaveUndoContext)
+        except DispatcherTimeout:
+            # Un call() abandonné ne s'exécute plus : sans ce post(), que le
+            # thread principal joue à son retour, le document resterait dans
+            # le contexte undo pour le reste de la session.
+            self.dispatcher.post(self._undo_manager.leaveUndoContext)
         except Exception:
             pass
         self._undo_open = False

@@ -74,6 +74,12 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
      Il n'existe pas de timer UNO : `com.sun.star.awt.Timer` renvoie `null`.
    - **La pompe s'éteint dès que la file est vide** — se réarmer sans
      condition monopolise la boucle et gèle l'interface immédiatement.
+   - **Un `call()` abandonné ne s'exécute plus** : au-delà du délai, l'appelant
+     annonce l'échec et la tâche restée en file est sautée ; une tâche déjà
+     démarrée rend son résultat. Une pompe qu'`AsyncCallback` refuse d'armer
+     fait renoncer tout de suite, sans attendre le délai. Ce qui doit
+     s'exécuter malgré tout repasse par `post()` : `ToolContext.undo_end` le
+     fait pour que le contexte undo se referme au retour du thread principal.
    - **Écrire du texte** : `model.Text` porte l'état, `control.setText()`
      l'affiche. Un contrôle déjà doté d'un peer ne repeint pas sur la seule
      écriture du modèle — passer par `_set_text()`, jamais par `model.Text`
