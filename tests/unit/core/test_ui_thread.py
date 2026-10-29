@@ -273,12 +273,12 @@ def test_a_call_started_just_before_its_deadline_reports_its_result():
     result = {}
 
     def slow():
-        threading.Event().wait(0.3)
+        threading.Event().wait(1.5)
         return 42
 
     def worker():
         try:
-            result["value"] = dispatcher.call(slow, timeout=0.1)
+            result["value"] = dispatcher.call(slow, timeout=1.0)
         except DispatcherTimeout as exc:
             result["value"] = exc
 
