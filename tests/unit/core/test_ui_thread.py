@@ -235,6 +235,57 @@ def test_call_leve_timeout_si_personne_ne_draine():
     assert isinstance(captured.get("exc"), DispatcherTimeout)
 
 
+def test_a_call_given_up_on_is_never_run_later():
+    """Le worker a renoncé sur le délai et annoncé l'échec : la tâche restée
+    en file ne s'exécute plus quand la boucle d'événements la rattrape."""
+    dispatcher, callback = _dispatcher()
+    seen = []
+    captured = {}
+
+    def worker():
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=0.05)
+        except DispatcherTimeout as exc:
+            captured["exc"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=5)
+    callback.drain()
+    dispatcher.drain()
+
+    assert isinstance(captured.get("exc"), DispatcherTimeout)
+    assert seen == []
+
+
+def test_a_call_started_just_before_its_deadline_reports_its_result():
+    """La tâche démarre avant l'expiration du délai et finit après : le worker
+    reçoit son résultat, et non un échec suivi d'une modification."""
+    dispatcher, callback = _dispatcher()
+    result = {}
+
+    def slow():
+        threading.Event().wait(0.3)
+        return 42
+
+    def worker():
+        try:
+            result["value"] = dispatcher.call(slow, timeout=0.1)
+        except DispatcherTimeout as exc:
+            result["value"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(300):
+        if callback.queued:
+            break
+        threading.Event().wait(0.005)
+    callback.drain()
+    thread.join(timeout=5)
+
+    assert result["value"] == 42
+
+
 def test_call_from_the_main_thread_runs_immediately():
     """Sur le thread principal, aucun détour : ni file, ni attente."""
     dispatcher, _callback = _dispatcher()

@@ -112,6 +112,9 @@ class MainThreadDispatcher:
         boucle d'événements, et `timeout` couvre cette attente. Lève
         DispatcherClosed si la palette est fermée, DispatcherTimeout au-delà
         du délai, et propage telle quelle l'exception levée par fn.
+
+        fn ne s'exécute jamais après un DispatcherTimeout : l'appelant a déjà
+        annoncé l'échec. Une tâche démarrée avant le délai rend son résultat.
         """
         if self._closed:
             raise DispatcherClosed("palette fermée")
@@ -124,8 +127,13 @@ class MainThreadDispatcher:
             return fn()
 
         result_queue = queue.Queue(maxsize=1)
+        # Démarrer la tâche et y renoncer s'excluent : le premier qui prend le
+        # verrou décide pour les deux.
+        claim = threading.Lock()
 
         def _run_and_report():
+            if not claim.acquire(blocking=False):
+                return                    # l'appelant a renoncé
             try:
                 result_queue.put(("ok", fn()))
             except Exception as exc:      # relayée à l'appelant
@@ -135,10 +143,12 @@ class MainThreadDispatcher:
         try:
             status, payload = result_queue.get(timeout=timeout)
         except queue.Empty:
-            raise DispatcherTimeout(
-                f"le thread principal n'a pas répondu en {timeout:g} s "
-                "(pompe arrêtée, ou boîte de dialogue modale ouverte ?)"
-            ) from None
+            if claim.acquire(blocking=False):
+                raise DispatcherTimeout(
+                    f"le thread principal n'a pas répondu en {timeout:g} s "
+                    "(pompe arrêtée, ou boîte de dialogue modale ouverte ?)"
+                ) from None
+            status, payload = result_queue.get()    # démarrée à temps : elle finit
         if status == "error":
             raise payload
         return payload
