@@ -137,7 +137,7 @@ class MainThreadDispatcher:
                 return                    # l'appelant a renoncé
             try:
                 result_queue.put(("ok", fn()))
-            except Exception as exc:      # relayée à l'appelant
+            except BaseException as exc:  # relayée : l'appelant l'attend sans délai
                 result_queue.put(("error", exc))
 
         armed = self._enqueue(_run_and_report)

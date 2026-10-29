@@ -221,6 +221,33 @@ def test_call_propage_lexception_de_fn():
     assert isinstance(captured.get("exc"), KeyError)
 
 
+def test_call_relays_an_exception_outside_the_exception_family():
+    """fn lève une BaseException (SystemExit, KeyboardInterrupt) : l'appelant
+    la reçoit au lieu d'attendre sans fin un résultat qui ne viendra pas."""
+    dispatcher, _callback = _dispatcher()
+    captured = {}
+
+    class Aborted(BaseException):
+        pass
+
+    def abort():
+        raise Aborted()
+
+    def worker():
+        try:
+            dispatcher.call(abort, timeout=5)
+        except Aborted as exc:
+            captured["exc"] = exc
+
+    # Démon : si l'exception se perd, le worker reste bloqué sans retenir pytest.
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    _pump_until(dispatcher.drain, thread)
+    thread.join(timeout=10)
+
+    assert isinstance(captured.get("exc"), Aborted)
+
+
 def test_call_leve_timeout_si_personne_ne_draine():
     """Pompe arrêtée ou thread principal retenu : on abandonne, on ne gèle pas.
 
