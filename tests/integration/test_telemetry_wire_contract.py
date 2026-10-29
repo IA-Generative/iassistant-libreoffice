@@ -128,33 +128,19 @@ def test_every_declared_step_survives_the_wire(step):
     assert read_back["probe.flag"] is True
 
 
-def test_the_run_duration_is_measured_and_not_hardcoded():
+def test_the_run_duration_is_measured_and_not_hardcoded(palette_module):
     """Une durée toujours nulle passerait inaperçue : tous les runs de test sont
     instantanés. On en fait durer un pour de vrai.
     """
     import time
     from unittest.mock import MagicMock
 
-    from src.mirai.core.ui_thread import DirectDispatcher
-    from src.mirai.ui import dsfr
-    from src.mirai.ui import palette as palette_module
-    from tests.unit.core.test_palette_build import FakeDialog
-
-    dialog = FakeDialog()
-    dsfr.make_dialog = lambda *_a, **_k: (dialog, dialog.model)
-    dsfr.probe_font = lambda _toolkit: "Arial"
-    palette_module._open_palette = [None]
-    palette_module.MainThreadDispatcher = lambda _ctx, log=None: DirectDispatcher()
+    from tests.stubs.fake_palette_dialog import build_palette
 
     spans = []
-    shell = MagicMock()
-    shell.toolkit.return_value = MagicMock()
-    shell.data_dir.return_value = "/tmp/mirai-duration-test"
-    shell.get_config.side_effect = lambda key, default=None: default
-    shell.log = lambda _m: None
-    shell.telemetry = lambda name, attrs=None: spans.append((name, dict(attrs or {})))
-
-    palette = palette_module.AssistantPalette(MagicMock(), shell, "writer")
+    palette = build_palette(palette_module)
+    palette.shell.telemetry = lambda name, attrs=None: spans.append(
+        (name, dict(attrs or {})))
 
     def _slow(*_a, **_k):
         time.sleep(0.2)

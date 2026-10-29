@@ -18,22 +18,7 @@ from src.mirai.core.ui_thread import (
     MainThreadDispatcher,
     is_main_thread,
 )
-
-
-class FakeAsyncCallback:
-    """Imite com.sun.star.awt.AsyncCallback : accumule, exécute sur demande."""
-
-    def __init__(self):
-        self.queued = []
-
-    def addCallback(self, task, _data):
-        self.queued.append(task)
-
-    def drain(self):
-        """Joue les tâches en attente — ce que ferait la boucle d'événements."""
-        pending, self.queued = self.queued, []
-        for task in pending:
-            task.run()
+from tests.stubs.fake_async_callback import FakeAsyncCallback, FakeUnoContext
 
 
 class RefusingAsyncCallback(FakeAsyncCallback):
@@ -41,21 +26,6 @@ class RefusingAsyncCallback(FakeAsyncCallback):
 
     def addCallback(self, task, _data):
         raise RuntimeError("tâche refusée par la boucle d'événements")
-
-
-class FakeUnoContext:
-    def __init__(self, callback=None, fail=False):
-        self._callback = callback
-        self._fail = fail
-
-    def getServiceManager(self):
-        return self
-
-    def createInstanceWithContext(self, name, _ctx):
-        assert name == "com.sun.star.awt.AsyncCallback"
-        if self._fail:
-            raise RuntimeError("service indisponible")
-        return self._callback
 
 
 class _DispatcherStoppedUnderAWorker(MainThreadDispatcher):
@@ -358,6 +328,33 @@ def test_call_leve_closed_apres_fermeture():
 
     with pytest.raises(DispatcherClosed):
         dispatcher.call(lambda: 1, timeout=1)
+
+
+def test_a_call_still_queued_when_the_palette_closes_never_runs():
+    """La palette se ferme pendant qu'une tâche du worker attend la boucle
+    d'événements : la tâche ne s'exécute plus, le worker reçoit DispatcherClosed."""
+    dispatcher, callback = _dispatcher()
+    seen = []
+    captured = {}
+
+    def worker():
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=5)
+        except DispatcherClosed as exc:
+            captured["exc"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(300):
+        if callback.queued:
+            break
+        threading.Event().wait(0.005)
+    dispatcher.close()
+    callback.drain()
+    thread.join(timeout=5)
+
+    assert isinstance(captured.get("exc"), DispatcherClosed)
+    assert seen == []
 
 
 def test_direct_dispatcher_est_synchrone():

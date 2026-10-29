@@ -41,22 +41,36 @@ class ToolContext:
             return
         try:
             self._undo_manager = self.on_main(self.model.getUndoManager)
-            self.on_main(lambda: self._undo_manager.enterUndoContext(label))
-            self._undo_open = True
+            self.on_main(lambda: self._enter_undo(label))
         except Exception:
             self._undo_manager = None
 
+    def _enter_undo(self, label):
+        self._undo_manager.enterUndoContext(label)
+        self._undo_open = True
+
     def undo_end(self):
-        if not self._undo_open or self._undo_manager is None:
-            self._undo_open = False
+        if not self._undo_open:
             return
         try:
-            self.on_main(self._undo_manager.leaveUndoContext)
+            self.on_main(self.close_undo)
         except DispatcherTimeout:
             # Un call() abandonné ne s'exécute plus : sans ce post(), que le
             # thread principal joue à son retour, le document resterait dans
             # le contexte undo pour le reste de la session.
-            self.dispatcher.post(self._undo_manager.leaveUndoContext)
+            self.dispatcher.post(self.close_undo)
         except Exception:
             pass
+
+    def close_undo(self):
+        """Referme le contexte undo s'il est ouvert.
+
+        À appeler sur le thread principal, comme `_enter_undo` : la palette
+        qui se ferme pendant un run et le run lui-même le referment alors une
+        seule fois. Sans dispatcher ni AsyncCallback, le repli exécute les deux
+        sur le thread appelant.
+        """
+        if not self._undo_open:
+            return
         self._undo_open = False
+        self._undo_manager.leaveUndoContext()

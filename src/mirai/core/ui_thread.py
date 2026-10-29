@@ -116,6 +116,8 @@ class MainThreadDispatcher:
         fn ne s'exécute jamais après un DispatcherTimeout : l'appelant a déjà
         annoncé l'échec. Une tâche démarrée avant le délai rend son résultat.
         Une pompe qu'AsyncCallback refuse d'armer fait renoncer tout de suite.
+        Une tâche encore en file quand la palette se ferme ne s'exécute plus
+        non plus : l'appelant reçoit DispatcherClosed.
         """
         if self._closed:
             raise DispatcherClosed("palette fermée")
@@ -132,15 +134,7 @@ class MainThreadDispatcher:
         # verrou décide pour les deux.
         claim = threading.Lock()
 
-        def _run_and_report():
-            if not claim.acquire(blocking=False):
-                return                    # l'appelant a renoncé
-            try:
-                result_queue.put(("ok", fn()))
-            except BaseException as exc:  # relayée : l'appelant l'attend sans délai
-                result_queue.put(("error", exc))
-
-        armed = self._enqueue(_run_and_report)
+        armed = self._enqueue(lambda: self._run_and_report(fn, claim, result_queue))
         try:
             status, payload = result_queue.get(timeout=timeout if armed else 0)
         except queue.Empty:
@@ -153,6 +147,20 @@ class MainThreadDispatcher:
         if status == "error":
             raise payload
         return payload
+
+    def _run_and_report(self, fn, claim, result_queue):
+        """La tâche d'un `call()`, jouée par le thread principal."""
+        if not claim.acquire(blocking=False):
+            return                    # l'appelant a renoncé
+        # La palette fermée a refermé le contexte undo du run : le document ne
+        # doit plus bouger.
+        if self._closed:
+            result_queue.put(("error", DispatcherClosed("palette fermée")))
+            return
+        try:
+            result_queue.put(("ok", fn()))
+        except BaseException as exc:  # relayée : l'appelant l'attend sans délai
+            result_queue.put(("error", exc))
 
     def start_pump(self):
         """Démarre le drain de la file. À APPELER DEPUIS LE THREAD PRINCIPAL.
