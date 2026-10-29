@@ -115,6 +115,7 @@ class MainThreadDispatcher:
 
         fn ne s'exécute jamais après un DispatcherTimeout : l'appelant a déjà
         annoncé l'échec. Une tâche démarrée avant le délai rend son résultat.
+        Une pompe qu'AsyncCallback refuse d'armer fait renoncer tout de suite.
         """
         if self._closed:
             raise DispatcherClosed("palette fermée")
@@ -139,15 +140,15 @@ class MainThreadDispatcher:
             except Exception as exc:      # relayée à l'appelant
                 result_queue.put(("error", exc))
 
-        self._enqueue(_run_and_report)
+        armed = self._enqueue(_run_and_report)
         try:
-            status, payload = result_queue.get(timeout=timeout)
+            status, payload = result_queue.get(timeout=timeout if armed else 0)
         except queue.Empty:
             if claim.acquire(blocking=False):
+                cause = (f"en {timeout:g} s (pompe arrêtée, ou boîte de dialogue "
+                         "modale ouverte ?)" if armed else ": armement de la pompe refusé")
                 raise DispatcherTimeout(
-                    f"le thread principal n'a pas répondu en {timeout:g} s "
-                    "(pompe arrêtée, ou boîte de dialogue modale ouverte ?)"
-                ) from None
+                    f"le thread principal n'a pas répondu {cause}") from None
             status, payload = result_queue.get()    # démarrée à temps : elle finit
         if status == "error":
             raise payload
@@ -193,32 +194,39 @@ class MainThreadDispatcher:
         l'extinction. L'armement depuis un worker n'est délivré qu'au prochain
         réveil de la boucle ; tant qu'un run produit du trafic régulier
         (fragments, jauge), la pompe reste vivante.
+
+        Rend False si la pompe était éteinte et n'a pas pu être armée.
         """
         self._queue.put(fn)
-        if not self._pumping:
-            self._arm_pump_from_worker()
+        if self._pumping:
+            return True
+        return self._arm_pump_from_worker()
 
     def _arm_pump_from_worker(self):
         """Tentative d'armement depuis un thread de fond (best effort)."""
         self._pumping = True
         try:
-            self._arm_pump()
+            return self._arm_pump()
         except Exception:
             self._pumping = False
+            return False
 
     def _arm_pump(self):
+        """Arme un tour de pompe. Rend False si AsyncCallback refuse la tâche."""
         callback = self._async_callback()
         if callback is None:
             self._pumping = False
             self.drain()
-            return
+            return True
         task = _Task(self._pump_once)
         self._pump = task           # référence vivante jusqu'au notify
         try:
             callback.addCallback(task, None)
+            return True
         except Exception as exc:
             self._note(f"pompe : réarmement impossible ({exc})")
             self._pumping = False
+            return False
 
     def _pump_once(self):
         """Un tour de pompe : drainer, puis se réarmer S'IL RESTE DU TRAVAIL.

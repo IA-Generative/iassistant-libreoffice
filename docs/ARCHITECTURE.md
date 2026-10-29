@@ -76,7 +76,8 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
      condition monopolise la boucle et gèle l'interface immédiatement.
    - **Un `call()` abandonné ne s'exécute plus** : au-delà du délai, l'appelant
      annonce l'échec et la tâche restée en file est sautée ; une tâche déjà
-     démarrée rend son résultat.
+     démarrée rend son résultat. Une pompe qu'`AsyncCallback` refuse d'armer
+     fait renoncer tout de suite, sans attendre le délai.
    - **Écrire du texte** : `model.Text` porte l'état, `control.setText()`
      l'affiche. Un contrôle déjà doté d'un peer ne repeint pas sur la seule
      écriture du modèle — passer par `_set_text()`, jamais par `model.Text`

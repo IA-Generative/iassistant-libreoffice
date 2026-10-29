@@ -7,6 +7,7 @@ faux qui garde les tâches en file et ne les exécute que lorsqu'on le lui deman
 """
 
 import threading
+import time
 
 import pytest
 
@@ -33,6 +34,13 @@ class FakeAsyncCallback:
         pending, self.queued = self.queued, []
         for task in pending:
             task.run()
+
+
+class RefusingAsyncCallback(FakeAsyncCallback):
+    """AsyncCallback d'un LibreOffice dégradé : chaque tâche est refusée."""
+
+    def addCallback(self, task, _data):
+        raise RuntimeError("tâche refusée par la boucle d'événements")
 
 
 class FakeUnoContext:
@@ -284,6 +292,31 @@ def test_a_call_started_just_before_its_deadline_reports_its_result():
     thread.join(timeout=5)
 
     assert result["value"] == 42
+
+
+def test_a_call_whose_pump_cannot_be_armed_fails_at_once():
+    """AsyncCallback refuse la tâche : l'échec est connu tout de suite, le
+    worker n'attend pas tout le délai, et la tâche ne s'exécute plus."""
+    dispatcher = MainThreadDispatcher(FakeUnoContext(RefusingAsyncCallback()))
+    seen = []
+    captured = {}
+
+    def worker():
+        started = time.monotonic()
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=5)
+        except DispatcherTimeout as exc:
+            captured["exc"] = exc
+        captured["elapsed"] = time.monotonic() - started
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=10)
+    dispatcher.drain()
+
+    assert isinstance(captured.get("exc"), DispatcherTimeout)
+    assert captured["elapsed"] < 1
+    assert seen == []
 
 
 def test_call_from_the_main_thread_runs_immediately():
