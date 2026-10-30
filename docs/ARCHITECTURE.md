@@ -239,9 +239,10 @@ document titre + corps repart intégralement en style titre. On écrit donc
 paragraphe par paragraphe (`para.setString`), on efface le surplus d'un seul
 tenant par une plage de curseur (`removeTextContent` ne supprime rien quand
 Writer enregistre les modifications), et les paragraphes ajoutés héritent du
-style du **dernier** remplacé. `writer_get_document_map` annote les styles (`[P1] <Heading 1>`) et
-termine par `[FIN DU DOCUMENT — N paragraphes]` : sans ces deux repères, le
-modèle fusionne un titre avec le corps, ou s'arrête avant la fin.
+style du **dernier** remplacé. `writer_get_document_map` annote les styles
+(`[P1] <Heading 1>`) et termine par `[FIN DU DOCUMENT — N paragraphes]` : sans
+ces deux repères, le modèle fusionne un titre avec le corps, ou s'arrête avant
+la fin.
 
 **Règle de complétude du catalogue.** Tout outil de LECTURE doit avoir son
 pendant d'ÉCRITURE à la même granularité, sinon le modèle sait décrire ce
