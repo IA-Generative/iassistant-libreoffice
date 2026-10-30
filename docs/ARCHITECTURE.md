@@ -216,8 +216,8 @@ document, dans le style du corps.
 Les tableaux du corps sont comptés à la même lecture, mais leur texte n'est ni
 lu ni écrit : l'énumération du corps rend un tableau comme un seul élément.
 Le bilan dit combien de tableaux l'action a laissés de côté, et les presets
-annoncent un document dont le texte n'est que dans des tableaux, ou dans des
-titres et des tableaux, au lieu de le dire vide ou fait de titres seuls.
+annoncent un document fait de tableaux seuls, ou de titres et de tableaux, au
+lieu de le dire vide ou fait de titres seuls.
 Cette lecture note aussi quel paragraphe suit chaque tableau : un morceau
 réécrit s'arrête à un tableau, car effacer d'un seul tenant les paragraphes en
 trop de part et d'autre le supprime. En remplacement, la demande libre sur un

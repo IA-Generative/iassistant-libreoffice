@@ -328,7 +328,7 @@
   "palette.applied": "Cambio aplicado.",
   "palette.empty_document": "El documento está vacío.",
   "palette.headings_only": "Este documento solo contiene títulos.",
-  "palette.tables_only": "El texto de este documento solo está en tablas, que las acciones sobre todo el documento dejan de lado.",
+  "palette.tables_only": "Este documento solo contiene tablas, que las acciones sobre todo el documento dejan de lado.",
   "palette.headings_and_tables_only": "Este documento solo contiene títulos y tablas, que las acciones sobre todo el documento dejan de lado.",
   "palette.tables_left": "{count} tabla(s) dejada(s) de lado.",
   "palette.rewrite_by_section": "Documento largo: la petición se aplica por partes, sección por sección, dividiendo las más largas.",

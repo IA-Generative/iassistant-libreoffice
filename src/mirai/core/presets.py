@@ -404,8 +404,9 @@ def _read_document(ctx, span, action):
 
 
 def _empty_message(snapshot):
-    """Un document dont le texte n'est que dans des tableaux n'est pas vide
-    aux yeux de l'utilisateur : le message le dit."""
+    """Un document fait de tableaux n'est pas vide aux yeux de l'utilisateur :
+    le message dit qu'il ne contient que des tableaux, ce qui reste vrai quand
+    leurs cellules, jamais lues, sont vides."""
     return _t("palette.tables_only") if snapshot.tables else _t("palette.empty_document")
 
 

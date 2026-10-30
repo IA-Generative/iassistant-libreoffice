@@ -275,8 +275,8 @@ WHOLE_DOCUMENT_RUNNERS = pytest.mark.parametrize(
 
 @WHOLE_DOCUMENT_RUNNERS
 def test_a_document_whose_text_is_only_in_tables_says_so_without_calling_the_model(runner):
-    """Une fiche faite de tableaux n'est pas vide : le message dit que son
-    texte est dans des tableaux, que l'action laisse de côté."""
+    """Une fiche faite de tableaux n'est pas vide : le message dit qu'elle ne
+    contient que des tableaux, que l'action laisse de côté."""
     doc = FakeBodyDoc(["", TABLE, ""])
     shell = FakeShell()
 
