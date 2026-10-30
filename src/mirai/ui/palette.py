@@ -2101,7 +2101,8 @@ class AssistantPalette:
 
         self._progress.set_phase(_t("progress.writing"))
         self._append_response(_t("palette.assistant_prefix"))
-        result = self._ask_rewrite(self._document_model(document), document, instruction)
+        result = self._ask_rewrite(self._document_model(document), document, instruction,
+                                   append)
         failure = self._ask_failed(result)
         if failure is None:
             failure = self._write_document(
@@ -2204,15 +2205,16 @@ class AssistantPalette:
                     "bilan": _t("preset.target_changed")}
         return None
 
-    def _ask_rewrite(self, model, document, instruction):
+    def _ask_rewrite(self, model, document, instruction, append):
         """Tout le corps d'un seul appel ; au-delà du seuil, ou quand un
-        tableau le coupe, section par section et entre les tableaux, et la
-        palette le dit : une demande globale (« en deux paragraphes »)
-        s'applique alors à chaque morceau. Une seule réponse ne peut pas se
-        répartir de part et d'autre d'un tableau."""
+        tableau le coupe en remplacement, section par section et entre les
+        tableaux, et la palette le dit : une demande globale (« en deux
+        paragraphes ») s'applique alors à chaque morceau. Une seule réponse ne
+        peut pas se répartir de part et d'autre d'un tableau ; en ajout, elle
+        suit le document et n'a pas à le faire."""
         limit = whole_document.max_chars(self.shell)
         span = whole_document.body_span(document)
-        if whole_document.spans_table(document, span):
+        if not append and whole_document.spans_table(document, span):
             self._stream_response(_t("palette.rewrite_around_tables") + "\n")
         elif sum(len(document.texts[i]) for i in span) <= limit:
             return whole_document.rewrite_whole(model, document, instruction,

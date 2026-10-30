@@ -978,6 +978,27 @@ def test_a_request_on_a_body_cut_by_a_table_goes_piece_by_piece_and_keeps_it(
     assert _t("palette.rewrite_around_tables") in palette._models["response"].Text
 
 
+def test_an_appended_rewrite_of_a_body_cut_by_a_table_keeps_a_single_call(
+        palette_module, monkeypatch):
+    """En ajout, la réponse suit le document sans rien effacer : « en un seul
+    paragraphe » en donne un seul, comme sans tableau."""
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", TABLE, "Les chiffres."],
+                      ["Heading 1", "Standard", "", "Standard"])
+    palette, relay, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Un seul paragraphe."], append=True,
+        instruction="Réécris ce document en un seul paragraphe")
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert doc.paragraphs == ["Rapport", "Le contexte.", "Les chiffres.",
+                              "---début-du-texte-réécrit---", "Un seul paragraphe.",
+                              "---fin-du-texte-réécrit---"]
+    assert doc.tables == 1
+    assert len(relay.requests) == 1
+    assert _t("palette.rewrite_around_tables") not in palette._models["response"].Text
+
+
 @pytest.mark.parametrize("reply", [ABEILLES, "Les abeilles pollinisent les fleurs."],
                          ids=["two_paragraphs", "one_paragraph"])
 def test_text_asked_for_a_document_of_tables_goes_after_the_last_table(

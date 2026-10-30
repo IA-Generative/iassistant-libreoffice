@@ -220,9 +220,10 @@ annoncent un document dont le texte n'est que dans des tableaux, ou dans des
 titres et des tableaux, au lieu de le dire vide ou fait de titres seuls.
 Cette lecture note aussi quel paragraphe suit chaque tableau : un morceau
 réécrit s'arrête à un tableau, car effacer d'un seul tenant les paragraphes en
-trop de part et d'autre le supprime. La demande libre sur un corps coupé par un
-tableau passe donc morceau par morceau, et la palette le dit ; le texte rédigé
-pour un document sans corps va après le dernier tableau ; et
+trop de part et d'autre le supprime. En remplacement, la demande libre sur un
+corps coupé par un tableau passe donc morceau par morceau, et la palette le
+dit ; en ajout, rien n'est effacé et elle part d'un seul appel ; le texte
+rédigé pour un document sans corps va après le dernier tableau ; et
 `writer_replace_paragraphs` refuse une plage qui enjambe un tableau, sauf avec
 une ligne par paragraphe, qui garde chaque texte de son côté.
 
