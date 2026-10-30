@@ -208,9 +208,9 @@ def test_absence_on_both_checks_wipes(tmp_path, timers):
 def test_skipped_listener_registration_is_logged(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(uninstall, "MirAIUninstallListener", None)
     with caplog.at_level(logging.INFO):
-        _watch(tmp_path, MagicMock()).register()
+        _watch(tmp_path, MagicMock()).register(MagicMock())
         monkeypatch.setattr(uninstall, "MirAIUninstallListener", MagicMock())
-        _watch(tmp_path, None).register()
+        _watch(tmp_path, None).register(MagicMock())
     assert len([line for line in caplog.messages if line.startswith("[désinstallation]")]) == 2
     assert shell_runtime.get().uninstall_listener is None
 
@@ -231,3 +231,126 @@ def test_failure_in_the_check_is_logged_not_raised(tmp_path, monkeypatch, caplog
         timers()
         timers()
     assert any("[désinstallation]" in line and "boom" in line for line in caplog.messages)
+
+
+def _watched(tmp_path, manager):
+    """Surveillance branchée sur un faux Desktop ; rend aussi l'écoute que
+    LibreOffice appellera à sa fermeture."""
+    watch = _watch(tmp_path, manager)
+    desktop = MagicMock()
+    watch.register(desktop)
+    return watch, desktop.addTerminateListener.call_args.args[0]
+
+
+def test_uninstall_then_close_before_the_timers_wipes_at_close(tmp_path):
+    """LibreOffice fermé ou redémarré par son invite avant la confirmation
+    différée : l'effacement a lieu pendant la fermeture."""
+    _profile(tmp_path)
+    watch, closing = _watched(tmp_path, _manager({}))
+    watch.schedule_check()
+    closing.notifyTermination(None)
+    assert not (tmp_path / "mirai").exists()
+    assert not (tmp_path / "config.json").exists()
+    assert credentials.store().get("refresh_token") is None
+
+
+def test_update_finished_before_the_close_wipes_nothing(tmp_path):
+    """Mise à jour ou remplacement terminé avant la fermeture : l'extension est
+    toujours déployée, rien n'est effacé."""
+    _profile(tmp_path)
+    watch, closing = _watched(tmp_path, _manager({"user": [IDENTIFIER]}))
+    watch.schedule_check()
+    closing.notifyTermination(None)
+    assert (tmp_path / "mirai" / "settings.json").exists()
+
+
+def test_close_without_extension_change_asks_libreoffice_nothing(tmp_path):
+    """Fermeture ordinaire, sans changement dans le Gestionnaire des extensions
+    pendant la session : aucune requête de déploiement, rien d'effacé."""
+    _profile(tmp_path)
+    manager = _manager({})
+    _, closing = _watched(tmp_path, manager)
+    closing.notifyTermination(None)
+    manager.getDeployedExtensions.assert_not_called()
+    assert (tmp_path / "mirai" / "settings.json").exists()
+
+
+def test_close_during_own_update_wipes_nothing(tmp_path):
+    """La mise à jour automatique installe puis ferme LibreOffice : rien n'est
+    effacé, même si l'ancienne entrée a déjà disparu."""
+    _profile(tmp_path)
+    watch, closing = _watched(tmp_path, _manager({}))
+    watch.schedule_check()
+    shell_runtime.get().self_update_in_flight = True
+    closing.notifyTermination(None)
+    assert (tmp_path / "mirai" / "settings.json").exists()
+
+
+def test_closing_libreoffice_is_never_vetoed(tmp_path):
+    _profile(tmp_path)
+    watch, closing = _watched(tmp_path, _manager({}))
+    watch.schedule_check()
+    assert closing.queryTermination(None) is None
+    assert (tmp_path / "mirai" / "settings.json").exists()
+
+
+def test_close_is_listened_to_once_per_process(tmp_path):
+    first = make_job(config_dir=str(tmp_path))
+    second = make_job(config_dir=str(tmp_path))
+    first.desktop.addTerminateListener.assert_called_once()
+    second.desktop.addTerminateListener.assert_not_called()
+
+
+class _ObservedLock:
+    """Verrou réel qui signale qu'un thread attend pendant qu'un autre le tient."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.awaited = threading.Event()
+
+    def __enter__(self):
+        if not self._lock.acquire(blocking=False):
+            self.awaited.set()
+            self._lock.acquire()
+
+    def __exit__(self, *_exc):
+        self._lock.release()
+
+
+def test_close_during_the_deferred_wipe_waits_for_it_and_wipes_once(tmp_path, monkeypatch, timers):
+    """La confirmation différée efface pendant que LibreOffice se ferme : la
+    fermeture attend la fin de cet effacement et n'en lance pas un second."""
+    _profile(tmp_path)
+    lock = _ObservedLock()
+    shell_runtime.get().wipe_lock = lock
+    wiping, release = threading.Event(), threading.Event()
+    wipes = []
+    real_wipe = local_config.wipe
+
+    def slow_wipe(user_config_dir):
+        wipes.append(user_config_dir)
+        wiping.set()
+        release.wait(5)
+        real_wipe(user_config_dir)
+
+    monkeypatch.setattr(local_config, "wipe", slow_wipe)
+    watch, closing = _watched(tmp_path, _manager({}))
+    watch.schedule_check()
+    timers()
+    deferred = threading.Thread(target=timers)
+    deferred.start()
+    assert wiping.wait(5)
+    left_at_close = {}
+
+    def close():
+        closing.notifyTermination(None)
+        left_at_close["mirai"] = (tmp_path / "mirai").exists()
+
+    closer = threading.Thread(target=close)
+    closer.start()
+    assert lock.awaited.wait(5)
+    release.set()
+    deferred.join(5)
+    closer.join(5)
+    assert wipes == [str(tmp_path)]
+    assert left_at_close == {"mirai": False}

@@ -45,8 +45,8 @@ Tout est conservé ; seuls les caches dérivés sont recalculés. Un OXT constru
 
 ## Désinstallation
 
-- **Depuis le Gestionnaire des extensions** : en une dizaine de secondes au plus (deux constats espacés de 3 s), tout est effacé : dossier `mirai/`, souche `config.json`, entrées du coffre, mémoire, identifiant d'appareil compris. Toutes les écritures sont ensuite gelées jusqu'à la fin de la session. Laisser LibreOffice ouvert quelques secondes, puis le redémarrer. Désactiver ou mettre à jour l'extension n'efface rien.
-- **Hors LibreOffice** (`unopkg remove`, outil de déploiement) : rien ne peut s'exécuter côté extension, la désinstallation n'est pas détectée. Fermer LibreOffice dans les secondes qui suivent une désinstallation manuelle peut aussi empêcher l'effacement. Dans ces cas, lancer le nettoyage ci-dessous.
+- **Depuis le Gestionnaire des extensions** : tout est effacé : dossier `mirai/`, souche `config.json`, entrées du coffre, mémoire, identifiant d'appareil compris. L'effacement a lieu une dizaine de secondes au plus après la désinstallation (deux constats espacés de 3 s), ou pendant la fermeture de LibreOffice si celle-ci vient avant, y compris le redémarrage proposé par LibreOffice. Toutes les écritures sont ensuite gelées jusqu'à la fin de la session. Désactiver ou mettre à jour l'extension n'efface rien ; la réinstaller n'efface rien non plus si la réinstallation se termine avant le second constat, environ 6 s après la désinstallation, sans fermer LibreOffice entre les deux. Au-delà, les données sont déjà effacées et il faudra s'enrôler de nouveau.
+- **Hors LibreOffice** (`unopkg remove`, outil de déploiement) : rien ne peut s'exécuter côté extension, la désinstallation n'est pas détectée. Un arrêt brutal de LibreOffice (plantage, processus tué) dans les secondes qui suivent une désinstallation depuis le Gestionnaire des extensions peut aussi empêcher l'effacement. Dans ces cas, lancer le nettoyage ci-dessous.
 
 ## Nettoyage DSI (Windows, PowerShell, session de l'utilisateur)
 
