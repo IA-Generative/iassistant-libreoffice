@@ -46,7 +46,7 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_storage_wiring.py": 10,
     "tests/unit/test_telemetry_defaults.py": 2,
     "tests/unit/test_token_logic.py": 4,
-    "tests/unit/test_uninstall_wipe.py": 13,
+    "tests/unit/test_uninstall_wipe.py": 6,
     "tests/unit/test_update_blocked.py": 14,
     "tests/unit/test_update_features.py": 15,
 }
