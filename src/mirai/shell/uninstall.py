@@ -47,8 +47,10 @@ else:
 
 if _XTERMINATE_LISTENER_IFACE is not None:
     class MirAITerminateListener(unohelper.Base, _XTERMINATE_LISTENER_IFACE):
-        """Notifié sur le thread principal quand LibreOffice se ferme ou
-        redémarre ; ne s'oppose jamais à la fermeture."""
+        """Notifié quand LibreOffice se ferme ou redémarre, sur le thread qui
+        demande la fermeture : le principal en général, celui de la mise à jour
+        quand elle ferme LibreOffice sous Windows. Ne s'oppose jamais à la
+        fermeture."""
 
         def __init__(self, on_termination):
             self._on_termination = on_termination
