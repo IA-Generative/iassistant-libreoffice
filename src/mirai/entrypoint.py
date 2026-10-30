@@ -67,31 +67,6 @@ except Exception:
     _XCMDENV_IFACE = None
     _XINTERACTION_IFACE = None
 
-try:
-    from com.sun.star.util import XModifyListener as _XMODIFY_LISTENER_IFACE
-except Exception:
-    _XMODIFY_LISTENER_IFACE = None
-
-if _XMODIFY_LISTENER_IFACE is not None:
-    class MirAIUninstallListener(unohelper.Base, _XMODIFY_LISTENER_IFACE):
-        """Notifié à chaque changement du Gestionnaire des extensions : LibreOffice
-        n'offre aucun crochet de désinstallation, seule cette notification, sans
-        détail, arrive (dans le processus qui désinstalle)."""
-
-        def __init__(self, on_modified):
-            self._on_modified = on_modified
-
-        def modified(self, _event):
-            try:
-                self._on_modified()
-            except Exception as exc:
-                log_to_file(f"[désinstallation] {exc}")
-
-        def disposing(self, _event):
-            return
-else:
-    MirAIUninstallListener = None
-
 if _XCALLBACK_IFACE is not None:
     class _MainThreadCallback(unohelper.Base, _XCALLBACK_IFACE):
         """Exécute un callable sur le thread PRINCIPAL de LibreOffice, planifié via
@@ -200,6 +175,7 @@ from .i18n import (
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
 from .shell.ui_locale import extension_locale as _extension_locale
+from .shell.uninstall import UninstallWatch
 from .security_flow import (
     SecureBootstrapFlow,
     FileJsonStore,
@@ -609,8 +585,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "_schedule_enrollment_check",
     )
     runtime = property(lambda self: _shell_runtime.get())
-    _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
-    _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
     _EXTENSION_MANAGER = "/singletons/com.sun.star.deployment.ExtensionManager"
     # Caches dérivés d'une version, d'un modèle ou d'un DM : jamais conservés
     # d'une installation à l'autre.
@@ -958,84 +932,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     self._apply_install_changes)
                 self.runtime.storage_ready = True
         try:
-            self._register_uninstall_listener()
+            UninstallWatch(self.ctx, self.runtime, _EXTENSION_IDENTIFIER,
+                           self._local_config().user_config_dir).register(self.desktop)
         except Exception as exc:
             log_to_file(f"[désinstallation] écoute impossible : {exc}")
-
-    def _register_uninstall_listener(self):
-        if self.runtime.uninstall_listener is not None:
-            return
-        if MirAIUninstallListener is None:
-            log_to_file("[désinstallation] écoute non branchée : XModifyListener indisponible")
-            return
-        manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
-        if manager is None:
-            log_to_file("[désinstallation] écoute non branchée : "
-                        "gestionnaire des extensions introuvable")
-            return
-        listener = MirAIUninstallListener(self._schedule_uninstall_check)
-        manager.addModifyListener(listener)
-        self.runtime.uninstall_listener = listener
-
-    def _schedule_uninstall_check(self):
-        # Différé : la base des extensions doit être stabilisée (remplacement en
-        # cours, mise à jour native) avant de conclure à une désinstallation.
-        timer = threading.Timer(self._UNINSTALL_CHECK_DELAY_SECONDS, self._check_uninstalled)
-        timer.daemon = True
-        timer.start()
-
-    def _extension_still_deployed(self):
-        """True si l'extension figure encore dans un dépôt ; True aussi dans le
-        doute (API en échec) : on n'efface jamais sur une absence d'information.
-        Une extension désactivée reste listée."""
-        try:
-            manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
-            for repository in self._DEPLOYMENT_REPOSITORIES:
-                packages = manager.getDeployedExtensions(
-                    repository, manager.createAbortChannel(), None)
-                for package in packages or ():
-                    identifier = package.getIdentifier()
-                    if getattr(identifier, "Value", identifier) == _EXTENSION_IDENTIFIER:
-                        return True
-        except Exception as exc:
-            log_to_file(f"[désinstallation] état du déploiement illisible : {exc}")
-            return True
-        return False
-
-    def _check_uninstalled(self):
-        try:
-            if self.runtime.self_update_in_flight or self.runtime.wiped:
-                return
-            if self._extension_still_deployed():
-                return
-            # Un remplacement (addPackage) efface l'ancienne entrée avant d'insérer
-            # la nouvelle : une seule absence ne prouve rien.
-            timer = threading.Timer(
-                self._UNINSTALL_CHECK_DELAY_SECONDS, self._confirm_uninstalled)
-            timer.daemon = True
-            timer.start()
-        except Exception as exc:
-            log_to_file(f"[désinstallation] contrôle impossible : {exc}")
-
-    def _confirm_uninstalled(self):
-        try:
-            if self.runtime.self_update_in_flight or self.runtime.wiped:
-                return
-            if self._extension_still_deployed():
-                return
-            self._wipe_all_data("désinstallation depuis le Gestionnaire des extensions")
-        except Exception as exc:
-            log_to_file(f"[désinstallation] effacement impossible : {exc}")
-
-    def _wipe_all_data(self, reason):
-        self.runtime.wiped = True
-        log_to_file(f"[désinstallation] {reason} : effacement des données de l'extension")
-        credentials.freeze()
-        local_config.freeze()
-        log_setup.uninstall()
-        log_setup.freeze()
-        credentials.wipe()
-        local_config.wipe(self._local_config().user_config_dir)
 
     def _credential_scope(self):
         return self._local_config().transport_scope()

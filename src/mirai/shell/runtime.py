@@ -45,7 +45,14 @@ class ShellRuntime:
         # renouvelé depuis.
         self.secrets_copied = False
         self.uninstall_listener = None
+        self.terminate_listener = None
+        # Sans changement notifié par le Gestionnaire des extensions pendant la
+        # session, la fermeture de LibreOffice n'a rien à vérifier.
+        self.extensions_changed = False
+        # Une minuterie et la fermeture de LibreOffice peuvent conclure en même
+        # temps : l'effacement se réclame sous ce verrou, une seule fois.
         self.wiped = False
+        self.wipe_lock = threading.Lock()
 
         # Une action non gérée est signalée une fois par nom et par session :
         # un utilisateur qui reclique sur une entrée de menu morte ne doit pas

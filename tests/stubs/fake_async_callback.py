@@ -14,7 +14,7 @@ class FakeAsyncCallback:
         """Joue les tâches en attente — ce que ferait la boucle d'événements."""
         pending, self.queued = self.queued, []
         for task in pending:
-            task.run()
+            task.notify(None)
 
 
 class FakeUnoContext:
