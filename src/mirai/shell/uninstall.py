@@ -6,6 +6,7 @@ import UNO paresseux échouerait hors de ce thread.
 """
 
 import logging
+import queue
 import threading
 
 import unohelper
@@ -20,6 +21,10 @@ try:
     from com.sun.star.frame import XTerminateListener as _XTERMINATE_LISTENER_IFACE
 except Exception:
     _XTERMINATE_LISTENER_IFACE = None
+try:
+    from com.sun.star.awt import XCallback as _XCALLBACK_IFACE
+except Exception:
+    _XCALLBACK_IFACE = None
 
 _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
 _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
@@ -69,6 +74,18 @@ if _XTERMINATE_LISTENER_IFACE is not None:
 else:
     MirAITerminateListener = None
 
+if _XCALLBACK_IFACE is not None:
+    class _MainThreadCall(unohelper.Base, _XCALLBACK_IFACE):
+        """Livré sur le thread principal par com.sun.star.awt.AsyncCallback."""
+
+        def __init__(self, fn):
+            self._fn = fn
+
+        def notify(self, _data):
+            self._fn()
+else:
+    _MainThreadCall = None
+
 
 class UninstallWatch:
     """Guette la désinstallation de l'extension `identifier` et efface alors ce
@@ -80,6 +97,7 @@ class UninstallWatch:
         self._runtime = runtime
         self._identifier = identifier
         self._user_config_dir = user_config_dir
+        self._async_callback = None
 
     def register(self, desktop):
         """Une fois par processus : écoute du Gestionnaire des extensions et de
@@ -97,6 +115,13 @@ class UninstallWatch:
         if manager is None:
             logging.info("[désinstallation] écoute non branchée : "
                          "gestionnaire des extensions introuvable")
+            return
+        # Créé ici, sur le thread principal : les minuteries s'en servent pour
+        # lui confier la recherche du déploiement.
+        self._async_callback = self._ctx.getServiceManager().createInstanceWithContext(
+            "com.sun.star.awt.AsyncCallback", self._ctx)
+        if self._async_callback is None:
+            logging.info("[désinstallation] écoute non branchée : AsyncCallback indisponible")
             return
         listener = MirAIUninstallListener(self.schedule_check)
         manager.addModifyListener(listener)
@@ -139,11 +164,23 @@ class UninstallWatch:
             return True
         return False
 
+    def _still_deployed_from_timer(self):
+        # Postée depuis une minuterie, la recherche n'atteint le thread principal
+        # qu'au prochain réveil de sa boucle d'événements : la minuterie l'attend
+        # sans délai, y renoncer laisserait au repos un poste jamais effacé. Sur
+        # le thread principal, poster puis attendre se bloquerait.
+        if threading.current_thread() is threading.main_thread():
+            return self.still_deployed()
+        answer = queue.Queue(maxsize=1)
+        call = _MainThreadCall(lambda: answer.put(self.still_deployed()))
+        self._async_callback.addCallback(call, None)
+        return answer.get()
+
     def _check(self):
         try:
             if self._runtime.self_update_in_flight or self._runtime.wiped:
                 return
-            if self.still_deployed():
+            if self._still_deployed_from_timer():
                 return
             # Un remplacement (addPackage) efface l'ancienne entrée avant d'insérer
             # la nouvelle : une seule absence ne prouve rien.
@@ -157,7 +194,7 @@ class UninstallWatch:
         try:
             if self._runtime.self_update_in_flight or self._runtime.wiped:
                 return
-            if self.still_deployed():
+            if self._still_deployed_from_timer():
                 return
             self.wipe("désinstallation depuis le Gestionnaire des extensions")
         except Exception as exc:
