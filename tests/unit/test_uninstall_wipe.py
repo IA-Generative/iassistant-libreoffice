@@ -114,9 +114,9 @@ def test_still_deployed_means_no_wipe(tmp_path, monkeypatch, timers):
 
 def test_own_update_in_flight_means_no_wipe(tmp_path, timers):
     _profile(tmp_path)
-    shell_runtime.get().self_update_in_flight = True
     _watch(tmp_path, _manager({})).schedule_check()
     timers()
+    shell_runtime.get().self_update_in_flight = True
     timers()
     assert (tmp_path / "mirai" / "settings.json").exists()
 
