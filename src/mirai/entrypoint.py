@@ -933,7 +933,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.runtime.storage_ready = True
         try:
             UninstallWatch(self.ctx, self.runtime, _EXTENSION_IDENTIFIER,
-                           self._local_config().user_config_dir).register()
+                           self._local_config().user_config_dir).register(self.desktop)
         except Exception as exc:
             log_to_file(f"[désinstallation] écoute impossible : {exc}")
 

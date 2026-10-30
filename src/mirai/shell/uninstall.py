@@ -16,6 +16,10 @@ try:
     from com.sun.star.util import XModifyListener as _XMODIFY_LISTENER_IFACE
 except Exception:
     _XMODIFY_LISTENER_IFACE = None
+try:
+    from com.sun.star.frame import XTerminateListener as _XTERMINATE_LISTENER_IFACE
+except Exception:
+    _XTERMINATE_LISTENER_IFACE = None
 
 _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
 _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
@@ -41,6 +45,28 @@ if _XMODIFY_LISTENER_IFACE is not None:
 else:
     MirAIUninstallListener = None
 
+if _XTERMINATE_LISTENER_IFACE is not None:
+    class MirAITerminateListener(unohelper.Base, _XTERMINATE_LISTENER_IFACE):
+        """Notifié sur le thread principal quand LibreOffice se ferme ou
+        redémarre ; ne s'oppose jamais à la fermeture."""
+
+        def __init__(self, on_termination):
+            self._on_termination = on_termination
+
+        def queryTermination(self, _event):
+            return
+
+        def notifyTermination(self, _event):
+            try:
+                self._on_termination()
+            except Exception as exc:
+                logging.info(f"[désinstallation] {exc}")
+
+        def disposing(self, _event):
+            return
+else:
+    MirAITerminateListener = None
+
 
 class UninstallWatch:
     """Guette la désinstallation de l'extension `identifier` et efface alors ce
@@ -53,7 +79,13 @@ class UninstallWatch:
         self._identifier = identifier
         self._user_config_dir = user_config_dir
 
-    def register(self):
+    def register(self, desktop):
+        """Une fois par processus : écoute du Gestionnaire des extensions et de
+        la fermeture de LibreOffice (`desktop`)."""
+        self._listen_to_extension_manager()
+        self._listen_to_termination(desktop)
+
+    def _listen_to_extension_manager(self):
         if self._runtime.uninstall_listener is not None:
             return
         if MirAIUninstallListener is None:
@@ -68,7 +100,19 @@ class UninstallWatch:
         manager.addModifyListener(listener)
         self._runtime.uninstall_listener = listener
 
+    def _listen_to_termination(self, desktop):
+        if self._runtime.terminate_listener is not None:
+            return
+        if MirAITerminateListener is None:
+            logging.info("[désinstallation] fermeture non écoutée : "
+                         "XTerminateListener indisponible")
+            return
+        listener = MirAITerminateListener(self._on_termination)
+        desktop.addTerminateListener(listener)
+        self._runtime.terminate_listener = listener
+
     def schedule_check(self):
+        self._runtime.extensions_changed = True
         # Différé : la base des extensions doit être stabilisée (remplacement en
         # cours, mise à jour native) avant de conclure à une désinstallation.
         timer = threading.Timer(_UNINSTALL_CHECK_DELAY_SECONDS, self._check)
@@ -117,12 +161,32 @@ class UninstallWatch:
         except Exception as exc:
             logging.info(f"[désinstallation] effacement impossible : {exc}")
 
+    def _on_termination(self):
+        # Les minuteries meurent avec le processus : une fermeture ou un
+        # redémarrage pendant la confirmation différée perdrait l'effacement.
+        # Le Gestionnaire des extensions refuse la fermeture tant qu'il
+        # travaille : un remplacement est terminé ici, un seul constat suffit.
+        if not self._runtime.extensions_changed or self._runtime.self_update_in_flight:
+            return
+        if self._wiped() or self.still_deployed():
+            return
+        self.wipe("désinstallation constatée à la fermeture de LibreOffice")
+
+    def _wiped(self):
+        # Sous le verrou : la fermeture attend la fin d'un effacement lancé par
+        # une minuterie au lieu de laisser LibreOffice s'arrêter au milieu.
+        with self._runtime.wipe_lock:
+            return self._runtime.wiped
+
     def wipe(self, reason):
-        self._runtime.wiped = True
-        logging.info(f"[désinstallation] {reason} : effacement des données de l'extension")
-        credentials.freeze()
-        local_config.freeze()
-        log_setup.uninstall()
-        log_setup.freeze()
-        credentials.wipe()
-        local_config.wipe(self._user_config_dir)
+        with self._runtime.wipe_lock:
+            if self._runtime.wiped:
+                return
+            self._runtime.wiped = True
+            logging.info(f"[désinstallation] {reason} : effacement des données de l'extension")
+            credentials.freeze()
+            local_config.freeze()
+            log_setup.uninstall()
+            log_setup.freeze()
+            credentials.wipe()
+            local_config.wipe(self._user_config_dir)
