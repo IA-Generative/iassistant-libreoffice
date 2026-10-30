@@ -332,6 +332,7 @@
   "palette.headings_and_tables_only": "This document contains only headings and tables, which actions on the whole document skip.",
   "palette.tables_left": "{count} table(s) skipped.",
   "palette.rewrite_by_section": "Long document: the request is applied piece by piece, section by section, splitting the longest ones.",
+  "palette.rewrite_around_tables": "Document with tables: the request is applied piece by piece, section by section and between the tables, which stay in place.",
   "palette.mode_tools": "Tool mode: {mode}",
   "palette.no_action": "ℹ No action on the document — plain text answer only.",
   "palette.capabilities": "   Here, the assistant can: {tools}.",

@@ -218,6 +218,12 @@ lu ni écrit : l'énumération du corps rend un tableau comme un seul élément.
 Le bilan dit combien de tableaux l'action a laissés de côté, et les presets
 annoncent un document dont le texte n'est que dans des tableaux, ou dans des
 titres et des tableaux, au lieu de le dire vide ou fait de titres seuls.
+Cette lecture note aussi quel paragraphe suit chaque tableau : un morceau
+réécrit s'arrête à un tableau, car effacer d'un seul tenant les paragraphes en
+trop de part et d'autre le supprime. La demande libre sur un corps coupé par un
+tableau passe donc morceau par morceau, et la palette le dit ; le texte rédigé
+pour un document sans corps va après le dernier tableau ; et
+`writer_replace_paragraphs` refuse une plage qui enjambe un tableau.
 
 **Écriture de configuration atomique.** `set_config` écrit dans un fichier
 temporaire puis `os.replace`. En place, un lecteur concurrent peut voir un JSON
@@ -227,9 +233,10 @@ une entrée non désirée dans l'état absorbant.
 **Règle d'écriture : jamais de `setString` sur une plage multi-paragraphes.**
 LibreOffice applique alors le style du PREMIER paragraphe à tout le bloc — un
 document titre + corps repart intégralement en style titre. On écrit donc
-paragraphe par paragraphe (`para.setString`), on supprime le surplus par
-`removeTextContent`, et les paragraphes ajoutés héritent du style du **dernier**
-remplacé. `writer_get_document_map` annote les styles (`[P1] <Heading 1>`) et
+paragraphe par paragraphe (`para.setString`), on efface le surplus d'un seul
+tenant par une plage de curseur (`removeTextContent` ne supprime rien quand
+Writer enregistre les modifications), et les paragraphes ajoutés héritent du
+style du **dernier** remplacé. `writer_get_document_map` annote les styles (`[P1] <Heading 1>`) et
 termine par `[FIN DU DOCUMENT — N paragraphes]` : sans ces deux repères, le
 modèle fusionne un titre avec le corps, ou s'arrête avant la fin.
 

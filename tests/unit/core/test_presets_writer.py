@@ -299,6 +299,41 @@ def test_a_whole_document_action_says_how_many_tables_it_left_aside(runner, appe
     assert doc.tables == 2
 
 
+@pytest.mark.parametrize("runner", [presets.run_simplify, presets.run_shorten,
+                                    presets.run_lengthen],
+                         ids=["simplify", "shorten", "lengthen"])
+def test_a_section_cut_by_a_table_is_rewritten_on_each_side_and_keeps_it(runner):
+    """Le texte rendu plus court d'un côté du tableau ne le supprime jamais :
+    chaque côté part dans son propre appel et s'écrit à sa place."""
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", "Le cadre.", TABLE, "Les chiffres."],
+                      ["Heading 1", "Standard", "Standard", "", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte et cadre.")),
+                                 FakeSSEResponse(text_chunks("Chiffres."))])
+
+    runner(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert doc.paragraphs == ["Rapport", "Contexte et cadre.", "Chiffres."]
+    assert doc.tables == 1
+    first, second = (r["messages"][-1]["content"] for r in shell.requests)
+    assert "Le cadre." in first and "Les chiffres." not in first
+    assert "Les chiffres." in second and "Le cadre." not in second
+
+
+def test_a_table_after_the_table_of_contents_still_splits_its_section():
+    doc = FakeBodyDoc(["Table des matières", "Rapport\t1", "Rapport", "Le contexte.",
+                       "Le cadre.", TABLE, "Les chiffres."],
+                      ["Contents Heading", "Contents 1", "Heading 1", "Standard",
+                       "Standard", "", "Standard"])
+    doc.items[0].index = doc.items[1].index = "Table des matières1"
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte et cadre.")),
+                                 FakeSSEResponse(text_chunks("Chiffres."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs[2:] == ["Rapport", "Contexte et cadre.", "Chiffres."]
+    assert doc.tables == 1
+
+
 def test_the_table_of_contents_is_never_rewritten():
     """Writer régénère la table des matières : elle n'est ni envoyée au
     modèle, ni écrite."""

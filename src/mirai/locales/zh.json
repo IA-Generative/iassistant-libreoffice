@@ -332,6 +332,7 @@
   "palette.headings_and_tables_only": "此文档只包含标题和表格，针对整个文档的操作会跳过它们。",
   "palette.tables_left": "已跳过 {count} 个表格。",
   "palette.rewrite_by_section": "文档较长：该请求将分段应用，逐节进行，过长的节会再拆分。",
+  "palette.rewrite_around_tables": "文档包含表格：该请求将分段应用，逐节并在表格之间进行，表格保持原位。",
   "palette.mode_tools": "工具模式：{mode}",
   "palette.no_action": "ℹ 未对文档执行操作 — 仅返回纯文本。",
   "palette.capabilities": "   此处助手可以：{tools}。",

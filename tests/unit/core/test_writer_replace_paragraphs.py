@@ -14,6 +14,7 @@ suppression n'invalide pas les autres.
 from src.mirai.core.context import ToolContext
 from src.mirai.core.tools.writer_tools import replace_paragraphs
 from tests.stubs.fake_shell import FakeShell
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
 
 
 class FakeParagraph:
@@ -184,6 +185,35 @@ def test_invalid_range_is_refused():
     assert not replace_paragraphs(ctx, {"start": 0, "text": "X"}).ok
     assert not replace_paragraphs(ctx, {"start": 3, "end": 2, "text": "X"}).ok
     assert doc.paragraphs == ["A", "B", "C"]
+
+
+def _ctx_with_table():
+    doc = FakeBodyDoc(["Avant.", "Juste avant.", TABLE, "Après."])
+    return ToolContext(doc, doc.controller, "writer", FakeShell()), doc
+
+
+def test_a_range_that_crosses_a_table_is_refused():
+    """Remplacer d'un seul tenant des paragraphes de part et d'autre d'un
+    tableau le supprimerait : l'outil refuse et dit au modèle de remplacer
+    chaque côté séparément."""
+    ctx, doc = _ctx_with_table()
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": "Fusion."})
+
+    assert not result.ok
+    assert "[P2]" in result.error and "[P3]" in result.error
+    assert doc.paragraphs == ["Avant.", "Juste avant.", "Après."]
+    assert doc.tables == 1
+
+
+def test_a_range_on_one_side_of_a_table_is_replaced_and_keeps_it():
+    ctx, doc = _ctx_with_table()
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 2, "text": "Fusion."})
+
+    assert result.ok
+    assert doc.paragraphs == ["Fusion.", "Après."]
+    assert doc.tables == 1
 
 
 def test_tool_is_registered_for_writer():

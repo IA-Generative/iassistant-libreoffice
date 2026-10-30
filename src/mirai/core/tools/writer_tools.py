@@ -93,16 +93,11 @@ def get_document_map(ctx, args):
                       data={"paragraph_count": index, "truncated": truncated})
 
 
-def document_paragraphs(ctx):
-    """Liste les objets paragraphe du document, dans l'ordre."""
-    return document_body(ctx)[0]
-
-
 def document_body(ctx):
-    """Les objets paragraphe du document, dans l'ordre, et le nombre de
-    tableaux du corps : l'énumération rend un tableau comme un seul élément,
-    sans le texte de ses cellules."""
-    items, tables = [], 0
+    """Les objets paragraphe du document, dans l'ordre, et pour chaque tableau
+    du corps l'index du paragraphe qui le suit : l'énumération rend un
+    tableau comme un seul élément, sans le texte de ses cellules."""
+    items, tables = [], []
     enumeration = ctx.model.Text.createEnumeration()
     while enumeration.hasMoreElements():
         element = enumeration.nextElement()
@@ -110,7 +105,7 @@ def document_body(ctx):
             if element.supportsService("com.sun.star.text.Paragraph"):
                 items.append(element)
             elif element.supportsService("com.sun.star.text.TextTable"):
-                tables += 1
+                tables.append(len(items))
         except Exception:
             continue
     return items, tables
@@ -186,12 +181,20 @@ def replace_paragraphs(ctx, args):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"plage de paragraphes invalide : {start}..{end}")
 
-    paragraphs = document_paragraphs(ctx)
+    paragraphs, tables = document_body(ctx)
     if start > len(paragraphs):
         return ToolResult(
             call_id="", ok=False, content="",
             error=f"le document ne contient que {len(paragraphs)} paragraphe(s)")
     end = min(end, len(paragraphs))
+    crossed = [after for after in tables if start - 1 < after < end]
+    if crossed:
+        # Effacer les paragraphes en trop d'un seul tenant supprimerait le
+        # tableau placé entre eux.
+        return ToolResult(
+            call_id="", ok=False, content="",
+            error=(f"un tableau sépare [P{crossed[0]}] et [P{crossed[0] + 1}] : "
+                   "remplace séparément les paragraphes de chaque côté du tableau"))
 
     ctx.undo_begin("Réécriture de paragraphes")
     targets = paragraphs[start - 1:end]
