@@ -32,6 +32,7 @@ class _XCommandEnvironment: pass
 class _XInteractionHandler: pass
 class _XCallback:        pass
 class _XTerminateListener: pass
+class _XModifyListener:  pass
 
 
 def install():
@@ -85,6 +86,9 @@ def install():
 
     com_sun_star_ui = MagicMock()
 
+    com_sun_star_util = MagicMock()
+    com_sun_star_util.XModifyListener = _XModifyListener
+
     com_sun_star_system = MagicMock()
     com_sun_star_system.SystemShellExecuteFlags.NO_SYSTEM_ERROR_MESSAGE = 1
     com_sun_star_system.SystemShellExecuteFlags.URIS_ONLY = 2
@@ -105,6 +109,7 @@ def install():
         "com.sun.star.view": com_sun_star_view,
         "com.sun.star.frame": com_sun_star_frame,
         "com.sun.star.ui": com_sun_star_ui,
+        "com.sun.star.util": com_sun_star_util,
         "com.sun.star.system": com_sun_star_system,
         "com.sun.star.lang": MagicMock(),
         "com.sun.star.deployment": MagicMock(),

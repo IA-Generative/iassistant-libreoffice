@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.mirai import credentials, local_config
+from tests.stubs.fake_async_callback import FakeAsyncCallback
 from tests.stubs.uno_stubs import install, make_job, seed_user_config
 
 install()
@@ -76,9 +77,11 @@ def _manager(deployed, fail=False):
     return manager
 
 
-def _watch(tmp_path, manager):
+def _watch(tmp_path, manager, event_loop=None):
     ctx = MagicMock()
     ctx.getValueByName.return_value = manager
+    if event_loop is not None:
+        ctx.getServiceManager().createInstanceWithContext.return_value = event_loop
     return UninstallWatch(ctx, shell_runtime.get(), IDENTIFIER, str(tmp_path))
 
 
@@ -233,10 +236,10 @@ def test_failure_in_the_check_is_logged_not_raised(tmp_path, monkeypatch, caplog
     assert any("[désinstallation]" in line and "boom" in line for line in caplog.messages)
 
 
-def _watched(tmp_path, manager):
+def _watched(tmp_path, manager, event_loop=None):
     """Surveillance branchée sur un faux Desktop ; rend aussi l'écoute que
     LibreOffice appellera à sa fermeture."""
-    watch = _watch(tmp_path, manager)
+    watch = _watch(tmp_path, manager, event_loop)
     desktop = MagicMock()
     watch.register(desktop)
     return watch, desktop.addTerminateListener.call_args.args[0]
@@ -334,12 +337,17 @@ def test_close_during_the_deferred_wipe_waits_for_it_and_wipes_once(tmp_path, mo
         real_wipe(user_config_dir)
 
     monkeypatch.setattr(local_config, "wipe", slow_wipe)
-    watch, closing = _watched(tmp_path, _manager({}))
+    event_loop = FakeAsyncCallback()
+    watch, closing = _watched(tmp_path, _manager({}), event_loop)
     watch.schedule_check()
     timers()
-    deferred = threading.Thread(target=timers)
+    deferred = threading.Thread(target=timers, daemon=True)
     deferred.start()
-    assert wiping.wait(5)
+    for _ in range(500):
+        if wiping.wait(0.01):
+            break
+        event_loop.drain()
+    assert wiping.is_set()
     left_at_close = {}
 
     def close():
@@ -354,3 +362,29 @@ def test_close_during_the_deferred_wipe_waits_for_it_and_wipes_once(tmp_path, mo
     closer.join(5)
     assert wipes == [str(tmp_path)]
     assert left_at_close == {"mirai": False}
+
+
+def _fire_on_a_timer_thread(timers, event_loop):
+    """Joue les minuteries armées sur leur propre thread, comme LibreOffice, et
+    sert depuis le thread principal ce qu'elles lui confient."""
+    timer = threading.Thread(target=timers, daemon=True)
+    timer.start()
+    for _ in range(500):
+        event_loop.drain()
+        timer.join(0.01)
+        if not timer.is_alive():
+            return
+    raise AssertionError("la minuterie attend toujours le thread principal")
+
+
+def test_the_timers_look_the_deployment_up_on_the_main_thread(tmp_path, timers, thread_guard):
+    """Les minuteries tournent hors du thread principal : elles lui confient la
+    recherche du déploiement et attendent sa réponse avant d'effacer."""
+    _profile(tmp_path)
+    event_loop = FakeAsyncCallback()
+    manager = thread_guard(_manager({}), threading.main_thread(), "manager")
+    watch, _ = _watched(tmp_path, manager, event_loop)
+    watch.schedule_check()
+    _fire_on_a_timer_thread(timers, event_loop)
+    _fire_on_a_timer_thread(timers, event_loop)
+    assert not (tmp_path / "mirai").exists()
