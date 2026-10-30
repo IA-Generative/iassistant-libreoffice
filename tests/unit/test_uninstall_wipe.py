@@ -301,10 +301,28 @@ def test_close_is_listened_to_once_per_process(tmp_path):
     second.desktop.addTerminateListener.assert_not_called()
 
 
+class _ObservedLock:
+    """Verrou réel qui signale qu'un thread attend pendant qu'un autre le tient."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.awaited = threading.Event()
+
+    def __enter__(self):
+        if not self._lock.acquire(blocking=False):
+            self.awaited.set()
+            self._lock.acquire()
+
+    def __exit__(self, *_exc):
+        self._lock.release()
+
+
 def test_close_during_the_deferred_wipe_waits_for_it_and_wipes_once(tmp_path, monkeypatch, timers):
     """La confirmation différée efface pendant que LibreOffice se ferme : la
     fermeture attend la fin de cet effacement et n'en lance pas un second."""
     _profile(tmp_path)
+    lock = _ObservedLock()
+    shell_runtime.get().wipe_lock = lock
     wiping, release = threading.Event(), threading.Event()
     wipes = []
     real_wipe = local_config.wipe
@@ -330,7 +348,7 @@ def test_close_during_the_deferred_wipe_waits_for_it_and_wipes_once(tmp_path, mo
 
     closer = threading.Thread(target=close)
     closer.start()
-    closer.join(0.2)
+    assert lock.awaited.wait(5)
     release.set()
     deferred.join(5)
     closer.join(5)
