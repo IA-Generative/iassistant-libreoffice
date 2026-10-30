@@ -306,8 +306,8 @@ def test_a_document_of_headings_and_tables_says_so_without_calling_the_model(run
 @WHOLE_DOCUMENT_RUNNERS
 @MODES
 def test_a_whole_document_action_says_how_many_tables_it_left_aside(runner, append_mode):
-    """Le bilan dit combien de tableaux l'action a laissés de côté, et ils
-    restent dans le document."""
+    """Le bilan dit combien de tableaux l'action a laissés de côté, ils
+    restent dans le document, et la télémétrie de lecture les compte."""
     doc = FakeBodyDoc(["Rapport", TABLE, "Le contexte.", "Analyse", TABLE, "Les chiffres."],
                       ["Heading 1", "", "Standard", "Heading 2", "", "Standard"])
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte repris.")),
@@ -318,6 +318,7 @@ def test_a_whole_document_action_says_how_many_tables_it_left_aside(runner, appe
     assert isinstance(message, presets.Written)
     assert message.endswith(" " + _t("palette.tables_left", count=2))
     assert doc.tables == 2
+    assert [attrs["tables"] for _, attrs in shell.telemetry_events] == ["2"]
 
 
 @pytest.mark.parametrize("runner", [presets.run_simplify, presets.run_shorten,

@@ -399,7 +399,8 @@ def _read_document(ctx, span, action):
     """Tout le document, lu sur le thread principal avant l'appel au modèle."""
     snapshot = ctx.on_main(lambda: whole_document.read(ctx))
     _legacy_telemetry(ctx, span, {"action": action,
-                                  "text_length": str(len(snapshot.text))})
+                                  "text_length": str(len(snapshot.text)),
+                                  "tables": str(len(snapshot.tables))})
     return snapshot
 
 
