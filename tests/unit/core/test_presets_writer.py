@@ -21,7 +21,7 @@ from tests.stubs.fake_shell import (
     StoppedSSEResponse,
     text_chunks,
 )
-from tests.stubs.fake_writer_body import FakeBodyDoc
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc, FakeTable
 
 SUMMARY_HEADER = "\n\n---début-du-résumé---\n"
 SUMMARY_FOOTER = "\n---fin-du-résumé---\n"
@@ -236,6 +236,27 @@ def test_a_document_edited_during_a_whole_document_action_is_left_alone():
     assert doc.undo.entered == []
 
 
+def test_a_table_inserted_during_a_whole_document_action_is_left_alone():
+    """Écrire le morceau plus court effacerait le tableau inséré entre ses
+    paragraphes pendant le run : rien n'est écrit."""
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", "Le cadre."],
+                      ["Heading 1", "Standard", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte et cadre."))])
+    urlopen = shell.urlopen
+
+    def _user_inserts_a_table_then_model_answers(request, timeout=None):
+        doc.items.insert(2, FakeTable())
+        return urlopen(request, timeout)
+
+    shell.urlopen = _user_inserts_a_table_then_model_answers
+    message = presets.run_shorten(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert message == _t("preset.target_changed")
+    assert doc.paragraphs == ["Rapport", "Le contexte.", "Le cadre."]
+    assert doc.tables == 1
+    assert doc.undo.entered == []
+
+
 def test_an_empty_document_is_reported_without_calling_the_model():
     doc = FakeBodyDoc(["", ""])
     shell = FakeShell()
@@ -244,6 +265,95 @@ def test_an_empty_document_is_reported_without_calling_the_model():
 
     assert message == _t("palette.empty_document")
     assert shell.requests == []
+
+
+WHOLE_DOCUMENT_RUNNERS = pytest.mark.parametrize(
+    "runner", [presets.run_summarize, presets.run_simplify,
+               presets.run_shorten, presets.run_lengthen],
+    ids=["summarize", "simplify", "shorten", "lengthen"])
+
+
+@WHOLE_DOCUMENT_RUNNERS
+def test_a_document_whose_text_is_only_in_tables_says_so_without_calling_the_model(runner):
+    """Une fiche faite de tableaux n'est pas vide : le message dit qu'elle ne
+    contient que des tableaux, que l'action laisse de côté."""
+    doc = FakeBodyDoc(["", TABLE, ""])
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None)
+
+    assert message == _t("palette.tables_only")
+    assert shell.requests == []
+    assert doc.writes == 0
+
+
+@pytest.mark.parametrize("runner", [presets.run_simplify, presets.run_shorten,
+                                    presets.run_lengthen],
+                         ids=["simplify", "shorten", "lengthen"])
+def test_a_document_of_headings_and_tables_says_so_without_calling_the_model(runner):
+    """Une fiche faite d'un titre et de tableaux : le message dit qu'elle ne
+    contient que des titres et des tableaux, que l'action laisse de côté."""
+    doc = FakeBodyDoc(["Fiche de poste", TABLE, ""], ["Heading 1", "", "Standard"])
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert message == _t("palette.headings_and_tables_only")
+    assert shell.requests == []
+    assert doc.writes == 0
+
+
+@WHOLE_DOCUMENT_RUNNERS
+@MODES
+def test_a_whole_document_action_says_how_many_tables_it_left_aside(runner, append_mode):
+    """Le bilan dit combien de tableaux l'action a laissés de côté, ils
+    restent dans le document, et la télémétrie de lecture les compte."""
+    doc = FakeBodyDoc(["Rapport", TABLE, "Le contexte.", "Analyse", TABLE, "Les chiffres."],
+                      ["Heading 1", "", "Standard", "Heading 2", "", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte repris.")),
+                                 FakeSSEResponse(text_chunks("Texte repris."))])
+
+    message = runner(_ctx(doc, shell), shell, "", None, append_mode=append_mode)
+
+    assert isinstance(message, presets.Written)
+    assert message.endswith(" " + _t("palette.tables_left", count=2))
+    assert doc.tables == 2
+    assert [attrs["tables"] for _, attrs in shell.telemetry_events] == ["2"]
+
+
+@pytest.mark.parametrize("runner", [presets.run_simplify, presets.run_shorten,
+                                    presets.run_lengthen],
+                         ids=["simplify", "shorten", "lengthen"])
+def test_a_section_cut_by_a_table_is_rewritten_on_each_side_and_keeps_it(runner):
+    """Le texte rendu plus court d'un côté du tableau ne le supprime jamais :
+    chaque côté part dans son propre appel et s'écrit à sa place."""
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", "Le cadre.", TABLE, "Les chiffres."],
+                      ["Heading 1", "Standard", "Standard", "", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte et cadre.")),
+                                 FakeSSEResponse(text_chunks("Chiffres."))])
+
+    runner(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert doc.paragraphs == ["Rapport", "Contexte et cadre.", "Chiffres."]
+    assert doc.tables == 1
+    first, second = (r["messages"][-1]["content"] for r in shell.requests)
+    assert "Le cadre." in first and "Les chiffres." not in first
+    assert "Les chiffres." in second and "Le cadre." not in second
+
+
+def test_a_table_after_the_table_of_contents_still_splits_its_section():
+    doc = FakeBodyDoc(["Table des matières", "Rapport\t1", "Rapport", "Le contexte.",
+                       "Le cadre.", TABLE, "Les chiffres."],
+                      ["Contents Heading", "Contents 1", "Heading 1", "Standard",
+                       "Standard", "", "Standard"])
+    doc.items[0].index = doc.items[1].index = "Table des matières1"
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte et cadre.")),
+                                 FakeSSEResponse(text_chunks("Chiffres."))])
+
+    presets.run_shorten(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs[2:] == ["Rapport", "Contexte et cadre.", "Chiffres."]
+    assert doc.tables == 1
 
 
 def test_the_table_of_contents_is_never_rewritten():

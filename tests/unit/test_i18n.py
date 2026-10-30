@@ -85,6 +85,7 @@ _PLACEHOLDER_CASES = (
     ("calc.formula.filled_down", {"count": 5}),
     ("calc.formula.error_line", {"err": "#ERREUR: x"}),
     ("preset.refused_transform", {"count": 2}),
+    ("palette.tables_left", {"count": 2}),
     ("caps.refused", {"error": "http_401"}),
     ("caps.second_turn_refused", {"error": "http_503"}),
     ("caps.empty", {"error": "empty_response"}),

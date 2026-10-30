@@ -16,9 +16,10 @@ from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
 from src.mirai.core.ui_thread import DirectDispatcher, DispatcherTimeout
+from src.mirai.i18n import t as _t
 from tests.stubs.fake_docs import FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
-from tests.stubs.fake_writer_body import FakeBodyDoc
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
 from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
 
 
@@ -263,6 +264,19 @@ def test_writer_presets_on_the_whole_document_touch_it_only_on_the_main_thread(
     assert "Un paragraphe administratif dense." in shell.requests[0]["messages"][-1]["content"]
     assert "Texte produit." in fake.paragraphs
     assert fake.undo.entered and fake.undo.left == 1
+
+
+@WRITER_PRESETS
+def test_writer_presets_count_the_tables_of_the_document_on_the_main_thread(
+        thread_guard, runner):
+    fake = FakeBodyDoc(["Titre", TABLE, "Un paragraphe administratif dense."],
+                       ["Heading 1", "", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
+
+    message = _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
+        ctx, shell, "", None))
+
+    assert message.endswith(_t("palette.tables_left", count=1))
 
 
 @TARGETS

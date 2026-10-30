@@ -2101,7 +2101,8 @@ class AssistantPalette:
 
         self._progress.set_phase(_t("progress.writing"))
         self._append_response(_t("palette.assistant_prefix"))
-        result = self._ask_rewrite(self._document_model(document), document, instruction)
+        result = self._ask_rewrite(self._document_model(document), document, instruction,
+                                   append)
         failure = self._ask_failed(result)
         if failure is None:
             failure = self._write_document(
@@ -2126,8 +2127,8 @@ class AssistantPalette:
                "append.mode": bool(append)})
         kept = _t("palette.title_kept") if kept_count else ""
         how = _t("palette.how_appended") if append else _t("palette.how_rewritten")
-        summary = _t("palette.document_summary", how=how,
-                     before=body, after=after, kept=kept)
+        summary = whole_document.with_tables(document, _t(
+            "palette.document_summary", how=how, before=body, after=after, kept=kept))
         self._stream_response(summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
@@ -2140,7 +2141,8 @@ class AssistantPalette:
         self.journal_line(_t("palette.journal_read", count=len(document.texts)),
                           step=telemetry_steps.DOCUMENT_READ,
                           **{"document.paragraphs": len(document.texts),
-                             "document.headings": 0})
+                             "document.headings": 0,
+                             "document.tables": len(document.tables)})
         self._progress.set_phase(_t("progress.writing"))
         self._append_response(_t("palette.assistant_prefix"))
         result = whole_document.compose(self._document_model(document), document, instruction,
@@ -2159,7 +2161,8 @@ class AssistantPalette:
             step=telemetry_steps.DOCUMENT_DONE,
             **{"body.paragraphs": 0, "result.paragraphs": count,
                "headings.kept": 0, "append.mode": bool(self.append_mode)})
-        summary = _t("palette.document_composed", count=count)
+        summary = whole_document.with_tables(document,
+                                             _t("palette.document_composed", count=count))
         self._stream_response(summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
@@ -2202,16 +2205,22 @@ class AssistantPalette:
                     "bilan": _t("preset.target_changed")}
         return None
 
-    def _ask_rewrite(self, model, document, instruction):
-        """Tout le corps d'un seul appel ; au-delà du seuil, section par
-        section, et la palette le dit : une demande globale (« en deux
-        paragraphes ») s'applique alors à chaque section."""
+    def _ask_rewrite(self, model, document, instruction, append):
+        """Tout le corps d'un seul appel ; au-delà du seuil, ou quand un
+        tableau le coupe en remplacement, section par section et entre les
+        tableaux, et la palette le dit : une demande globale (« en deux
+        paragraphes ») s'applique alors à chaque morceau. Une seule réponse ne
+        peut pas se répartir de part et d'autre d'un tableau ; en ajout, elle
+        suit le document et n'a pas à le faire."""
         limit = whole_document.max_chars(self.shell)
         span = whole_document.body_span(document)
-        if sum(len(document.texts[i]) for i in span) <= limit:
+        if not append and whole_document.spans_table(document, span):
+            self._stream_response(_t("palette.rewrite_around_tables") + "\n")
+        elif sum(len(document.texts[i]) for i in span) <= limit:
             return whole_document.rewrite_whole(model, document, instruction,
                                                 tee=self._stream_response)
-        self._stream_response(_t("palette.rewrite_by_section") + "\n")
+        else:
+            self._stream_response(_t("palette.rewrite_by_section") + "\n")
         return whole_document.rewrite(model, document, lambda _originals: instruction,
                                       limit, tee=self._stream_response)
 
@@ -2219,7 +2228,8 @@ class AssistantPalette:
         self.journal_line(_t("palette.journal_read", count=len(document.texts)),
                           step=telemetry_steps.DOCUMENT_READ,
                           **{"document.paragraphs": len(document.texts),
-                             "document.headings": len(headings)})
+                             "document.headings": len(headings),
+                             "document.tables": len(document.tables)})
         if headings:
             self.journal_line(_t("palette.journal_heading_kept"),
                               detail=f"« {headings[0][:50]} »")

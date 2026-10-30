@@ -7,13 +7,15 @@ dans une seule action d'annulation, si le run n'a pas été arrêté et si le
 document n'a pas changé entre-temps.
 """
 
+import bisect
 import dataclasses
 
+from ..i18n import t as _t
 from . import doc_rewrite
 from .sinks import DraftSink
 from .tools.writer_tools import (
     PARAGRAPH_BREAK,
-    document_paragraphs,
+    document_body,
     paragraph_style,
     write_paragraphs,
 )
@@ -37,10 +39,13 @@ def max_chars(shell):
 @dataclasses.dataclass
 class Snapshot:
     """Le document lu avant le run. `paragraphs` sont des références UNO, à
-    n'utiliser que sur le thread principal."""
+    n'utiliser que sur le thread principal. `tables` donne, pour chaque
+    tableau du corps, l'index du paragraphe qui le suit : leur texte n'est ni
+    lu ni écrit, et aucun morceau réécrit ne les enjambe."""
     paragraphs: list
     texts: list
     styles: list
+    tables: tuple = ()
 
     @property
     def empty(self):
@@ -53,15 +58,19 @@ class Snapshot:
 
 def read(ctx):
     """Thread principal exclusivement."""
-    items = _body(ctx)
+    items, tables = _body(ctx)
     return Snapshot(items, [p.getString() for p in items],
-                    [paragraph_style(p) for p in items])
+                    [paragraph_style(p) for p in items], tables)
 
 
 def _body(ctx):
     """Paragraphes du document hors index (table des matières…) : Writer les
-    régénère, et l'API les laisse écrire malgré leur protection."""
-    return [p for p in document_paragraphs(ctx) if _index_of(p) is None]
+    régénère, et l'API les laisse écrire malgré leur protection. Puis, pour
+    chaque tableau du corps, l'index parmi eux du paragraphe qui le suit."""
+    paragraphs, tables = document_body(ctx)
+    kept = [index for index, p in enumerate(paragraphs) if _index_of(p) is None]
+    return ([paragraphs[index] for index in kept],
+            tuple(bisect.bisect_left(kept, after) for after in tables))
 
 
 def _index_of(paragraph):
@@ -144,7 +153,7 @@ def rewrite(model, snapshot, instruction_for, limit, tee=None):
         heading = snapshot.texts[section.heading] if section.heading is not None else ""
         if tee and heading.strip():
             tee(heading + "\n")
-        for indexes in doc_rewrite.chunks(snapshot.texts, section.body, limit):
+        for indexes in _chunks(snapshot, section.body, limit):
             originals = [snapshot.texts[i] for i in indexes]
             answer = model.ask(doc_rewrite.build_rewrite_prompt(
                 originals, instruction_for(originals),
@@ -157,6 +166,29 @@ def rewrite(model, snapshot, instruction_for, limit, tee=None):
                 return Outcome(error="empty_response", step=model.last_step)
             drafts.append(Draft(indexes, paragraphs, heading=section.heading))
     return Outcome(drafts=drafts)
+
+
+def _chunks(snapshot, body, limit):
+    """Les morceaux du corps d'une section, jamais à cheval sur un tableau :
+    effacer les paragraphes en trop d'un tel morceau supprimerait le tableau
+    placé entre eux. Chaque suite de paragraphes entre deux tableaux va de
+    son premier à son dernier paragraphe non vide."""
+    runs, current = [], []
+    for index in body:
+        if index in snapshot.tables and current:
+            runs.append(current)
+            current = []
+        current.append(index)
+    runs.append(current)
+    filled = ([index for index in run if snapshot.texts[index].strip()] for run in runs)
+    return [chunk for run in filled if run
+            for chunk in doc_rewrite.chunks(snapshot.texts, range(run[0], run[-1] + 1), limit)]
+
+
+def spans_table(snapshot, indexes):
+    """Vrai si un tableau du corps sépare deux des paragraphes consécutifs
+    `indexes`."""
+    return any(indexes[0] < after <= indexes[-1] for after in snapshot.tables)
 
 
 def compose(model, snapshot, instruction, tee=None):
@@ -173,9 +205,13 @@ def compose(model, snapshot, instruction, tee=None):
 
 
 def _trailing_blanks(snapshot):
-    """Index des paragraphes vides qui terminent le document."""
+    """Index des paragraphes vides qui terminent le document, après son
+    dernier tableau : remplir aussi ceux d'avant répartirait le texte de part
+    et d'autre du tableau, ou le supprimerait avec un surplus effacé. Aucun
+    quand seul un index suit ce tableau : le texte suit alors le dernier
+    paragraphe du corps, avant le tableau."""
     blanks = []
-    for index in reversed(range(len(snapshot.texts))):
+    for index in reversed(range(max(snapshot.tables, default=0), len(snapshot.texts))):
         if snapshot.texts[index].strip():
             break
         blanks.insert(0, index)
@@ -235,12 +271,15 @@ def summarize(model, snapshot, prompt_for, limit, tee=None):
 
 def write(ctx, snapshot, apply, undo_label, cancel_event=None):
     """Applique `apply()` dans une seule action d'annulation, si le run n'a pas
-    été arrêté et si le document n'a pas changé depuis sa lecture. Rend
-    "written", "stopped" ou "changed". Thread principal exclusivement, celui
-    du bouton Arrêter : un arrêt demandé avant cette écriture est donc vu."""
+    été arrêté et si le document n'a pas changé depuis sa lecture, tableaux
+    compris : un tableau inséré dans un morceau serait effacé avec son
+    surplus. Rend "written", "stopped" ou "changed". Thread principal
+    exclusivement, celui du bouton Arrêter : un arrêt demandé avant cette
+    écriture est donc vu."""
     if cancel_event is not None and cancel_event.is_set():
         return "stopped"
-    if [p.getString() for p in _body(ctx)] != snapshot.texts:
+    paragraphs, tables = _body(ctx)
+    if [p.getString() for p in paragraphs] != snapshot.texts or tables != snapshot.tables:
         return "changed"
     undo = ctx.model.getUndoManager()
     undo.enterUndoContext(undo_label)
@@ -249,6 +288,14 @@ def write(ctx, snapshot, apply, undo_label, cancel_event=None):
     finally:
         undo.leaveUndoContext()
     return "written"
+
+
+def with_tables(snapshot, message):
+    """Le bilan d'une action qui a écrit son résultat, suivi du nombre de
+    tableaux qu'elle a laissés de côté, s'il y en a."""
+    if not snapshot.tables:
+        return message
+    return message + " " + _t("palette.tables_left", count=len(snapshot.tables))
 
 
 def replace(ctx, snapshot, drafts):

@@ -938,6 +938,97 @@ def test_text_asked_under_a_lone_title_follows_it_in_body_style(
     assert "Les abeilles" in relay.requests[0]["messages"][-1]["content"]
 
 
+@pytest.mark.parametrize("append", [False, True], ids=["replace", "append"])
+def test_a_rewritten_document_says_how_many_tables_it_left_aside(palette_module, monkeypatch,
+                                                                 append):
+    """Le bilan dit combien de tableaux la demande a laissés de côté, ils
+    restent dans le document, et l'étape de lecture les compte."""
+    from src.mirai.core import telemetry_steps
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc(["Rapport", TABLE, "Le contexte.", "Les chiffres."],
+                      ["Heading 1", "", "Standard", "Standard"])
+    palette, _, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."], append=append)
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert summary["bilan"].endswith(" " + _t("palette.tables_left", count=1))
+    assert palette.conversation.load()[-1]["text"] == summary["bilan"]
+    assert doc.tables == 1
+    read = _step_spans(palette.shell, telemetry_steps.DOCUMENT_READ)
+    assert read[0]["document.tables"] == 1
+
+
+def test_a_request_on_a_body_cut_by_a_table_goes_piece_by_piece_and_keeps_it(
+        palette_module, monkeypatch):
+    """Une seule réponse ne peut pas se répartir de part et d'autre d'un
+    tableau : la demande part morceau par morceau entre les tableaux, et la
+    palette le dit."""
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", "Le cadre.", TABLE, "Les chiffres."],
+                      ["Heading 1", "Standard", "Standard", "", "Standard"])
+    palette, relay, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Premier bloc.", "Second bloc."])
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert doc.paragraphs == ["Rapport", "Premier bloc.", "Second bloc."]
+    assert doc.tables == 1
+    assert len(relay.requests) == 2
+    assert _t("palette.rewrite_around_tables") in palette._models["response"].Text
+
+
+def test_an_appended_rewrite_of_a_body_cut_by_a_table_keeps_a_single_call(
+        palette_module, monkeypatch):
+    """En ajout, la réponse suit le document sans rien effacer : « en un seul
+    paragraphe » en donne un seul, comme sans tableau."""
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", TABLE, "Les chiffres."],
+                      ["Heading 1", "Standard", "", "Standard"])
+    palette, relay, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Un seul paragraphe."], append=True,
+        instruction="Réécris ce document en un seul paragraphe")
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert doc.paragraphs == ["Rapport", "Le contexte.", "Les chiffres.",
+                              "---début-du-texte-réécrit---", "Un seul paragraphe.",
+                              "---fin-du-texte-réécrit---"]
+    assert doc.tables == 1
+    assert len(relay.requests) == 1
+    assert _t("palette.rewrite_around_tables") not in palette._models["response"].Text
+
+
+@pytest.mark.parametrize("reply", [ABEILLES, "Les abeilles pollinisent les fleurs."],
+                         ids=["two_paragraphs", "one_paragraph"])
+def test_text_asked_for_a_document_of_tables_goes_after_the_last_table(
+        palette_module, monkeypatch, reply):
+    """Les paragraphes vides placés avant un tableau restent vides : le texte
+    rédigé ne se répartit jamais de part et d'autre du tableau."""
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc(["", TABLE, ""])
+    _rewrite_document(palette_module, monkeypatch, doc, [reply],
+                      instruction="Rédige une introduction")
+
+    assert doc.paragraphs == [""] + reply.split("\n")
+    assert doc.tables == 1
+
+
+def test_text_asked_in_a_document_of_tables_says_the_tables_were_left_aside(
+        palette_module, monkeypatch):
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc([TABLE, ""])
+    _, _, summary = _rewrite_document(palette_module, monkeypatch, doc, [ABEILLES],
+                                      instruction="Rédige une introduction")
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert doc.paragraphs == ABEILLES.split("\n")
+    assert doc.tables == 1
+    assert summary["bilan"].endswith(" " + _t("palette.tables_left", count=1))
+
+
 def test_a_global_request_applies_to_the_whole_document(palette_module, monkeypatch):
     """« En deux paragraphes » : deux paragraphes en tout, d'un seul appel. Le
     titre du document reste, le corps ne prend jamais un style de titre."""

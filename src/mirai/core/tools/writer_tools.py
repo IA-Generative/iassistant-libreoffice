@@ -93,18 +93,22 @@ def get_document_map(ctx, args):
                       data={"paragraph_count": index, "truncated": truncated})
 
 
-def document_paragraphs(ctx):
-    """Liste les objets paragraphe du document, dans l'ordre."""
-    items = []
+def document_body(ctx):
+    """Les objets paragraphe du document, dans l'ordre, et pour chaque tableau
+    du corps l'index du paragraphe qui le suit : l'énumération rend un
+    tableau comme un seul élément, sans le texte de ses cellules."""
+    items, tables = [], []
     enumeration = ctx.model.Text.createEnumeration()
     while enumeration.hasMoreElements():
-        para = enumeration.nextElement()
+        element = enumeration.nextElement()
         try:
-            if para.supportsService("com.sun.star.text.Paragraph"):
-                items.append(para)
+            if element.supportsService("com.sun.star.text.Paragraph"):
+                items.append(element)
+            elif element.supportsService("com.sun.star.text.TextTable"):
+                tables.append(len(items))
         except Exception:
             continue
-    return items
+    return items, tables
 
 
 def paragraph_style(para):
@@ -177,16 +181,28 @@ def replace_paragraphs(ctx, args):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"plage de paragraphes invalide : {start}..{end}")
 
-    paragraphs = document_paragraphs(ctx)
+    paragraphs, tables = document_body(ctx)
     if start > len(paragraphs):
         return ToolResult(
             call_id="", ok=False, content="",
             error=f"le document ne contient que {len(paragraphs)} paragraphe(s)")
     end = min(end, len(paragraphs))
+    new_texts = text.split("\n")
+    crossed = [after for after in tables if start - 1 < after < end]
+    if crossed and len(new_texts) != end - start + 1:
+        # Une ligne par paragraphe garde chaque texte de son côté du tableau :
+        # moins de lignes l'effaceraient avec le surplus, plus de lignes
+        # feraient passer du texte de l'autre côté.
+        places = ", ".join(f"[P{after}] et [P{after + 1}]" for after in crossed)
+        return ToolResult(
+            call_id="", ok=False, content="",
+            error=(f"un tableau sépare {places} : rends une ligne par paragraphe, "
+                   "ou remplace séparément les paragraphes de chaque côté du tableau, "
+                   "en commençant par le dernier : un remplacement renumérote les "
+                   "paragraphes qui le suivent"))
 
     ctx.undo_begin("Réécriture de paragraphes")
     targets = paragraphs[start - 1:end]
-    new_texts = text.split("\n")
     write_paragraphs(ctx.model.Text, targets, new_texts)
 
     return ToolResult(
