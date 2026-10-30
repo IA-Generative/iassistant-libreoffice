@@ -187,18 +187,20 @@ def replace_paragraphs(ctx, args):
             call_id="", ok=False, content="",
             error=f"le document ne contient que {len(paragraphs)} paragraphe(s)")
     end = min(end, len(paragraphs))
+    new_texts = text.split("\n")
     crossed = [after for after in tables if start - 1 < after < end]
-    if crossed:
-        # Effacer les paragraphes en trop d'un seul tenant supprimerait le
-        # tableau placé entre eux.
+    if crossed and len(new_texts) != end - start + 1:
+        # Une ligne par paragraphe garde chaque texte de son côté du tableau :
+        # moins de lignes l'effaceraient avec le surplus, plus de lignes
+        # feraient passer du texte de l'autre côté.
+        places = ", ".join(f"[P{after}] et [P{after + 1}]" for after in crossed)
         return ToolResult(
             call_id="", ok=False, content="",
-            error=(f"un tableau sépare [P{crossed[0]}] et [P{crossed[0] + 1}] : "
-                   "remplace séparément les paragraphes de chaque côté du tableau"))
+            error=(f"un tableau sépare {places} : rends une ligne par paragraphe, "
+                   "ou remplace séparément les paragraphes de chaque côté du tableau"))
 
     ctx.undo_begin("Réécriture de paragraphes")
     targets = paragraphs[start - 1:end]
-    new_texts = text.split("\n")
     write_paragraphs(ctx.model.Text, targets, new_texts)
 
     return ToolResult(

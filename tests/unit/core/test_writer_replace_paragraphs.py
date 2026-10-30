@@ -11,6 +11,8 @@ qui permet de vérifier que chaque paragraphe garde son propre style, et qu'une
 suppression n'invalide pas les autres.
 """
 
+import pytest
+
 from src.mirai.core.context import ToolContext
 from src.mirai.core.tools.writer_tools import replace_paragraphs
 from tests.stubs.fake_shell import FakeShell
@@ -192,18 +194,43 @@ def _ctx_with_table():
     return ToolContext(doc, doc.controller, "writer", FakeShell()), doc
 
 
-def test_a_range_that_crosses_a_table_is_refused():
-    """Remplacer d'un seul tenant des paragraphes de part et d'autre d'un
-    tableau le supprimerait : l'outil refuse et dit au modèle de remplacer
-    chaque côté séparément."""
+@pytest.mark.parametrize("text", ["Fusion.", "Un.\nDeux.\nTrois.\nQuatre."],
+                         ids=["fewer_lines", "more_lines"])
+def test_a_range_across_a_table_with_another_number_of_lines_is_refused(text):
+    """Moins de lignes que de paragraphes supprimeraient le tableau avec le
+    surplus, plus de lignes feraient passer du texte de l'autre côté :
+    l'outil refuse et dit au modèle comment s'y prendre."""
     ctx, doc = _ctx_with_table()
 
-    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": "Fusion."})
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": text})
 
     assert not result.ok
     assert "[P2]" in result.error and "[P3]" in result.error
     assert doc.paragraphs == ["Avant.", "Juste avant.", "Après."]
     assert doc.tables == 1
+
+
+def test_a_range_across_a_table_with_one_line_per_paragraph_is_replaced_and_keeps_it():
+    """Corriger l'orthographe de tout le document garde un texte par
+    paragraphe : chacun reste de son côté du tableau."""
+    ctx, doc = _ctx_with_table()
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": "Avant !\nJuste avant !\nAprès !"})
+
+    assert result.ok
+    assert doc.paragraphs == ["Avant !", "Juste avant !", "Après !"]
+    assert doc.tables == 1
+
+
+def test_a_refused_range_names_every_table_it_crosses():
+    """Un refus par tableau coûterait au modèle un tour de plus pour chacun."""
+    doc = FakeBodyDoc(["Un.", TABLE, "Deux.", TABLE, "Trois."])
+    ctx = ToolContext(doc, doc.controller, "writer", FakeShell())
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": "Fusion."})
+
+    assert not result.ok
+    assert "[P1] et [P2]" in result.error and "[P2] et [P3]" in result.error
 
 
 def test_a_range_on_one_side_of_a_table_is_replaced_and_keeps_it():

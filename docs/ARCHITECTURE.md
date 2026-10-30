@@ -223,7 +223,8 @@ réécrit s'arrête à un tableau, car effacer d'un seul tenant les paragraphes 
 trop de part et d'autre le supprime. La demande libre sur un corps coupé par un
 tableau passe donc morceau par morceau, et la palette le dit ; le texte rédigé
 pour un document sans corps va après le dernier tableau ; et
-`writer_replace_paragraphs` refuse une plage qui enjambe un tableau.
+`writer_replace_paragraphs` refuse une plage qui enjambe un tableau, sauf avec
+une ligne par paragraphe, qui garde chaque texte de son côté.
 
 **Écriture de configuration atomique.** `set_config` écrit dans un fichier
 temporaire puis `os.replace`. En place, un lecteur concurrent peut voir un JSON
