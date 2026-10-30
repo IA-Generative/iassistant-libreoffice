@@ -207,7 +207,9 @@ def compose(model, snapshot, instruction, tee=None):
 def _trailing_blanks(snapshot):
     """Index des paragraphes vides qui terminent le document, après son
     dernier tableau : remplir aussi ceux d'avant répartirait le texte de part
-    et d'autre du tableau, ou le supprimerait avec un surplus effacé."""
+    et d'autre du tableau, ou le supprimerait avec un surplus effacé. Aucun
+    quand seul un index suit ce tableau : le texte suit alors le dernier
+    paragraphe du corps, avant le tableau."""
     blanks = []
     for index in reversed(range(max(snapshot.tables, default=0), len(snapshot.texts))):
         if snapshot.texts[index].strip():

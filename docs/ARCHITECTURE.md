@@ -223,7 +223,8 @@ réécrit s'arrête à un tableau, car effacer d'un seul tenant les paragraphes 
 trop de part et d'autre le supprime. En remplacement, la demande libre sur un
 corps coupé par un tableau passe donc morceau par morceau, et la palette le
 dit ; en ajout, rien n'est effacé et elle part d'un seul appel ; le texte
-rédigé pour un document sans corps va après le dernier tableau ; et
+rédigé pour un document sans corps va après le dernier tableau, ou avant lui
+quand seul un index (table des matières) le suit ; et
 `writer_replace_paragraphs` refuse une plage qui enjambe un tableau, sauf avec
 une ligne par paragraphe, qui garde chaque texte de son côté.
 
