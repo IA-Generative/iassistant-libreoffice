@@ -21,7 +21,7 @@ from tests.stubs.fake_shell import (
     StoppedSSEResponse,
     text_chunks,
 )
-from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc, FakeTable
 
 SUMMARY_HEADER = "\n\n---début-du-résumé---\n"
 SUMMARY_FOOTER = "\n---fin-du-résumé---\n"
@@ -233,6 +233,27 @@ def test_a_document_edited_during_a_whole_document_action_is_left_alone():
 
     assert message == _t("preset.target_changed")
     assert len(doc.paragraphs) == len(ARTICLE)
+    assert doc.undo.entered == []
+
+
+def test_a_table_inserted_during_a_whole_document_action_is_left_alone():
+    """Écrire le morceau plus court effacerait le tableau inséré entre ses
+    paragraphes pendant le run : rien n'est écrit."""
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", "Le cadre."],
+                      ["Heading 1", "Standard", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Contexte et cadre."))])
+    urlopen = shell.urlopen
+
+    def _user_inserts_a_table_then_model_answers(request, timeout=None):
+        doc.items.insert(2, FakeTable())
+        return urlopen(request, timeout)
+
+    shell.urlopen = _user_inserts_a_table_then_model_answers
+    message = presets.run_shorten(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert message == _t("preset.target_changed")
+    assert doc.paragraphs == ["Rapport", "Le contexte.", "Le cadre."]
+    assert doc.tables == 1
     assert doc.undo.entered == []
 
 

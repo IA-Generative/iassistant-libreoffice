@@ -269,12 +269,15 @@ def summarize(model, snapshot, prompt_for, limit, tee=None):
 
 def write(ctx, snapshot, apply, undo_label, cancel_event=None):
     """Applique `apply()` dans une seule action d'annulation, si le run n'a pas
-    été arrêté et si le document n'a pas changé depuis sa lecture. Rend
-    "written", "stopped" ou "changed". Thread principal exclusivement, celui
-    du bouton Arrêter : un arrêt demandé avant cette écriture est donc vu."""
+    été arrêté et si le document n'a pas changé depuis sa lecture, tableaux
+    compris : un tableau inséré dans un morceau serait effacé avec son
+    surplus. Rend "written", "stopped" ou "changed". Thread principal
+    exclusivement, celui du bouton Arrêter : un arrêt demandé avant cette
+    écriture est donc vu."""
     if cancel_event is not None and cancel_event.is_set():
         return "stopped"
-    if [p.getString() for p in _body(ctx)[0]] != snapshot.texts:
+    paragraphs, tables = _body(ctx)
+    if [p.getString() for p in paragraphs] != snapshot.texts or tables != snapshot.tables:
         return "changed"
     undo = ctx.model.getUndoManager()
     undo.enterUndoContext(undo_label)
