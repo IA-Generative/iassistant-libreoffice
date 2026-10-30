@@ -103,9 +103,10 @@ def test_uninstall_wipes_everything_and_freezes_writes(tmp_path, monkeypatch, ti
     assert not (tmp_path / "mirai").exists()
 
 
-def test_still_deployed_means_no_wipe(tmp_path, timers):
-    _profile(tmp_path)
-    _watch(tmp_path, _manager({"user": [IDENTIFIER]})).schedule_check()
+def test_still_deployed_means_no_wipe(tmp_path, monkeypatch, timers):
+    job, extensions_changed = _watched_job(tmp_path, monkeypatch)
+    job.ctx.getValueByName.return_value = _manager({"user": [IDENTIFIER]})
+    extensions_changed()
     timers()
     timers()
     assert (tmp_path / "mirai" / "settings.json").exists()
