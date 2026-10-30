@@ -197,7 +197,9 @@ def replace_paragraphs(ctx, args):
         return ToolResult(
             call_id="", ok=False, content="",
             error=(f"un tableau sépare {places} : rends une ligne par paragraphe, "
-                   "ou remplace séparément les paragraphes de chaque côté du tableau"))
+                   "ou remplace séparément les paragraphes de chaque côté du tableau, "
+                   "en commençant par le dernier : un remplacement renumérote les "
+                   "paragraphes qui le suivent"))
 
     ctx.undo_begin("Réécriture de paragraphes")
     targets = paragraphs[start - 1:end]

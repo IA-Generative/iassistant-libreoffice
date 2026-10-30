@@ -233,6 +233,22 @@ def test_a_refused_range_names_every_table_it_crosses():
     assert "[P1] et [P2]" in result.error and "[P2] et [P3]" in result.error
 
 
+def test_each_side_replaced_from_the_last_keeps_the_numbers_of_the_map():
+    """Le refus dit de commencer par le dernier côté : un remplacement
+    renumérote les paragraphes qui le suivent, jamais ceux d'avant."""
+    doc = FakeBodyDoc(["Intro.", "Contexte.", TABLE, "Chiffres.", "Conclusion."])
+    ctx = ToolContext(doc, doc.controller, "writer", FakeShell())
+
+    refusal = replace_paragraphs(ctx, {"start": 1, "end": 4, "text": "Résumé."})
+    after = replace_paragraphs(ctx, {"start": 3, "end": 4, "text": "Résumé de la fin."})
+    before = replace_paragraphs(ctx, {"start": 1, "end": 2, "text": "Résumé du début."})
+
+    assert "en commençant par le dernier" in refusal.error
+    assert after.ok and before.ok
+    assert doc.paragraphs == ["Résumé du début.", "Résumé de la fin."]
+    assert doc.tables == 1
+
+
 def test_a_range_on_one_side_of_a_table_is_replaced_and_keeps_it():
     ctx, doc = _ctx_with_table()
 
