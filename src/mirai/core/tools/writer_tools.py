@@ -95,16 +95,25 @@ def get_document_map(ctx, args):
 
 def document_paragraphs(ctx):
     """Liste les objets paragraphe du document, dans l'ordre."""
-    items = []
+    return document_body(ctx)[0]
+
+
+def document_body(ctx):
+    """Les objets paragraphe du document, dans l'ordre, et le nombre de
+    tableaux du corps : l'énumération rend un tableau comme un seul élément,
+    sans le texte de ses cellules."""
+    items, tables = [], 0
     enumeration = ctx.model.Text.createEnumeration()
     while enumeration.hasMoreElements():
-        para = enumeration.nextElement()
+        element = enumeration.nextElement()
         try:
-            if para.supportsService("com.sun.star.text.Paragraph"):
-                items.append(para)
+            if element.supportsService("com.sun.star.text.Paragraph"):
+                items.append(element)
+            elif element.supportsService("com.sun.star.text.TextTable"):
+                tables += 1
         except Exception:
             continue
-    return items
+    return items, tables
 
 
 def paragraph_style(para):

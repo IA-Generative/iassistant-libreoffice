@@ -21,7 +21,7 @@ from tests.stubs.fake_shell import (
     StoppedSSEResponse,
     text_chunks,
 )
-from tests.stubs.fake_writer_body import FakeBodyDoc
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
 
 SUMMARY_HEADER = "\n\n---début-du-résumé---\n"
 SUMMARY_FOOTER = "\n---fin-du-résumé---\n"
@@ -244,6 +244,59 @@ def test_an_empty_document_is_reported_without_calling_the_model():
 
     assert message == _t("palette.empty_document")
     assert shell.requests == []
+
+
+WHOLE_DOCUMENT_RUNNERS = pytest.mark.parametrize(
+    "runner", [presets.run_summarize, presets.run_simplify,
+               presets.run_shorten, presets.run_lengthen],
+    ids=["summarize", "simplify", "shorten", "lengthen"])
+
+
+@WHOLE_DOCUMENT_RUNNERS
+def test_a_document_whose_text_is_only_in_tables_says_so_without_calling_the_model(runner):
+    """Une fiche faite de tableaux n'est pas vide : le message dit que son
+    texte est dans des tableaux, que l'action laisse de côté."""
+    doc = FakeBodyDoc(["", TABLE, ""])
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None)
+
+    assert message == _t("palette.tables_only")
+    assert shell.requests == []
+    assert doc.writes == 0
+
+
+@pytest.mark.parametrize("runner", [presets.run_simplify, presets.run_shorten,
+                                    presets.run_lengthen],
+                         ids=["simplify", "shorten", "lengthen"])
+def test_a_document_of_headings_and_tables_says_so_without_calling_the_model(runner):
+    """Une fiche faite d'un titre et de tableaux : le message dit qu'elle ne
+    contient que des titres et des tableaux, que l'action laisse de côté."""
+    doc = FakeBodyDoc(["Fiche de poste", TABLE, ""], ["Heading 1", "", "Standard"])
+    shell = FakeShell()
+
+    message = runner(_ctx(doc, shell), shell, "", None, append_mode=False)
+
+    assert message == _t("palette.headings_and_tables_only")
+    assert shell.requests == []
+    assert doc.writes == 0
+
+
+@WHOLE_DOCUMENT_RUNNERS
+@MODES
+def test_a_whole_document_action_says_how_many_tables_it_left_aside(runner, append_mode):
+    """Le bilan dit combien de tableaux l'action a laissés de côté, et ils
+    restent dans le document."""
+    doc = FakeBodyDoc(["Rapport", TABLE, "Le contexte.", "Analyse", TABLE, "Les chiffres."],
+                      ["Heading 1", "", "Standard", "Heading 2", "", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte repris.")),
+                                 FakeSSEResponse(text_chunks("Texte repris."))])
+
+    message = runner(_ctx(doc, shell), shell, "", None, append_mode=append_mode)
+
+    assert isinstance(message, presets.Written)
+    assert message.endswith(" " + _t("palette.tables_left", count=2))
+    assert doc.tables == 2
 
 
 def test_the_table_of_contents_is_never_rewritten():

@@ -3,12 +3,23 @@ réel : texte et style de chacun, références stables comme sous UNO.
 
 Il sert aux actions qui portent sur tout le document : ce qu'elles écrivent,
 où, avec quel style, et si l'écriture a eu lieu dans une action d'annulation,
-se lit directement sur `paragraphs`, `styles` et `undo`.
+se lit directement sur `paragraphs`, `styles` et `undo`. `TABLE` à la place
+d'un texte met un tableau dans le corps ; `tables` dit combien il en reste.
 """
 
 from types import SimpleNamespace
 
 from tests.stubs.thread_guard import UnoStruct
+
+TABLE = object()
+
+
+class FakeTable:
+    """Tableau du corps : l'énumération le rend comme un seul élément, sans
+    le texte de ses cellules."""
+
+    def supportsService(self, name):
+        return name in ("com.sun.star.text.TextTable", "com.sun.star.text.TextContent")
 
 
 class FakeParagraph:
@@ -64,7 +75,8 @@ class FakeBodyCursor:
 
     def setString(self, _text):
         # Le curseur va de la fin d'un paragraphe à la fin d'un suivant :
-        # effacer la plage supprime les paragraphes qu'elle couvre.
+        # effacer la plage supprime les paragraphes qu'elle couvre, et comme
+        # Writer, les tableaux placés entre eux.
         self._doc.record_write()
         items = self._doc.items
         del items[items.index(self.anchor) + 1:items.index(self._until) + 1]
@@ -129,7 +141,7 @@ class FakeBodyDoc:
 
     def __init__(self, paragraphs, styles=None, selection_text=""):
         styles = list(styles or ["Standard"] * len(paragraphs))
-        self.items = [FakeParagraph(self, text, style)
+        self.items = [FakeTable() if text is TABLE else FakeParagraph(self, text, style)
                       for text, style in zip(paragraphs, styles, strict=True)]
         self.Text = FakeBodyText(self)
         self.record_changes = False      # Édition > Suivi des modifications > Enregistrer
@@ -146,11 +158,15 @@ class FakeBodyDoc:
 
     @property
     def paragraphs(self):
-        return [p.text for p in self.items]
+        return [p.text for p in self.items if isinstance(p, FakeParagraph)]
 
     @property
     def styles(self):
-        return [p.style for p in self.items]
+        return [p.style for p in self.items if isinstance(p, FakeParagraph)]
+
+    @property
+    def tables(self):
+        return sum(isinstance(item, FakeTable) for item in self.items)
 
     def record_write(self):
         self.writes += 1

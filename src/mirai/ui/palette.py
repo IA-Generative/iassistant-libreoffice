@@ -2126,8 +2126,8 @@ class AssistantPalette:
                "append.mode": bool(append)})
         kept = _t("palette.title_kept") if kept_count else ""
         how = _t("palette.how_appended") if append else _t("palette.how_rewritten")
-        summary = _t("palette.document_summary", how=how,
-                     before=body, after=after, kept=kept)
+        summary = whole_document.with_tables(document, _t(
+            "palette.document_summary", how=how, before=body, after=after, kept=kept))
         self._stream_response(summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
@@ -2140,7 +2140,8 @@ class AssistantPalette:
         self.journal_line(_t("palette.journal_read", count=len(document.texts)),
                           step=telemetry_steps.DOCUMENT_READ,
                           **{"document.paragraphs": len(document.texts),
-                             "document.headings": 0})
+                             "document.headings": 0,
+                             "document.tables": document.tables})
         self._progress.set_phase(_t("progress.writing"))
         self._append_response(_t("palette.assistant_prefix"))
         result = whole_document.compose(self._document_model(document), document, instruction,
@@ -2159,7 +2160,8 @@ class AssistantPalette:
             step=telemetry_steps.DOCUMENT_DONE,
             **{"body.paragraphs": 0, "result.paragraphs": count,
                "headings.kept": 0, "append.mode": bool(self.append_mode)})
-        summary = _t("palette.document_composed", count=count)
+        summary = whole_document.with_tables(document,
+                                             _t("palette.document_composed", count=count))
         self._stream_response(summary)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
@@ -2219,7 +2221,8 @@ class AssistantPalette:
         self.journal_line(_t("palette.journal_read", count=len(document.texts)),
                           step=telemetry_steps.DOCUMENT_READ,
                           **{"document.paragraphs": len(document.texts),
-                             "document.headings": len(headings)})
+                             "document.headings": len(headings),
+                             "document.tables": document.tables})
         if headings:
             self.journal_line(_t("palette.journal_heading_kept"),
                               detail=f"« {headings[0][:50]} »")

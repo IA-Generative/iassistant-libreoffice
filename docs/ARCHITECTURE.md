@@ -213,6 +213,11 @@ dans une seule action d'annulation, si le document n'a pas changé entre-temps.
 Un document sans texte de corps, vide ou fait de titres seuls, n'a rien à
 réécrire : la demande libre y rédige le texte demandé et l'écrit à la fin du
 document, dans le style du corps.
+Les tableaux du corps sont comptés à la même lecture, mais leur texte n'est ni
+lu ni écrit : l'énumération du corps rend un tableau comme un seul élément.
+Le bilan dit combien de tableaux l'action a laissés de côté, et les presets
+annoncent un document dont le texte n'est que dans des tableaux, ou dans des
+titres et des tableaux, au lieu de le dire vide ou fait de titres seuls.
 
 **Écriture de configuration atomique.** `set_config` écrit dans un fichier
 temporaire puis `os.replace`. En place, un lecteur concurrent peut voir un JSON

@@ -327,7 +327,7 @@ Les budgets de tokens sont également configurables :
 | `summarize_selection_max_tokens` | 15 000 |
 | `simplify_selection_max_tokens` | 15 000 |
 
-Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section.
+Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document dont le texte n'est que dans des tableaux, Résumer, Simplifier, Raccourcir et Allonger le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux.
 
 Un fichier `prompt.txt` placé à côté du document est détecté automatiquement et peut être ouvert depuis la boîte de dialogue d'édition.
 

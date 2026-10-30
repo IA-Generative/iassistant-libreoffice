@@ -403,6 +403,12 @@ def _read_document(ctx, span, action):
     return snapshot
 
 
+def _empty_message(snapshot):
+    """Un document dont le texte n'est que dans des tableaux n'est pas vide
+    aux yeux de l'utilisateur : le message le dit."""
+    return _t("palette.tables_only") if snapshot.tables else _t("palette.empty_document")
+
+
 def _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
                     done_message):
     """Bilan d'une action sur tout le document : `apply` n'écrit que si le
@@ -417,7 +423,7 @@ def _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
         return error_message("cancelled")
     if outcome == "changed":
         return _t("preset.target_changed")
-    return Written(done_message)
+    return Written(whole_document.with_tables(snapshot, done_message))
 
 
 def _write_rewrite(ctx, snapshot, result, append_mode, undo_label, markers,
@@ -425,7 +431,8 @@ def _write_rewrite(ctx, snapshot, result, append_mode, undo_label, markers,
     """Écrit les sections réécrites à leur place, ou en un bloc après le
     dernier paragraphe entre les `markers` (début, fin)."""
     if not (result.error or result.question or result.drafts):
-        return _t("palette.headings_only")
+        return (_t("palette.headings_and_tables_only") if snapshot.tables
+                else _t("palette.headings_only"))
 
     def apply():
         if append_mode:
@@ -444,7 +451,7 @@ def _summarize_document(ctx, shell, tee, cancel_event, progress):
     jamais à sa place."""
     snapshot = _read_document(ctx, "SummarizeSelection", "summarize_selection")
     if snapshot.empty:
-        return _t("palette.empty_document")
+        return _empty_message(snapshot)
     model = whole_document.Model(
         _text_client(shell, int(shell.get_config("summarize_selection_max_tokens", 15000))),
         _system(_SUMMARY_SYSTEM), cancel_event=cancel_event, progress=progress,
@@ -470,7 +477,7 @@ _SIMPLIFY_INSTRUCTION = (
 def _simplify_document(ctx, shell, tee, cancel_event, append_mode, progress):
     snapshot = _read_document(ctx, "SimplifySelection", "simplify_selection")
     if snapshot.empty:
-        return _t("palette.empty_document")
+        return _empty_message(snapshot)
     limit = whole_document.max_chars(shell)
     model = whole_document.Model(
         _text_client(shell, int(shell.get_config("simplify_selection_max_tokens", 15000))),
@@ -490,7 +497,7 @@ def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mo
                      progress):
     snapshot = _read_document(ctx, "ResizeSelection", "resize_selection")
     if snapshot.empty:
-        return _t("palette.empty_document")
+        return _empty_message(snapshot)
     goal = "plus courte" if ratio < 1 else "plus longue"
 
     def instruction_for(originals):

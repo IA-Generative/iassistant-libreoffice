@@ -9,11 +9,12 @@ document n'a pas changé entre-temps.
 
 import dataclasses
 
+from ..i18n import t as _t
 from . import doc_rewrite
 from .sinks import DraftSink
 from .tools.writer_tools import (
     PARAGRAPH_BREAK,
-    document_paragraphs,
+    document_body,
     paragraph_style,
     write_paragraphs,
 )
@@ -37,10 +38,12 @@ def max_chars(shell):
 @dataclasses.dataclass
 class Snapshot:
     """Le document lu avant le run. `paragraphs` sont des références UNO, à
-    n'utiliser que sur le thread principal."""
+    n'utiliser que sur le thread principal. `tables` compte les tableaux du
+    corps, dont le texte n'est ni lu ni écrit."""
     paragraphs: list
     texts: list
     styles: list
+    tables: int = 0
 
     @property
     def empty(self):
@@ -53,15 +56,17 @@ class Snapshot:
 
 def read(ctx):
     """Thread principal exclusivement."""
-    items = _body(ctx)
+    items, tables = _body(ctx)
     return Snapshot(items, [p.getString() for p in items],
-                    [paragraph_style(p) for p in items])
+                    [paragraph_style(p) for p in items], tables)
 
 
 def _body(ctx):
     """Paragraphes du document hors index (table des matières…) : Writer les
-    régénère, et l'API les laisse écrire malgré leur protection."""
-    return [p for p in document_paragraphs(ctx) if _index_of(p) is None]
+    régénère, et l'API les laisse écrire malgré leur protection. Puis le
+    nombre de tableaux du corps."""
+    paragraphs, tables = document_body(ctx)
+    return [p for p in paragraphs if _index_of(p) is None], tables
 
 
 def _index_of(paragraph):
@@ -240,7 +245,7 @@ def write(ctx, snapshot, apply, undo_label, cancel_event=None):
     du bouton Arrêter : un arrêt demandé avant cette écriture est donc vu."""
     if cancel_event is not None and cancel_event.is_set():
         return "stopped"
-    if [p.getString() for p in _body(ctx)] != snapshot.texts:
+    if [p.getString() for p in _body(ctx)[0]] != snapshot.texts:
         return "changed"
     undo = ctx.model.getUndoManager()
     undo.enterUndoContext(undo_label)
@@ -249,6 +254,14 @@ def write(ctx, snapshot, apply, undo_label, cancel_event=None):
     finally:
         undo.leaveUndoContext()
     return "written"
+
+
+def with_tables(snapshot, message):
+    """Le bilan d'une action qui a écrit son résultat, suivi du nombre de
+    tableaux qu'elle a laissés de côté, s'il y en a."""
+    if not snapshot.tables:
+        return message
+    return message + " " + _t("palette.tables_left", count=snapshot.tables)
 
 
 def replace(ctx, snapshot, drafts):

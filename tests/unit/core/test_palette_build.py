@@ -938,6 +938,41 @@ def test_text_asked_under_a_lone_title_follows_it_in_body_style(
     assert "Les abeilles" in relay.requests[0]["messages"][-1]["content"]
 
 
+@pytest.mark.parametrize("append", [False, True], ids=["replace", "append"])
+def test_a_rewritten_document_says_how_many_tables_it_left_aside(palette_module, monkeypatch,
+                                                                 append):
+    """Le bilan dit combien de tableaux la demande a laissés de côté, ils
+    restent dans le document, et l'étape de lecture les compte."""
+    from src.mirai.core import telemetry_steps
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc(["Rapport", "Le contexte.", TABLE, "Les chiffres."],
+                      ["Heading 1", "Standard", "", "Standard"])
+    palette, _, summary = _rewrite_document(
+        palette_module, monkeypatch, doc, ["Premier bloc.\nSecond bloc."], append=append)
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert summary["bilan"].endswith(" " + _t("palette.tables_left", count=1))
+    assert palette.conversation.load()[-1]["text"] == summary["bilan"]
+    assert doc.tables == 1
+    read = _step_spans(palette.shell, telemetry_steps.DOCUMENT_READ)
+    assert read[0]["document.tables"] == 1
+
+
+def test_text_asked_in_a_document_of_tables_says_the_tables_were_left_aside(
+        palette_module, monkeypatch):
+    from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+
+    doc = FakeBodyDoc([TABLE, ""])
+    _, _, summary = _rewrite_document(palette_module, monkeypatch, doc, [ABEILLES],
+                                      instruction="Rédige une introduction")
+
+    assert _issue(summary) == {"ok": True, "written": True}
+    assert doc.paragraphs == ABEILLES.split("\n")
+    assert doc.tables == 1
+    assert summary["bilan"].endswith(" " + _t("palette.tables_left", count=1))
+
+
 def test_a_global_request_applies_to_the_whole_document(palette_module, monkeypatch):
     """« En deux paragraphes » : deux paragraphes en tout, d'un seul appel. Le
     titre du document reste, le corps ne prend jamais un style de titre."""
