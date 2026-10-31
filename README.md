@@ -231,11 +231,7 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 src/mirai/
 ├── entrypoint.py              # MainJob, UNO, mise à jour auto, télémétrie
 ├── security_flow.py           # SecureBootstrapFlow (enrollment, tokens, relay)
-├── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
-└── menu_actions/
-    ├── writer.py              # Edit, Summarize, Simplify, Resize
-    ├── calc.py                # Transform, Formula, Analyze
-    └── shared.py              # Utilitaires partagés
+└── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
 
 oxt/                           # Fichiers statiques packagés dans l'OXT
 ├── Addons.xcu                 # Menus et toolbar

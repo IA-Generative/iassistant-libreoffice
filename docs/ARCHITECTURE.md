@@ -370,7 +370,7 @@ faux documents à état réel).
 La refacto de la coquille et les suppressions décidées sont suivies par
 [l'ADR 0001](adr/0001-refacto-strangler.md) et le ticket #98.
 
-1. Supprimer le cœur legacy d'entrypoint.py + `menu_actions/` (commit de pure
+1. Supprimer le cœur legacy d'entrypoint.py et `formatting/` (commit de pure
    suppression, une fois la validation utilisateur passée) puis, une release
    plus tard, `stream_request`/`make_api_request`.
 2. Unifier `=PROMPT()` (`calc_prompt_function.py`) sur la façade (≈150 lignes

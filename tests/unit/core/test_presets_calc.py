@@ -1,6 +1,5 @@
 """Golden iso-fonctionnels Calc : transform (colonne Résultat IA), analyse
-(cellule fusionnée sous la sélection), formule agentique (via orchestrateur).
-Assertions portées de menu_actions/calc.py."""
+(cellule fusionnée sous la sélection), formule agentique (via orchestrateur)."""
 
 import threading
 
