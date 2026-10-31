@@ -166,7 +166,6 @@ from .formatting import insert_formatted
 from . import credentials, feed_rewrite, local_config, log_setup
 from .menu_actions.writer import handle_writer_action
 from .menu_actions.calc import handle_calc_action
-from .menu_actions.shared import apply_settings_result
 from .i18n import t as _t
 from .i18n import (
     get_locale as _i18n_get_locale,
@@ -174,6 +173,7 @@ from .i18n import (
 )
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
+from .shell.settings_result import apply_settings_result
 from .shell.ui_locale import extension_locale as _extension_locale
 from .shell.uninstall import UninstallWatch
 from .security_flow import (

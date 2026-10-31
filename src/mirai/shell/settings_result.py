@@ -1,4 +1,4 @@
-"""Shared helpers for menu actions."""
+"""Enregistrement des champs validés dans le dialogue Paramètres."""
 
 
 def apply_settings_result(job, result):
