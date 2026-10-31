@@ -1,7 +1,6 @@
 """Golden iso-fonctionnels Writer : chaque fonction historique rejouée via le
 moteur (vrai LLMClient + SSE scripté + faux document) — marqueurs, stop
-phrases, retry sur question, undo unique. Assertions portées des
-comportements de menu_actions/writer.py."""
+phrases, retry sur question, undo unique."""
 
 import threading
 from types import SimpleNamespace

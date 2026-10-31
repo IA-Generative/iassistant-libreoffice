@@ -164,9 +164,6 @@ import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .formatting import insert_formatted
 from . import credentials, feed_rewrite, local_config, log_setup
-from .menu_actions.writer import handle_writer_action
-from .menu_actions.calc import handle_calc_action
-from .menu_actions.shared import apply_settings_result
 from .i18n import t as _t
 from .i18n import (
     get_locale as _i18n_get_locale,
@@ -174,6 +171,7 @@ from .i18n import (
 )
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
+from .shell.settings_result import apply_settings_result
 from .shell.ui_locale import extension_locale as _extension_locale
 from .shell.uninstall import UninstallWatch
 from .security_flow import (
@@ -6076,112 +6074,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         finally:
             self._close_thinking()
 
-    #retrieved from https://wiki.documentfoundation.org/Macros/General/IO_to_Screen
-    #License: Creative Commons Attribution-ShareAlike 3.0 Unported License,
-    #License: The Document Foundation  https://creativecommons.org/licenses/by-sa/3.0/
-    #begin sharealike section
-    def input_box(self,message, title="", default="", x=None, y=None, ok_label=None, cancel_label=None, always_on_top=False):
-        """ Shows dialog with input box.
-            @param message message to show on the dialog
-            @param title window title
-            @param default default value
-            @param x optional dialog position in twips
-            @param y optional dialog position in twips
-            @return string if OK button pushed, otherwise zero length string
-        """
-        ok_label = ok_label or _t("common.send")
-        cancel_label = cancel_label or _t("common.cancel")
-        WIDTH = 720
-        HORI_MARGIN = VERT_MARGIN = 8
-        BUTTON_WIDTH = 100
-        BUTTON_HEIGHT = 30
-        VERT_SEP = 8
-        LABEL_HEIGHT = 26
-        EDIT_HEIGHT = 80
-        HEIGHT = VERT_MARGIN * 2 + LABEL_HEIGHT + VERT_SEP + EDIT_HEIGHT + VERT_SEP + BUTTON_HEIGHT + VERT_MARGIN
-        from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-        from com.sun.star.awt.PushButtonType import OK
-        from com.sun.star.util.MeasureUnit import TWIP
-        ctx = uno.getComponentContext()
-        def create(name):
-            return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-        dialog = create("com.sun.star.awt.UnoControlDialog")
-        dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-        dialog.setModel(dialog_model)
-        if always_on_top:
-            try:
-                dialog_model.AlwaysOnTop = True
-            except Exception:
-                pass
-            try:
-                dialog_model.Closeable = True
-            except Exception:
-                pass
-        dialog.setVisible(False)
-        dialog.setTitle(title)
-        dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-        try:
-            dialog.getModel().Sizeable = True
-        except Exception:
-            pass
-        def add(name, type, x_, y_, width_, height_, props):
-            try:
-                model = dialog_model.createInstance("com.sun.star.awt.UnoControl" + type + "Model")
-            except Exception as e:
-                log_to_file(f"Dialog control type unsupported: name={name} type={type} error={str(e)}")
-                return None
-            try:
-                dialog_model.insertByName(name, model)
-            except Exception as e:
-                log_to_file(f"Dialog insert failed: name={name} type={type} error={str(e)}")
-                return None
-            control = dialog.getControl(name)
-            try:
-                control.setPosSize(x_, y_, width_, height_, POSSIZE)
-            except Exception as e:
-                log_to_file(f"Dialog size failed: name={name} type={type} error={str(e)}")
-            for key, value in props.items():
-                try:
-                    setattr(model, key, value)
-                except Exception as e:
-                    log_to_file(f"Dialog prop unsupported: control={name} type={type} prop={key} error={str(e)}")
-            return control
-
-        edit_y = VERT_MARGIN + LABEL_HEIGHT + VERT_SEP
-        btn_y = edit_y + EDIT_HEIGHT + VERT_SEP
-        try:
-            dialog_model.BackgroundColor = _UI["bg"]
-        except Exception:
-            pass
-        add("label", "FixedText", HORI_MARGIN, VERT_MARGIN, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": str(message), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text"],
-        })
-        add("edit", "Edit", HORI_MARGIN, edit_y, WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-            "Text": str(default), "MultiLine": True,
-            "BackgroundColor": _UI["bg_input"],
-        })
-        add("btn_ok", "Button", WIDTH - HORI_MARGIN - BUTTON_WIDTH, btn_y,
-                BUTTON_WIDTH, BUTTON_HEIGHT, {"PushButtonType": OK, "DefaultButton": True, "Label": ok_label})
-        frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dialog.createPeer(create("com.sun.star.awt.Toolkit"), window)
-        if x is not None and y is not None:
-            ps = dialog.convertSizeToPixel(uno.createUnoStruct("com.sun.star.awt.Size", x, y), TWIP)
-            _x, _y = ps.Width, ps.Height
-        elif window:
-            ps = window.getPosSize()
-            _x = ps.Width / 2 - WIDTH / 2
-            _y = ps.Height / 2 - HEIGHT / 2
-        dialog.setPosSize(_x, _y, 0, 0, POS)
-        edit = dialog.getControl("edit")
-        edit.setSelection(uno.createUnoStruct("com.sun.star.awt.Selection", 0, len(str(default))))
-        edit.setFocus()
-        ret = edit.getModel().Text if dialog.execute() else ""
-        dialog.dispose()
-        return ret
-
     def _chunk_doc_paragraphs(self, doc):
         """Enumerate paragraphs and group into smart chunks for LLM processing.
 
@@ -10121,7 +10013,6 @@ EDITED VERSION:
 
         dialog.dispose()
         return result
-    #end sharealike section 
 
     def _needs_first_enrollment(self):
         """True si le wizard d'enrôlement doit s'ouvrir (DM actif) : jamais
@@ -10278,12 +10169,6 @@ EDITED VERSION:
         # d'une sélection. Elles doivent donc être traitées AVANT les handlers
         # par module.
         if self._handle_shell_action(action):
-            return
-
-        if handle_writer_action(self, action, model):
-            return
-
-        if handle_calc_action(self, action, model):
             return
 
         # Aucune branche n'a traité l'action : le dire, plutôt que de rendre la

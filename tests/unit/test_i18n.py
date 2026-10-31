@@ -32,7 +32,6 @@ install()
 from src.mirai import entrypoint
 from src.mirai.core import doc_analysis, presets, prompts
 from src.mirai.core.context import ToolContext
-from src.mirai.menu_actions import calc
 from src.mirai.shell.ui_locale import extension_locale
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
@@ -74,16 +73,6 @@ _PLACEHOLDER_CASES = (
     ("resize.ok_format", {"delta": 3, "new_word_count": 120, "sign": "+"}),
     ("edit.selection_prefix", {"snippet": "texte", "warning": ""}),
     ("edit.prepare_suggestions", {"dots": "..."}),
-    ("calc.out_new_col", {"letter": "D", "name": "Resultat"}),
-    ("calc.out_col", {"letter": "D"}),
-    ("calc.out_col_header", {"header": "Resultat"}),
-    ("calc.selection_one", {"n": 1, "ref": "A1:A1"}),
-    ("calc.selection_many", {"n": 20, "ref": "A1:D5"}),
-    ("calc.formula.detail", {"formula": "=1+1"}),
-    ("calc.formula.detail_explained", {"explanation": "somme", "formula": "=1+1"}),
-    ("calc.formula.applied", {"formula": "=1+1"}),
-    ("calc.formula.filled_down", {"count": 5}),
-    ("calc.formula.error_line", {"err": "#ERREUR: x"}),
     ("preset.refused_transform", {"count": 2}),
     ("palette.tables_left", {"count": 2}),
     ("caps.refused", {"error": "http_401"}),
@@ -194,16 +183,16 @@ def test_missing_locale_falls_back_to_french(monkeypatch):
 
 def test_t_interpolates_placeholders():
     i18n.set_locale("fr")
-    assert "20" in i18n.t("calc.selection_many", n=20, ref="A1:D5")
+    assert "20" in i18n.t("sel.calc_range", count=20, first="A1", last="D5")
 
 
 def test_bad_placeholder_degrades_to_the_raw_template():
     # `t()` avale l'erreur de formatage : on documente ici la degradation
     # (accolade visible) plutôt que de la laisser passer pour un mystere.
     i18n.set_locale("fr")
-    rendered = i18n.t("calc.selection_many", unexpected="x")
+    rendered = i18n.t("sel.calc_range", unexpected="x")
     assert "{" in rendered
-    assert rendered == i18n.CATALOG["calc.selection_many"]["fr"]
+    assert rendered == i18n.CATALOG["sel.calc_range"]["fr"]
 
 
 @pytest.mark.parametrize("key,kwargs", _PLACEHOLDER_CASES)
@@ -338,7 +327,6 @@ _IDENTICAL_BY_DESIGN = {
     "about.window_title",  # nom de la marque "MIrAI — IA'ssistant LibreOffice"
     "addon.documentation",  # "📚 Documentation" : mot identique
     "addon.menubar",  # "🤖 MIrAI" : nom de la marque
-    "calc.out_col",  # "  →  col. {letter}" : abreviation technique
     "common.ok",  # "OK" : sigle international
     "common.suggestions",  # "Suggestions..." : mot identique
     "edit.suggestions_plain",  # "Suggestions" : mot identique
@@ -526,20 +514,10 @@ def test_conversation_follows_the_interface_language(code):
     _assert_interface_language(prompts.build_system("writer", None, "native"))
 
 
-def test_formula_explanation_follows_the_interface_language():
-    i18n.set_locale("en")
-    job = MagicMock()
-    calc._explain_formula(job, "=SUM(A1:A3)")
-    system = job.make_chat_request.call_args.args[0][0]["content"]
-    _assert_interface_language(system)
-    assert "EXACTEMENT 3 lignes :\nLigne 1" in system
-
-
 @pytest.mark.parametrize(
     "relative_path",
     (
         "src/mirai/entrypoint.py",
-        "src/mirai/menu_actions/calc.py",
         "src/mirai/core/prompts.py",
     ),
 )
