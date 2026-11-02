@@ -45,6 +45,16 @@ def test_documentation_works_without_any_document():
     assert rec.opened_urls == ["doc_url"]
 
 
+def test_documentation_falls_back_to_the_portal_url():
+    job = make_job()
+    job._send_telemetry = lambda *a, **k: None
+    config = {"doc_url": "", "portal_url": "https://portail.example"}
+    job.get_config = lambda key, default="": config.get(key, default)
+    with patch("src.mirai.entrypoint.open_url", return_value=True) as opened:
+        assert job._handle_shell_action("Documentation") is True
+    assert opened.call_args.args[1] == "https://portail.example"
+
+
 def test_website_works_without_any_document():
     job, rec = _job()
     assert job._handle_shell_action("OpenmiraiWebsite") is True
