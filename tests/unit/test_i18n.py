@@ -70,9 +70,6 @@ _PLACEHOLDER_CASES = (
     ("update.prompt", {"version": "0.0.2"}),
     ("update.prompt_critical", {"version": "0.0.2"}),
     ("update.blocked_body", {"oxt": "/tmp/mirai_update.oxt", "version": "0.0.2"}),
-    ("resize.ok_format", {"delta": 3, "new_word_count": 120, "sign": "+"}),
-    ("edit.selection_prefix", {"snippet": "texte", "warning": ""}),
-    ("edit.prepare_suggestions", {"dots": "..."}),
     ("preset.refused_transform", {"count": 2}),
     ("palette.tables_left", {"count": 2}),
     ("caps.refused", {"error": "http_401"}),
@@ -299,26 +296,6 @@ def test_every_referenced_key_exists_in_the_catalog(relative_path):
     assert sorted(key for key in keys if key not in i18n.CATALOG) == []
 
 
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_calc_fallback_prompts_follow_the_locale(code):
-    job = make_job()
-    i18n.set_locale(code)
-    prompts = job._fallback_calc_prompts()
-    assert len(prompts) == 10
-    assert prompts == [i18n.CATALOG[f"calc.suggest.{position}"][code] for position in range(1, 11)]
-
-
-def test_edit_suggestion_keys_are_distinct_across_locales():
-    keys = [f"edit.suggest.{position}" for position in range(1, 11)]
-    i18n.set_locale("fr")
-    french = [i18n.t(key) for key in keys]
-    i18n.set_locale("en")
-    english = [i18n.t(key) for key in keys]
-    assert all(french)
-    assert all(english)
-    assert french != english
-
-
 # Libelles legitimement identiques en francais et en anglais : noms propres,
 # marques, sigles et termes techniques qui ne se traduisent pas. Toute autre
 # egalite signale une traduction oubliee.
@@ -328,8 +305,6 @@ _IDENTICAL_BY_DESIGN = {
     "addon.documentation",  # "📚 Documentation" : mot identique
     "addon.menubar",  # "🤖 MIrAI" : nom de la marque
     "common.ok",  # "OK" : sigle international
-    "common.suggestions",  # "Suggestions..." : mot identique
-    "edit.suggestions_plain",  # "Suggestions" : mot identique
     "palette.header",  # "  MIrAI — Assistant ({app})" : nom de la marque
     "palette.title",  # "MIrAI — Assistant" : nom de la marque
     "proxy.title",  # "Proxy" : terme technique identique

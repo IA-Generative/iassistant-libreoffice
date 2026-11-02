@@ -26,10 +26,9 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_config_cache_secrets.py": 3,
     "tests/unit/test_config_fetch_perf.py": 12,
     "tests/unit/test_credentials.py": 1,
-    "tests/unit/test_data_paths.py": 8,
+    "tests/unit/test_data_paths.py": 6,
     "tests/unit/test_enrollment.py": 7,
     "tests/unit/test_feed_rewrite.py": 17,
-    "tests/unit/test_i18n.py": 1,
     "tests/unit/test_install_changes.py": 4,
     "tests/unit/test_llm_relay_error.py": 8,
     "tests/unit/test_llm_token_auth.py": 19,
@@ -37,19 +36,18 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_models_fetch.py": 4,
     "tests/unit/test_native_route.py": 31,
     "tests/unit/test_native_update.py": 15,
-    "tests/unit/test_prompts_calc_path.py": 4,
     "tests/unit/test_reload_config.py": 3,
     "tests/unit/test_secret_routing.py": 6,
     "tests/unit/test_settings_token_field.py": 2,
     "tests/unit/test_storage_wiring.py": 10,
     "tests/unit/test_telemetry_defaults.py": 2,
     "tests/unit/test_token_logic.py": 4,
-    "tests/unit/test_uninstall_wipe.py": 6,
+    "tests/unit/test_uninstall_wipe.py": 4,
     "tests/unit/test_update_blocked.py": 14,
     "tests/unit/test_update_features.py": 15,
 }
 
-MAKE_JOB_FILES_BUDGET = 31
+MAKE_JOB_FILES_BUDGET = 30
 # make_job est interdit dans ces dossiers, sauf pour ces fichiers : la façade,
 # le routage et le démarrage inerte ne se testent qu'avec un MainJob.
 MAKE_JOB_FORBIDDEN_IN = ("tests/unit/core/", "tests/unit/rules/")

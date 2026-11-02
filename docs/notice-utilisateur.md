@@ -122,7 +122,6 @@ Ouvre une boîte de dialogue pour donner une instruction libre à l'IA sur le te
 La fenêtre de modification contient :
 - Un **champ de saisie** pour votre instruction
 - Un bouton **Envoyer** pour lancer le traitement
-- Un lien **Ouvrir prompt.txt** pour accéder au fichier de prompt personnalisable
 
 #### Suggestions contextuelles IA
 
@@ -134,7 +133,7 @@ Sous le champ de saisie, une liste de **suggestions** s'affiche automatiquement.
 
 Si la génération IA échoue, des suggestions génériques sont proposées (correction, reformulation, simplification…).
 
-> 🔵 **Expert** — Les suggestions sont générées via un appel LLM séparé (max 600 tokens). Le prompt impose une liste numérotée de 8 instructions en français. Les blocs `<think>` et les lignes non numérotées sont filtrés pour éviter que le raisonnement du modèle n'apparaisse dans les suggestions. Le prompt système de la modification est configurable via `edit_selection_system_prompt`.
+> 🔵 **Expert** — Les suggestions sont générées via un appel LLM séparé (max 600 tokens). Le prompt impose une liste numérotée de 8 instructions en français. Les blocs `<think>` et les lignes non numérotées sont filtrés pour éviter que le raisonnement du modèle n'apparaisse dans les suggestions.
 
 ### 3.3 📏 Ajuster la longueur 
 
@@ -313,7 +312,6 @@ Chaque fonctionnalité dispose d'un prompt système configurable via `config.jso
 | Clé de configuration | Fonctionnalité |
 |---------------------|----------------|
 | `extend_selection_system_prompt` | Générer la suite |
-| `edit_selection_system_prompt` | Modifier la sélection |
 | `summarize_selection_system_prompt` | Résumer la sélection |
 | `simplify_selection_system_prompt` | Reformuler la sélection |
 | `systemPrompt` | Prompt système global (ajouté à toutes les requêtes) |
@@ -323,13 +321,10 @@ Les budgets de tokens sont également configurables :
 | Clé | Défaut |
 |-----|--------|
 | `extend_selection_max_tokens` | 15 000 |
-| `edit_selection_max_new_tokens` | 15 000 |
 | `summarize_selection_max_tokens` | 15 000 |
 | `simplify_selection_max_tokens` | 15 000 |
 
 Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document fait de tableaux seuls, Résumer, Simplifier, Raccourcir et Allonger le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux. Les tableaux restent en place : le texte de part et d'autre d'un tableau est réécrit séparément, et en mode remplacement, la demande libre, sur un document dont un tableau coupe le texte, est appliquée morceau par morceau, ce que la palette signale.
-
-Un fichier `prompt.txt` placé à côté du document est détecté automatiquement et peut être ouvert depuis la boîte de dialogue d'édition.
 
 ---
 
@@ -348,7 +343,6 @@ Un fichier `prompt.txt` placé à côté du document est détecté automatiqueme
 > - **Choix du modèle** — Les modèles plus grands (70B+) produisent des résultats de meilleure qualité mais sont plus lents. Les modèles de raisonnement (deepseek-r1) ajoutent une latence due à la phase de réflexion, mais leurs balises `<think>` sont filtrées automatiquement.
 > - **Température** — Configurable via le backend. Une température basse (0.3-0.5) convient pour la correction et la reformulation, une température plus haute (0.7-1.0) pour la génération créative.
 > - **Limites de tokens** — Si le résultat est tronqué, augmentez le budget de tokens dans la configuration. Attention : certains modèles ont des limites de contexte strictes.
-> - **prompt.txt** — Placez un fichier `prompt.txt` à côté de votre document pour injecter des instructions persistantes dans le dialogue d'édition.
 
 ---
 
