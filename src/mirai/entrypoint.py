@@ -5707,8 +5707,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 "jamais la langue."
             )
 
-        # Default system prompt: ask for structured Markdown (converted to native
-        # Writer formatting on insertion — see src/mirai/formatting) and set the
+        # Default system prompt: ask for structured Markdown and set the
         # answer language. /no_thinking prefix minimises reasoning tokens
         # on Qwen3-style models.
         default_system_prompt = (

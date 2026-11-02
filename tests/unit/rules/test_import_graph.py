@@ -2,8 +2,8 @@
 
 Couches : les modules communs (à plat dans src/mirai, sans UNO), le moteur
 (core), la palette (ui), la coquille (entrypoint) et l'add-in =PROMPT(). Le
-legacy (formatting, security_flow) est hors matrice : seule la
-coquille l'importe encore, en attendant sa suppression.
+legacy (security_flow) est hors matrice : seule la coquille l'importe
+encore, en attendant sa suppression.
 
 Les écarts tolérés sont nommés ici, avec la raison de leur fin prévue. La liste
 ne peut que raccourcir : un écart disparu doit en être retiré.
@@ -18,7 +18,7 @@ _SRC = os.path.join(_REPO_ROOT, "src", "mirai")
 _TESTS = os.path.join(_REPO_ROOT, "tests")
 
 COMMON = {"local_config", "credentials", "log_setup", "feed_rewrite", "i18n"}
-LEGACY = {"formatting", "security_flow"}
+LEGACY = {"security_flow"}
 SHELL = {"entrypoint", "shell"}
 ADDIN = "calc_prompt_function"
 # Ce que le moteur et la palette prennent dans les modules communs ; le reste
