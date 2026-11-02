@@ -10165,9 +10165,6 @@ EDITED VERSION:
             open_palette(self, model)
             return
 
-        # Actions non textuelles : elles ne dépendent NI du type de document NI
-        # d'une sélection. Elles doivent donc être traitées AVANT les handlers
-        # par module.
         if self._handle_shell_action(action):
             return
 
