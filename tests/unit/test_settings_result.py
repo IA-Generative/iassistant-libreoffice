@@ -2,10 +2,6 @@
 
 from types import SimpleNamespace
 
-from tests.stubs.uno_stubs import install
-
-install()
-
 from src.mirai.shell.settings_result import apply_settings_result
 
 
