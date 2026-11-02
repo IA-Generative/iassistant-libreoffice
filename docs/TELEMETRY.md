@@ -76,12 +76,6 @@ Envoyé lors de l'utilisation de la reformulation (CTRL+L).
 - `action`: "simplify_selection"
 - `text_length`: Longueur du texte sélectionné
 
-### OpenmiraiWebsite
-Envoyé lors de l'accès au site web mirai.
-
-**Attributs :**
-- `action`: "open_website"
-
 ### OpenSettings
 Envoyé lors de l'ouverture du dialogue des paramètres.
 

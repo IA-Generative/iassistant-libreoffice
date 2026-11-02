@@ -57,7 +57,6 @@ _ADDON_KEYS = (
 # (cle, kwargs) — chaque couple doit s'interpoler dans les cinq locales.
 _PLACEHOLDER_CASES = (
     ("common.error", {"detail": "boom"}),
-    ("proxy.test_failed", {"detail": "boom"}),
     ("settings.id_prefix", {"value": "42"}),
     ("settings.token_error_proxy", {"detail": "boom", "url": "http://p"}),
     ("settings.token_error_unreachable", {"detail": "boom", "url": "http://p"}),
@@ -307,11 +306,9 @@ _IDENTICAL_BY_DESIGN = {
     "common.ok",  # "OK" : sigle international
     "palette.header",  # "  MIrAI — Assistant ({app})" : nom de la marque
     "palette.title",  # "MIrAI — Assistant" : nom de la marque
-    "proxy.title",  # "Proxy" : terme technique identique
     "settings.id_prefix",  # "ID: {value}" : sigle international
     "settings.model_label",  # "Model:" : mot identique
     "settings.models_failed_title",  # "API" : sigle international
-    "settings.proxy_button",  # "Proxy" : terme technique identique
     "settings.reload_dialog_title",  # "Configuration" : mot identique
     "tab.actions",  # "Actions" : mot identique
     "tab.conversation",  # "Conversation" : mot identique

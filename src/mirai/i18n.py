@@ -14,7 +14,7 @@ independante de la coquille UNO.
 Usage (la coquille lit la langue de LibreOffice, voir shell/ui_locale.py) :
     from .i18n import t, set_locale, resolve_locale
     set_locale(resolve_locale("fr-FR"))
-    label = t("proxy.section")
+    label = t("common.save")
 """
 
 import json

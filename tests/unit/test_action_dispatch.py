@@ -55,12 +55,6 @@ def test_documentation_falls_back_to_the_portal_url():
     assert opened.call_args.args[1] == "https://portail.example"
 
 
-def test_website_works_without_any_document():
-    job, rec = _job()
-    assert job._handle_shell_action("OpenmiraiWebsite") is True
-    assert rec.opened_urls == ["portal_url"]
-
-
 def test_documentation_without_any_browser_tells_the_user():
     """Ni Python ni LibreOffice n'ouvrent l'URL : un message, pas un clic muet."""
     job = make_job()

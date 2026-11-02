@@ -202,7 +202,7 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 
 ### Via l'interface
 
-**Menu MIrAI → Paramètres** : URL du backend, modèle par défaut, token API, proxy.
+**Menu MIrAI → Paramètres** : URL du backend, modèle par défaut, token API.
 
 ### Fichiers de configuration
 

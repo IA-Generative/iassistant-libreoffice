@@ -260,7 +260,6 @@ Accessible depuis le menu **🤖 MIrAI 🤖 → ⚙️ Paramètres**. Vous pouve
 - **URL du backend** — L'adresse du serveur IA
 - **Modèle par défaut** — Le modèle de langage à utiliser
 - **Token API** — Votre clé d'authentification
-- **Proxy** — Si votre réseau nécessite un proxy
 
 Dans la plupart des cas, ces paramètres sont préconfigurés par votre administrateur via le Device Management.
 
@@ -292,7 +291,7 @@ Pour construire un OXT avec un profil spécifique :
 
 ### 5.3 🔵 Proxy et certificats SSL
 
-Le proxy se règle depuis **🤖 MIrAI 🤖 → ⚙️ Paramètres**, bouton **Proxy**. Les réglages sont enregistrés dans `mirai/settings.json` ; le mot de passe du proxy, lui, va dans le coffre du système (voir [Vos données](#vos-données)) :
+Le proxy se règle dans `mirai/settings.json` ; le Device Management ne le pilote pas. Un mot de passe (`proxy_password`) écrit dans ce fichier passe dans le coffre du système au démarrage suivant de LibreOffice, et le fichier ne le garde pas (voir [Vos données](#vos-données)) :
 
 ```json
 {
@@ -362,7 +361,7 @@ Sans sélection, la demande libre et les actions rapides de Writer portent sur t
 **"Erreur de connexion"**
 - Vérifiez votre accès réseau
 - Vérifiez l'URL du backend dans Paramètres
-- Si vous êtes derrière un proxy, configurez-le dans les paramètres
+- Si vous êtes derrière un proxy, réglez-le dans `mirai/settings.json` (voir [Proxy et certificats SSL](#53--proxy-et-certificats-ssl))
 
 **"Token invalide"**
 - Une boîte de dialogue vous proposera d'ouvrir les paramètres pour vérifier votre token API
