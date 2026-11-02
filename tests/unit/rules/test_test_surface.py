@@ -15,7 +15,6 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 
 PRIVATE_MEMBERS_BUDGET = {
     "tests/integration/test_full_enrollment_flow.py": 9,
-    "tests/stubs/legacy_calc.py": 2,
     "tests/stubs/uno_stubs.py": 2,
     "tests/unit/core/test_shell_facade.py": 2,
     # Le routage vit encore dans des privés de MainJob ; ce test suivra son
