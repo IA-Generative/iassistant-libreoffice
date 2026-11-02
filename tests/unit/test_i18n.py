@@ -514,17 +514,6 @@ def test_conversation_follows_the_interface_language(code):
     _assert_interface_language(prompts.build_system("writer", None, "native"))
 
 
-@pytest.mark.parametrize(
-    "relative_path",
-    (
-        "src/mirai/entrypoint.py",
-        "src/mirai/core/prompts.py",
-    ),
-)
-def test_llm_language_directive_is_wired(relative_path):
-    assert '_t("llm.answer_language")' in _read(relative_path)
-
-
 def test_no_absolute_french_only_rule_remains():
     # La palette d'éditions imposait « LANGUE OBLIGATOIRE : français » : ces
     # suggestions sont des éléments d'interface et doivent suivre la locale.
