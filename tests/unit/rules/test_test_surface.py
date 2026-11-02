@@ -36,7 +36,6 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_models_fetch.py": 4,
     "tests/unit/test_native_route.py": 31,
     "tests/unit/test_native_update.py": 15,
-    "tests/unit/test_prompts_calc_path.py": 4,
     "tests/unit/test_reload_config.py": 3,
     "tests/unit/test_secret_routing.py": 6,
     "tests/unit/test_settings_token_field.py": 2,
