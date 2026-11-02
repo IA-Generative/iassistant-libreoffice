@@ -6072,6 +6072,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         finally:
             self._close_thinking()
 
+    #retrieved from https://wiki.documentfoundation.org/Macros/General/IO_to_Screen
+    #License: Creative Commons Attribution-ShareAlike 3.0 Unported License,
+    #License: The Document Foundation  https://creativecommons.org/licenses/by-sa/3.0/
+    #begin sharealike section
     def _chunk_doc_paragraphs(self, doc):
         """Enumerate paragraphs and group into smart chunks for LLM processing.
 
@@ -10011,6 +10015,7 @@ EDITED VERSION:
 
         dialog.dispose()
         return result
+    #end sharealike section
 
     def _needs_first_enrollment(self):
         """True si le wizard d'enrôlement doit s'ouvrir (DM actif) : jamais
