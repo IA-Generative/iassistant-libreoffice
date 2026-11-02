@@ -1635,23 +1635,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 except Exception:
                     pass
 
-    def _notify_update_blocked(self, target_version, install_script=""):
+    def _notify_update_blocked(self, target_version, oxt_path=""):
         """Inform the user once that the automatic update could not be installed.
 
         We stop the re-prompt loop and point to the ready-to-install package so
-        an admin can finish manually: the mirai_update.oxt next to
-        `install_script` when there is one, the pending_update folder otherwise.
+        an admin can finish manually: `oxt_path` when given, the pending_update
+        folder otherwise.
         Uses the same message-box path as the update prompt (known to work from
         this worker thread).
         """
         try:
-            oxt = ""
-            try:
-                base = os.path.dirname(install_script or "")
-                if base:
-                    oxt = os.path.join(base, "mirai_update.oxt")
-            except Exception:
-                oxt = ""
+            oxt = oxt_path
             # Dossier à proposer à l'ouverture : celui du .oxt téléchargé, sinon
             # le dossier pending_update du profil. Sert au bouton « Ouvrir le
             # dossier » (ouverture native, sans cmd.exe — cf. _open_folder_native).
@@ -5940,15 +5934,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                 try:
                                     pend = about_self._pending_update_dir()
                                     os.makedirs(pend, exist_ok=True)
-                                    open(os.path.join(pend, "mirai_update.oxt"), "a").close()
+                                    oxt = os.path.join(pend, "mirai_update.oxt")
+                                    open(oxt, "a").close()
                                     if update_status:
                                         update_status.getModel().Label = (
                                             _t("about.selftest_blocked")
                                         )
                                         update_status.getModel().TextColor = _UI["info"]
-                                    about_self._notify_update_blocked(
-                                        "SELFTEST", os.path.join(pend, "mirai_update.bat")
-                                    )
+                                    about_self._notify_update_blocked("SELFTEST", oxt)
                                 except Exception as _e:
                                     log_to_file(f"selftest update-blocked: {str(_e)}")
                                 return
