@@ -1,5 +1,5 @@
-"""Dégradation propre + anti-boucle quand l'install auto de la MAJ est bloquée
-par la politique du poste (WinError 5 — AppLocker / Defender ASR).
+"""Installation automatique d'une mise à jour en échec : anti-boucle, message
+d'installation manuelle, ouverture native du dossier du paquet.
 
 Run:  pytest tests/unit/test_update_blocked.py -v
 """
