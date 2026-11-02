@@ -13,7 +13,6 @@ def teardown_function():
 def test_install_writes_into_the_data_dir(tmp_path):
     log_setup.install(str(tmp_path / "mirai"))
     logging.getLogger().info("ligne de test")
-    assert log_setup.path() == str(tmp_path / "mirai" / "mirai.log")
     assert "ligne de test" in (tmp_path / "mirai" / "mirai.log").read_text(encoding="utf-8")
 
 
@@ -28,6 +27,9 @@ def test_install_is_idempotent_and_rotates(tmp_path):
 
 
 def test_uninstall_detaches_the_handler(tmp_path):
+    log = tmp_path / "mirai" / "mirai.log"
     log_setup.install(str(tmp_path / "mirai"))
+    logging.getLogger().info("avant")
     log_setup.uninstall()
-    assert log_setup.path() == ""
+    logging.getLogger().info("après")
+    assert "après" not in log.read_text(encoding="utf-8")
