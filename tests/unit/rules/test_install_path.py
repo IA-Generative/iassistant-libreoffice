@@ -4,8 +4,9 @@ niveau ni par unopkg.
 
 Le remove/add du gestionnaire bas niveau ajoute le paquet sans l'enregistrer :
 après redémarrage, la nouvelle version est listée mais désactivée (incident du
-2026-10-05). unopkg, lancé dans un processus à part une fois LibreOffice fermé,
-rejoue ce même cycle remove/add.
+2026-10-05). unopkg passe bien par l'ExtensionManager, mais il tourne dans un
+processus enfant, refusé sur les postes durcis (WinError 5), et son remove
+précède l'add : un add en échec laisse le poste sans l'extension.
 """
 
 import ast
