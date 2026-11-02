@@ -32,7 +32,6 @@ REQUIRED_MEMBERS = [
     "description.xml",            # métadonnées extension (id + version)
     "main.py",                    # point d'entrée
     "src/mirai/entrypoint.py",    # logique principale
-    "src/mirai/security_flow.py", # coffre + flux sécurisé
     "config.default.json",        # config embarquée (transport-only)
     "dm-manifest.json",           # métadonnées Device Management
     "dm-config.json",             # template config DM

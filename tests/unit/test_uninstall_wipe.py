@@ -15,7 +15,6 @@ from tests.stubs.uno_stubs import install, make_job, seed_user_config
 install()
 
 from src.mirai.core.conversation import ConversationStore
-from src.mirai.security_flow import FileJsonStore
 from src.mirai.shell import runtime as shell_runtime
 from src.mirai.shell import uninstall
 from src.mirai.shell.uninstall import UninstallWatch
@@ -162,7 +161,6 @@ def _wiped_job(tmp_path):
 def test_nothing_is_written_after_the_wipe(tmp_path):
     job = _wiped_job(tmp_path)
     job._save_update_state({"campaign_id": 1, "target_version": "2"}, "downloaded")
-    FileJsonStore(str(tmp_path / "mirai" / "state.json")).write({"a": 1})
     ConversationStore(str(tmp_path / "mirai")).append("user", "salut", "writer")
     assert not (tmp_path / "mirai").exists()
 

@@ -168,13 +168,6 @@ from .shell.open_url import open_url
 from .shell.settings_result import apply_settings_result
 from .shell.ui_locale import extension_locale as _extension_locale
 from .shell.uninstall import UninstallWatch
-from .security_flow import (
-    SecureBootstrapFlow,
-    FileJsonStore,
-    FileQueueStore,
-    default_vault,
-    Ed25519Provider,
-)
 
 
 PLUGIN_NAME = "MIrAI-LibreOffice"
@@ -446,14 +439,6 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
             ]
         }
 
-        # Preferred secure telemetry pipeline (bootstrap/enroll/token rotation + offline queue).
-        try:
-            handled = bool(config._secure_send_telemetry_payload(payload, span_name))
-            if handled:
-                return
-        except Exception as e:
-            log_to_file(f"Secure telemetry pipeline unavailable, fallback legacy sender: {str(e)}")
-
         if log_json:
             log_to_file("=== Telemetry Request ===")
             log_to_file(f"URL: {endpoint}")
@@ -564,7 +549,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # de /config part d'un getter (_ensure_extension_uuid → get_config).
     STARTUP_TASKS = (
         "_schedule_config_refresh",
-        "_warmup_secure_flow_async",
         "_send_telemetry",
         "_ensure_device_management_state_async",
         "_schedule_update_reconciliation",
@@ -613,10 +597,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self._relay_recovery_last_at = 0
         self._llm_auth_recovery_lock = threading.Lock()
         self._llm_auth_recovery_last_at = 0
-        self._secure_flow = None
-        self._secure_flow_lock = threading.RLock()
-        self._secure_flow_init_error = None
-        self._secure_legacy_fallback_logged = False
         self._trigger_source = "auto"
         self._last_loaded_ca_bundle = None
         self._last_ca_bundle_error = None
@@ -659,7 +639,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         try:
             self._ensure_extension_uuid()
             self._ensure_plugin_uuid()
-            self._warmup_secure_flow_async()
             self._send_telemetry("ExtensionLoaded", {
                 "event.type": "extension_loaded",
                 "extension.context": "libreoffice_writer",
@@ -731,34 +710,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "AboutDialog": "about",
         "EnrollSuccess": "enroll.ok",
         "EnrollFailed": "enroll.fail",
-        "BootstrapConfig": "bootstrap",
         "LlmRelayError": "llm.error",
         "ConfigWaitAtTrigger": "config.wait",
         "ActionUnhandled": "dispatch.unhandled",
-    }
-
-    # Spans émis AVANT que le poste ne soit lié à un utilisateur. Les autres
-    # sont jetés tant que l'identité télémétrie n'est pas "user" — ceux-ci
-    # décrivent le poste, pas la personne, et sont justement ceux dont on a
-    # besoin quand rien ne fonctionne encore.
-    _TECHNICAL_EVENTS = {
-        "ExtensionLoaded",
-        "OpenSettings",
-        "OpenmiraiWebsite",
-        "ConfigWaitAtTrigger",
-        "ActionUnhandled",
-        # Flux de mise à jour : télémétrie technique de flotte,
-        # envoyée même avant la liaison utilisateur.
-        "UpdateStaged",
-        "UpdateAccepted",
-        "UpdatePostponed",
-        "UpdateInstalledPendingRestart",
-        "UpdateInstallFailed",
-        "UpdateNativeDialogShown",
-        "UpdateCloseDeferred",
-        "ExtensionUpdated",
-        "NativeFeedCheck",
-        "FeedRewrite",
     }
 
     def _send_telemetry(self, span_name, attributes=None):
@@ -1000,116 +954,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self.set_config("extensionUUID", extension_uuid)
         self.set_config("plugin_uuid", extension_uuid)
         return extension_uuid
-
-    def _secure_http_call(self, method, url, headers=None, body=None, timeout=10, use_proxy=True):
-        request = urllib.request.Request(url, data=body, headers=_with_user_agent(headers or {}),
-                                         method=str(method or "GET").upper())
-        try:
-            with self._urlopen(request, context=self.get_ssl_context(), timeout=timeout, use_proxy=use_proxy) as response:
-                payload = response.read()
-                status = int(getattr(response, "status", 0) or 0)
-                response_headers = dict(response.headers.items()) if hasattr(response, "headers") else {}
-                return status, response_headers, payload
-        except urllib.error.HTTPError as exc:
-            try:
-                payload = exc.read()
-            except Exception:
-                payload = b""
-            response_headers = dict(exc.headers.items()) if hasattr(exc, "headers") and exc.headers else {}
-            return int(exc.code), response_headers, payload
-
-    def _get_secure_flow(self):
-        with self._secure_flow_lock:
-            if self._secure_flow is not None:
-                return self._secure_flow
-            if self._secure_flow_init_error:
-                return None
-            bootstrap_url = str(self._active_bootstrap_url() or "").strip()
-            if not bootstrap_url:
-                return None
-            plugin_uuid = self._ensure_plugin_uuid()
-            device_name = str(self._get_config_from_file("device_name", "mirai-libreoffice") or "").strip() or "mirai-libreoffice"
-            user_config_dir = self._data_dir()
-            if not user_config_dir:
-                # Pas de dossier de config exploitable -> flux sécurisé
-                # indisponible (évite d'écrire l'état dans un chemin fantôme).
-                return None
-            state_path = os.path.join(user_config_dir, "secure_bootstrap_state.json")
-            queue_path = os.path.join(user_config_dir, "telemetry_queue.json")
-            try:
-                flow = SecureBootstrapFlow(
-                    bootstrap_base_url=bootstrap_url.rstrip("/"),
-                    plugin_uuid=plugin_uuid,
-                    device_name=device_name,
-                    http_call=self._secure_http_call,
-                    log_func=log_to_file,
-                    state_store=FileJsonStore(state_path),
-                    queue_store=FileQueueStore(queue_path),
-                    vault=default_vault(),
-                    signer=Ed25519Provider(),
-                )
-            except Exception as exc:
-                log_to_file(f"Secure flow init failed: {str(exc)}")
-                self._secure_flow_init_error = str(exc)
-                return None
-            self._secure_flow = flow
-            return flow
-
-    def _warmup_secure_flow_async(self):
-        def _worker():
-            try:
-                flow = self._get_secure_flow()
-                if not flow:
-                    return
-                flow.ensure_identity()
-                try:
-                    flow.fetch_bootstrap_config()
-                    self._send_telemetry("BootstrapConfig", {"status": "ok"})
-                except Exception as exc:
-                    log_to_file(f"Secure flow bootstrap fetch failed: {str(exc)}")
-                    self._send_telemetry("BootstrapConfig", {"status": "error", "error": str(exc)[:120]})
-            except Exception as exc:
-                log_to_file(f"Secure flow warmup failed: {str(exc)}")
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-    def _secure_send_telemetry_payload(self, payload, _span_name=None):
-        flow = self._get_secure_flow()
-        if not flow:
-            if str(self._active_bootstrap_url() or "").strip() and not self._secure_legacy_fallback_logged:
-                self._secure_legacy_fallback_logged = True
-                log_to_file("Secure telemetry unavailable; fallback to legacy sender")
-            return False
-        try:
-            current_kind = flow.telemetry_kind()
-            access_token = str(self._get_config_from_file("access_token", "") or "").strip()
-            has_valid_login = bool(access_token) and (not self._token_is_expired(access_token))
-            if current_kind != "user":
-                if not has_valid_login:
-                    return True
-                if _span_name and _span_name not in self._TECHNICAL_EVENTS:
-                    return True
-            handled = bool(flow.send_trace(payload))
-            if flow.rebind_required():
-                if access_token and not self._token_is_expired(access_token):
-                    self._secure_bind_identity(access_token)
-                else:
-                    log_to_file("Secure telemetry requires user rebind/login")
-            return handled
-        except Exception as exc:
-            log_to_file(f"Secure telemetry pipeline failure: {str(exc)}")
-            return True
-
-    def _secure_bind_identity(self, access_token):
-        flow = self._get_secure_flow()
-        if not flow:
-            return ""
-        try:
-            return flow.bind_identity(access_token)
-        except Exception as exc:
-            log_to_file(f"Secure identity bind failed: {str(exc)}")
-            return ""
 
     def _get_telemetry_defaults(self):
         """Return default values for telemetry configuration."""
@@ -4312,10 +4156,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if isinstance(token_response, dict) and token_response.get("access_token"):
             self._store_tokens(token_response)
             access_token = token_response.get("access_token")
-            try:
-                self._secure_bind_identity(access_token)
-            except Exception as exc:
-                log_to_file(f"Post-SSO identity bind failed: {str(exc)}")
             try:
                 if wiz_dialog and wiz_update and wiz_toolkit and wiz_state:
                     wiz_update(

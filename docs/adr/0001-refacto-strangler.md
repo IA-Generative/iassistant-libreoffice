@@ -59,7 +59,7 @@ ajoute ou justifie la hausse en revue.
 ### Décisions du 07/10/2026
 
 - **Suppressions** : le menu contextuel Writer (fait), `menu_actions/` (fait),
-  `formatting/` (fait), `security_flow.py`, `run_extend`, le dialogue proxy et l'action
+  `formatting/` (fait), `security_flow.py` (fait), `run_extend`, le dialogue proxy et l'action
   `OpenmiraiWebsite`, le bloc script `unopkg` (`MIRAI_UPDATE_ALLOW_SCRIPT`),
   `_KEYWORD_MAP` (fait), les scripts morts, et le dossier `prompts/` une fois ses
   décisions reprises en ADR. « Corriger » et « Traduire » reviennent comme chips de

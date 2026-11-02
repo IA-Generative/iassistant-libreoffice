@@ -11,7 +11,6 @@ from src.mirai.entrypoint import _send_telemetry_trace_impl
 
 def test_trace_without_any_configured_key_carries_no_authorization(tmp_path):
     job = make_job(config_dir=str(tmp_path))
-    job._secure_send_telemetry_payload = MagicMock(return_value=False)
     job._urlopen = MagicMock()
 
     _send_telemetry_trace_impl(job, "Span")

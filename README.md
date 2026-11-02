@@ -230,7 +230,6 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 ```
 src/mirai/
 ├── entrypoint.py              # MainJob, UNO, mise à jour auto, télémétrie
-├── security_flow.py           # SecureBootstrapFlow (enrollment, tokens, relay)
 └── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
 
 oxt/                           # Fichiers statiques packagés dans l'OXT
@@ -289,7 +288,6 @@ python3 -m pytest tests/unit/ -v
 |---|---|---|
 | `ExtensionLoaded` | `launch` | Démarrage du plugin |
 | `ExtensionUpdated` | `update` | Après mise à jour |
-| `BootstrapConfig` | `bootstrap` | Fetch config DM |
 | `EnrollSuccess` | `enroll.ok` | Enrollment réussi |
 | `EnrollFailed` | `enroll.fail` | Enrollment échoué |
 | `EditSelection` | `edit` | Modifier la sélection |

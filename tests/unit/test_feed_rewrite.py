@@ -244,9 +244,8 @@ def test_diagnostic_feed_urls_carry_the_same_version(installed):
     assert job._update_feed_urls() == [BASE_1 + "?version=0.0.1.0.32"]
 
 
-def test_feed_rewrite_is_registered_as_technical_telemetry():
+def test_feed_rewrite_telemetry_reports_an_update_action():
     assert MainJob._ACTION_NAMES["FeedRewrite"] == "update"
-    assert "FeedRewrite" in MainJob._TECHNICAL_EVENTS
 
 
 def test_file_mode_and_crlf_are_preserved():

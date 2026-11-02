@@ -358,7 +358,7 @@ Plug-in ──HTTPS──▶ relay-assistant (nginx) ──HTTP──▶ device-
 ### 8.1 Les 3 règles d'or
 
 1. **Tout corps de requête DOIT être JSON `application/json`.** Pas de `multipart/form-data` au-delà de quelques KB. Pour uploader un binaire > 768 KB, utiliser l'API chunked `POST /api/upload-chunk` (cf. [`router.py:1412`](../../device-management/app/admin/router.py#L1412)).
-2. **Tout binaire dans un payload JSON DOIT être encodé en base64url sans padding.** C'est la convention universelle MIrAI : signatures, clés publiques, nonces, icônes, blobs audio courts. Le helper Python `_b64e()` ([`security_flow.py:18`](../src/mirai/security_flow.py#L18)) encode `urlsafe_b64encode + rstrip("=")` ; côté JS utiliser :
+2. **Tout binaire dans un payload JSON DOIT être encodé en base64url sans padding.** C'est la convention universelle MIrAI : signatures, clés publiques, nonces, icônes, blobs audio courts. Le helper Python `_b64e()` (§ 9.4) encode `urlsafe_b64encode + rstrip("=")` ; côté JS utiliser :
    ```js
    const b64url = btoa(String.fromCharCode(...new Uint8Array(buf)))
      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -532,8 +532,6 @@ def enroll_anonymous(bootstrap_url, plugin_uuid, device_name, signing_key, acces
     return enroll_resp  # contient relayClientId, relayClientKey
 ```
 
-> Référence complète : [`src/mirai/security_flow.py:537-592`](../src/mirai/security_flow.py#L537-L592).
-
 ### 9.5 Appel relay-authentifié (config refresh)
 
 ```python
@@ -641,7 +639,7 @@ def download_and_verify(bootstrap_url, slug, expected_sha256, relay_id, relay_ke
 
 | Question | Fichier de référence |
 |---|---|
-| Comment fonctionne l'enroll Python ? | [`src/mirai/security_flow.py:537`](../src/mirai/security_flow.py#L537) |
+| Comment fonctionne l'enroll Python ? | `_ensure_device_management_state` dans [`src/mirai/entrypoint.py`](../src/mirai/entrypoint.py) |
 | Comment fonctionne l'enroll JS ? | [`mirai-assistant-navigateur/src/auth.js`](../../mirai-assistant-navigateur/src/auth.js) |
 | Comment le DM mint les telemetry tokens ? | [`device-management/app/main.py:616`](../../device-management/app/main.py#L616) |
 | Comment le DM construit l'update directive ? | [`device-management/app/main.py:959`](../../device-management/app/main.py#L959) |

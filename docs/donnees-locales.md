@@ -19,8 +19,7 @@ Tout vit dans un seul dossier du profil LibreOffice : `<profil LibreOffice>/user
 | `install_state.json` | Version installée, dossier du paquet, empreinte du transport (environnement visé par l'OXT) |
 | `assistant_conversation.json` | Historique de la conversation de l'assistant |
 | `prompts_calc.txt`, `prompt.txt` | Consignes saisies dans les anciens dialogues d'édition et de Calc ; plus lus ni écrits, effacés à la désinstallation |
-| `secure_bootstrap_state.json` | État de la télémétrie sécurisée |
-| `telemetry_queue.json` | File d'attente de la télémétrie |
+| `secure_bootstrap_state.json`, `telemetry_queue.json` | État et file d'attente de l'ancienne télémétrie « sécurisée » ; plus lus ni écrits, effacés à la désinstallation |
 | `pending_update/` | Mise à jour téléchargée en attente d'installation |
 | `mirai.log`, `mirai.log.1` | Journal (voir plus bas) |
 
@@ -28,7 +27,7 @@ Un ancien fichier `user/config/config.json` (à côté du dossier `mirai/`) subs
 
 ## Secrets
 
-Aucun secret n'est écrit dans ces fichiers, à une exception près : le flux de télémétrie sécurisée hérité, quand il est actif, garde un jeton porteur de télémétrie dans `secure_bootstrap_state.json`. Il n'est actif que si le Python de LibreOffice dispose du paquet `cryptography` : ce n'est pas le cas du Python embarqué sous Windows et macOS ; sous Linux, LibreOffice utilise le Python du système, où ce paquet peut être installé.
+Aucun secret n'est écrit dans ces fichiers. Les versions qui embarquaient l'ancienne télémétrie « sécurisée » ont pu laisser un jeton porteur de télémétrie dans `secure_bootstrap_state.json` et une clé d'appareil dans le trousseau (libellé `MIrAI device key`, service `mirai-libreoffice`), sur les seuls postes où le Python qu'utilise LibreOffice dispose du paquet `cryptography`, ce qui n'arrive que sous Linux : le Python embarqué sous Windows et macOS ne l'a pas.
 
 - Les jetons de courte durée (`llmToken` du DM, `telemetryKey`, `access_token` Keycloak) ne vivent qu'en mémoire du processus.
 - Les secrets de longue durée vont dans le coffre du système :
