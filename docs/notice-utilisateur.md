@@ -282,7 +282,7 @@ Au premier lancement, les réglages sont initialisés depuis `config.default.jso
 
 #### Vos données
 
-L'extension ne garde sur votre poste que ses réglages, votre conversation et son journal, dans ce dossier. Aucun mot de passe ni jeton n'y est écrit (hors flux de télémétrie sécurisée hérité, inactif en pratique, voir donnees-locales.md) : ils sont confiés au coffre de votre système (Gestionnaire d'identification sous Windows, trousseau sous macOS). Sous Linux, ils ne sont gardés qu'en mémoire : l'assistant de connexion s'affiche à chaque session LibreOffice. Si vous désinstallez l'extension depuis le Gestionnaire des extensions de LibreOffice, tout est effacé ; redémarrez ensuite LibreOffice. Détails pour votre support : [donnees-locales.md](donnees-locales.md).
+L'extension ne garde sur votre poste que ses réglages, votre conversation et son journal, dans ce dossier. Aucun mot de passe ni jeton n'y est écrit : ils sont confiés au coffre de votre système (Gestionnaire d'identification sous Windows, trousseau sous macOS). Sous Linux, ils ne sont gardés qu'en mémoire : l'assistant de connexion s'affiche à chaque session LibreOffice. Si vous désinstallez l'extension depuis le Gestionnaire des extensions de LibreOffice, tout est effacé ; redémarrez ensuite LibreOffice. Détails pour votre support : [donnees-locales.md](donnees-locales.md).
 
 Pour construire un OXT avec un profil spécifique :
 

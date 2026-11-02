@@ -139,7 +139,6 @@ def test_palette_stream_error_body_is_not_logged():
 
 def test_telemetry_error_body_is_not_logged(tmp_path):
     job = make_job(config_dir=str(tmp_path))
-    job._secure_send_telemetry_payload = MagicMock(return_value=False)
     job._urlopen = MagicMock(side_effect=_http_error(400))
     lines = _entrypoint_log(lambda: _send_telemetry_trace_impl(job, "Span"))
     assert any("Status: 400" in line for line in lines)

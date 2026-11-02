@@ -1,9 +1,7 @@
 """Règles d'architecture : qui a le droit d'importer qui.
 
 Couches : les modules communs (à plat dans src/mirai, sans UNO), le moteur
-(core), la palette (ui), la coquille (entrypoint) et l'add-in =PROMPT(). Le
-legacy (security_flow) est hors matrice : seule la coquille l'importe
-encore, en attendant sa suppression.
+(core), la palette (ui), la coquille (entrypoint) et l'add-in =PROMPT().
 
 Les écarts tolérés sont nommés ici, avec la raison de leur fin prévue. La liste
 ne peut que raccourcir : un écart disparu doit en être retiré.
@@ -18,7 +16,6 @@ _SRC = os.path.join(_REPO_ROOT, "src", "mirai")
 _TESTS = os.path.join(_REPO_ROOT, "tests")
 
 COMMON = {"local_config", "credentials", "log_setup", "feed_rewrite", "i18n"}
-LEGACY = {"security_flow"}
 SHELL = {"entrypoint", "shell"}
 ADDIN = "calc_prompt_function"
 # Ce que le moteur et la palette prennent dans les modules communs ; le reste
@@ -118,8 +115,6 @@ def _layer(module):
         return "shell"
     if top == ADDIN:
         return "addin"
-    if top in LEGACY:
-        return "legacy"
     return None
 
 
@@ -194,10 +189,10 @@ def test_shell_modules_load_with_entrypoint():
     assert offenders == []
 
 
-def test_legacy_shell_and_addin_are_never_imported_by_the_new_layers():
+def test_shell_and_addin_are_never_imported_by_the_new_layers():
     offenders = [f"{module} -> {target}" for module, target, _ in _edges()
                  if target != "<uno>"
-                 and _layer(target) in ("legacy", "shell", "addin")
+                 and _layer(target) in ("shell", "addin")
                  and _layer(module) in ("common", "core", "ui", "addin")]
     assert offenders == []
 

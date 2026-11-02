@@ -453,19 +453,6 @@ def test_directed_route_postponed_sets_cooldown():
     assert "UpdatePostponed" in _events(job)
 
 
-UPDATE_EVENTS = {
-    "UpdateStaged", "UpdateAccepted", "UpdatePostponed", "UpdateInstalledPendingRestart",
-    "UpdateInstallFailed", "UpdateNativeDialogShown", "ExtensionUpdated", "NativeFeedCheck",
-    "UpdateCloseDeferred",
-}
-
-
-def test_update_events_are_technical():
-    """Sans cela, le pipeline sécurisé jette ces spans avant la liaison
-    utilisateur : l'entonnoir de campagne serait aveugle sur une partie du parc."""
-    assert UPDATE_EVENTS <= MainJob._TECHNICAL_EVENTS
-
-
 def test_action_names_cover_native_dialog_event():
     assert MainJob._ACTION_NAMES["UpdateNativeDialogShown"] == "update"
 

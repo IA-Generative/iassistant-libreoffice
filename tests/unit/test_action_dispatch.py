@@ -148,15 +148,6 @@ def test_the_new_spans_have_a_condensed_action_name():
     assert MainJob._ACTION_NAMES["ConfigWaitAtTrigger"] == "config.wait"
 
 
-def test_new_shell_spans_pass_the_identity_filter():
-    """Avant login, seuls les spans « techniques » sortent : les deux
-    nouveaux doivent en être, sinon ils seraient jetés en silence."""
-    from src.mirai.entrypoint import MainJob
-
-    for span in ("ActionUnhandled", "ConfigWaitAtTrigger", "ExtensionLoaded"):
-        assert span in MainJob._TECHNICAL_EVENTS, span
-
-
 def test_config_wait_emits_nothing_when_config_is_ready():
     job = make_job()
     seen = _telemetry_recorder(job)
