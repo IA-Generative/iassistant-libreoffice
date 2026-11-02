@@ -60,7 +60,7 @@ ajoute ou justifie la hausse en revue.
 
 - **Suppressions** : le menu contextuel Writer (fait), `menu_actions/` (fait),
   `formatting/` (fait), `security_flow.py` (fait), `run_extend`, le dialogue proxy et l'action
-  `OpenmiraiWebsite`, le bloc script `unopkg` (`MIRAI_UPDATE_ALLOW_SCRIPT`),
+  `OpenmiraiWebsite`, le bloc script `unopkg` (`MIRAI_UPDATE_ALLOW_SCRIPT`) (fait),
   `_KEYWORD_MAP` (fait), les scripts morts, et le dossier `prompts/` une fois ses
   décisions reprises en ADR. « Corriger » et « Traduire » reviennent comme chips de
   la palette (#81).

@@ -184,8 +184,6 @@ un canary au reste du parc.
   plugin : si elle échoue, la route manuelle prend le relais. L'API bas niveau
   `removePackage`/`addPackage` n'est pas utilisée : elle ajoute le paquet sans
   l'enregistrer et laisse l'ancien enregistrement orphelin.
-- **Scripts `.bat`/`.sh` désactivés par défaut** (spawn d'enfant = WinError 5 +
-  cycle unopkg corrupteur). Réactivation diagnostic : `MIRAI_UPDATE_ALLOW_SCRIPT=1`.
 - **Rapport DM véridique** : `deferred` au staging, `installed` seulement quand
   la nouvelle version est **réellement active** (réconciliation au démarrage
   suivant, `_reconcile_update_state`), qui purge aussi `pending_update` et lève

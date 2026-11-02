@@ -82,8 +82,7 @@ def test_in_process_install_guard_rejects_bad_path():
 
 def test_in_process_install_degrades_gracefully(tmp_path):
     """Fichier réel mais installation en échec sur le thread principal → False,
-    LibreOffice reste ouvert (l'appelant retombera sur le script puis le message
-    manuel)."""
+    LibreOffice reste ouvert (l'appelant retombera sur le message manuel)."""
     path = str(tmp_path / "u.oxt")
     open(path, "w").close()
     job = make_job()
