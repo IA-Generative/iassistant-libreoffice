@@ -182,6 +182,24 @@ def test_notify_update_blocked_uses_infobox_without_folder(tmp_path):
     assert args[1] == 1, "doit rester un INFOBOX (1) quand il n'y a pas de dossier à ouvrir"
 
 
+def test_update_blocked_without_a_package_offers_the_pending_update_folder(tmp_path):
+    """Sans paquet nommé, la boîte désigne le dossier pending_update du profil
+    et propose de l'ouvrir."""
+    pending = tmp_path / "mirai" / "pending_update"
+    pending.mkdir(parents=True)
+    job = make_job(config_dir=str(tmp_path))
+    job._open_folder_native = MagicMock()
+    toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
+    toolkit.createMessageBox.return_value.execute.return_value = 2
+
+    job._notify_update_blocked("0.0.1.0.18")
+
+    args = toolkit.createMessageBox.call_args.args
+    assert args[1] == 4
+    assert i18n.t("update.blocked_pending_folder") in args[4]
+    job._open_folder_native.assert_called_once_with(str(pending))
+
+
 def test_notify_update_blocked_follows_the_interface_language():
     import os
     import tempfile
