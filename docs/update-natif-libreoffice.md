@@ -8,8 +8,8 @@ Réfs : issue plugin [#5](https://github.com/IA-Generative/AssistantMiraiLibreOf
 
 Toutes les routes convergent vers **`ExtensionManager.addExtension` exécuté sur le
 thread principal de soffice** — le code exact du Gestionnaire des extensions, la
-seule voie validée comme fiable sur plusieurs cycles. Aucune route par défaut ne
-spawne de processus enfant (immunisé WinError 5 / AppLocker / Defender ASR).
+seule voie validée comme fiable sur plusieurs cycles. Aucune route ne spawne de
+processus enfant (immunisé WinError 5 / AppLocker / Defender ASR).
 
 | Route | Déclencheur | Téléchargement + installation | Cohorte/canary |
 |---|---|---|---|
