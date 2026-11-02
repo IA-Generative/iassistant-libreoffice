@@ -141,11 +141,6 @@ except ImportError:
     XMouseListener = _S5
     XTopWindowListener = _S7
     PropertyValue = _S8
-try:
-    from com.sun.star.view import XSelectionChangeListener
-except ImportError:
-    class _S12: pass
-    XSelectionChangeListener = _S12
 import uno
 import os
 import logging
