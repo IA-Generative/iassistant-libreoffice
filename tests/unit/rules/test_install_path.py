@@ -43,7 +43,7 @@ def test_the_low_level_package_manager_is_never_called():
 
 def test_unopkg_is_never_run():
     _, strings = _calls_and_strings()
-    assert [site for value, site in strings if "unopkg" in value] == []
+    assert [site for value, site in strings if "unopkg" in value.lower()] == []
 
 
 def test_add_extension_has_a_single_call_site():
