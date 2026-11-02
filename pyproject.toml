@@ -53,7 +53,6 @@ max-complexity = 10
 # La coquille historique est en cours de découpage : elle est hors budget tant
 # que le travail n'est pas fini. Les modules NEUFS (core/, ui/) le respectent.
 "src/mirai/entrypoint.py" = ["C901", "E501", "ARG", "B", "UP", "I", "E402", "E701", "E741", "F841"]
-"src/mirai/menu_actions/*.py" = ["C901", "E501", "ARG", "B", "UP", "I"]
 "src/mirai/security_flow.py" = ["C901", "E501", "ARG", "B", "UP", "I"]
 "src/mirai/calc_prompt_function.py" = ["C901", "E501", "ARG", "B", "UP", "I", "E402"]
 

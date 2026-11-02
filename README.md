@@ -231,11 +231,7 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 src/mirai/
 ├── entrypoint.py              # MainJob, UNO, mise à jour auto, télémétrie
 ├── security_flow.py           # SecureBootstrapFlow (enrollment, tokens, relay)
-├── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
-└── menu_actions/
-    ├── writer.py              # Edit, Summarize, Simplify, Resize
-    ├── calc.py                # Transform, Formula, Analyze
-    └── shared.py              # Utilitaires partagés
+└── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
 
 oxt/                           # Fichiers statiques packagés dans l'OXT
 ├── Addons.xcu                 # Menus et toolbar
@@ -376,8 +372,8 @@ Copyright (c) 2025-2026 Ministère de l'Intérieur.
 L'extension dérive de [localwriter](https://github.com/balisujohn/localwriter)
 de John Balis (Copyright (c) 2024 John Balis, MPL 2.0), lui-même dérivé d'un
 changement LibreOffice de The Document Foundation (MPL 2.0). Les fichiers
-hérités restent sous MPL 2.0 et conservent leurs mentions d'origine ; une
-boîte de saisie reprise du wiki de The Document Foundation est sous
-CC BY-SA 3.0, avec sa mention dans le source.
+hérités restent sous MPL 2.0 et conservent leurs mentions d'origine ; du
+code de dialogue repris d'une boîte de saisie du wiki de The Document
+Foundation est sous CC BY-SA 3.0, avec sa mention dans le source.
 
 Dépôt de référence : [IA-Generative/iassistant-libreoffice](https://github.com/IA-Generative/iassistant-libreoffice)

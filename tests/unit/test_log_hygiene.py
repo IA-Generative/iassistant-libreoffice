@@ -14,10 +14,8 @@ install()
 from src.mirai.calc_prompt_function import call_llm
 from src.mirai.core import sse_pump
 from src.mirai.entrypoint import _send_telemetry_trace_impl
-from src.mirai.menu_actions.calc import _generate_formula, _transform_to_column
 from tests.stubs.fake_palette_dialog import build_palette
 from tests.stubs.fake_shell import FakeShell
-from tests.stubs.legacy_calc import make_cell, make_sheet, make_streaming_job
 
 SECRET = "SECRET-llmToken-0123456789"
 DOCUMENT = "Texte confidentiel du document"
@@ -78,24 +76,6 @@ def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_mod
     assert DOCUMENT in palette._models["journal"].Text
     assert [line for line in lines if DOCUMENT in str(line)] == []
     assert any("Titre conservé" in line and "car.)" in line for line in lines)
-
-
-def test_calc_transform_does_not_log_cell_text():
-    sheet, _ = make_sheet({(0, 0): DOCUMENT})
-    job = make_streaming_job(["résultat"])
-    _transform_to_column(job, sheet, range(0, 1), range(0, 1), "traduis")
-    logged = " ".join(str(call) for call in job._log.call_args_list)
-    assert "[transform]" in logged
-    assert DOCUMENT not in logged
-
-
-def test_calc_formula_does_not_log_the_generated_formula():
-    formula = "=SUM(A1:A9)+42424242"
-    job = make_streaming_job([formula])
-    _generate_formula(job, make_cell(), "somme")
-    logged = " ".join(str(call) for call in job._log.call_args_list)
-    assert "[formula]" in logged
-    assert "42424242" not in logged
 
 
 def test_dm_error_body_is_not_logged(tmp_path):

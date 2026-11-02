@@ -34,8 +34,8 @@ docs/ARCHITECTURE.md est la carte (couches, tools, règles, « ajouter un tool e
 - `src/mirai/core/` : le moteur : registry de tools UNO, orchestrateur, client LLM ;
   `shell_facade.py` est le seul pont vers `MainJob`, duck-typé.
 - `src/mirai/ui/` : la palette universelle (DSFR).
-- `src/mirai/menu_actions/`, `formatting/`, `security_flow.py` : legacy, suppression
-  décidée (ADR 0001).
+- `src/mirai/formatting/`, `security_flow.py` : legacy, suppression décidée
+  (ADR 0001).
 - `oxt/` : description, menu `🤖 MIrAI`, raccourci, jobs ; `config/profiles/` : les
   profils embarqués au build.
 - `tests/unit/rules/` : les règles d'architecture, exécutables ; `tests/stubs/` : les

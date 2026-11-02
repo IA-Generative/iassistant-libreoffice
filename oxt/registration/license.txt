@@ -36,9 +36,9 @@ distribué par The Document Foundation sous MPL 2.0 :
   https://gerrit.libreoffice.org/c/core/+/159938
 
 Les fichiers hérités restent sous MPL 2.0 et conservent leurs
-mentions d'origine. Une boîte de saisie reprise du wiki de The
-Document Foundation est sous licence CC BY-SA 3.0 ; sa mention
-figure dans le code source.
+mentions d'origine. Du code de dialogue repris d'une boîte de
+saisie du wiki de The Document Foundation est sous licence
+CC BY-SA 3.0 ; sa mention figure dans le code source.
 
 
 Limites de l'intelligence artificielle
