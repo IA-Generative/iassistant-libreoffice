@@ -40,8 +40,6 @@ def _job():
 
 
 def test_documentation_works_without_any_document():
-    """Déclarée dans les menus Writer ET Calc, elle n'était branchée nulle part
-    côté Calc — et pas du tout sans document."""
     job, rec = _job()
     assert job._handle_shell_action("Documentation") is True
     assert rec.opened_urls == ["doc_url"]
