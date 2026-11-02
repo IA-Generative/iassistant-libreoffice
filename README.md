@@ -339,7 +339,7 @@ sequenceDiagram
   DM-->>P: update directive (target_version, artifact_url, checksum)
   P->>DM: GET /catalog/{slug}/download
   DM-->>P: fichier .oxt
-  P->>P: addExtension (thread principal) → redémarrage de LO
+  P->>P: addExtension (thread principal) → fermeture de LO, réouverture manuelle
 ```
 
 ---
