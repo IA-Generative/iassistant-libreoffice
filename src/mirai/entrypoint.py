@@ -206,17 +206,13 @@ _UI = {
     "bg":              0xFFFFFF,   # white background
     "bg_section":      0xF6F6F6,   # light-grey section background
     "bg_input":        0xFCFCFC,   # very light input background
-    "bg_header":      0x000091,   # Bleu France (DSFR primary)
-    "bg_accent":       0xF5F5FE,   # light blue accent
     "text":            0x161616,   # almost-black text
     "text_secondary":  0x666666,   # secondary grey text
     "text_light":      0x929292,   # light hint text
-    "text_on_dark":    0xFFFFFF,   # white text on dark backgrounds
     "border":          0xDDDDDD,   # subtle border grey
     "primary":         0x000091,   # Bleu France
     "primary_hover":   0x1212FF,   # lighter blue
     "success":         0x18753C,   # DSFR success green
-    "warning":         0xB34000,   # DSFR warning orange
     "error":           0xCE0500,   # DSFR error red
     "info":            0x0063CB,   # DSFR info blue
     "status_ok":       0x18753C,   # connected
