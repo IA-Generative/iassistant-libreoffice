@@ -2180,7 +2180,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Clôt la mise à jour précédente de façon idempotente.
 
         - version active == target → rapport « installed » au DM + télémétrie,
-          purge de pending_update (OXT stagé, scripts, état), retrait du target
+          purge de pending_update (OXT stagé, état), retrait du target
           de l'anti-boucle runtime.update_launch_blocked ;
         - `at_startup` et étape installed_* dont la cible n'est pas active,
           confirmé par deux lectures espacées du registre → l'installation a
