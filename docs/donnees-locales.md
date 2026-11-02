@@ -18,7 +18,7 @@ Tout vit dans un seul dossier du profil LibreOffice : `<profil LibreOffice>/user
 | `dm_snapshot.json` | Dernière réponse `/config` du Device Management, secrets vidés |
 | `install_state.json` | Version installée, dossier du paquet, empreinte du transport (environnement visé par l'OXT) |
 | `assistant_conversation.json` | Historique de la conversation de l'assistant |
-| `prompts_calc.txt`, `prompt.txt` | Invites personnalisées |
+| `prompts_calc.txt`, `prompt.txt` | Consignes saisies dans les anciens dialogues d'édition et de Calc ; plus lus ni écrits, effacés à la désinstallation |
 | `secure_bootstrap_state.json` | État de la télémétrie sécurisée |
 | `telemetry_queue.json` | File d'attente de la télémétrie |
 | `pending_update/` | Mise à jour téléchargée en attente d'installation |

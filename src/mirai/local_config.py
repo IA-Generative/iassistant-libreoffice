@@ -402,8 +402,6 @@ LEGACY_KEEP_KEYS = frozenset({
     "proxy_allow_insecure_ssl", "ca_bundle_path",
     "config_fetch_timeout_seconds", "keycloak_auth_timeout_seconds",
     "assistant_window_rect", "assistant_append_mode", "assistant_active_tab",
-    "edit_dialog_x", "edit_dialog_y", "formula_dialog_x", "formula_dialog_y",
-    "calc_input_dialog_x", "calc_input_dialog_y",
 })
 # Après un retour arrière, la version antérieure se réinscrit et le DM révoque
 # l'ancienne paire : ce que config.json porte alors est plus récent que settings.json.
