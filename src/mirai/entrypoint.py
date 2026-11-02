@@ -154,7 +154,6 @@ import threading
 import socket
 import platform
 import shutil
-import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import credentials, feed_rewrite, local_config, log_setup
@@ -1514,7 +1513,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             stable_oxt = os.path.join(stable_dir, "mirai_update.oxt")
             shutil.copy2(tmp_path, stable_oxt)
             self._pending_install_oxt = stable_oxt
-            self._pending_install_script = ""
             log_to_file(f"_perform_update: OXT copied to {stable_oxt}")
             # Persiste l'état de campagne : la réconciliation au prochain
             # démarrage rapporte l'issue RÉELLE au DM (_reconcile_update_state).
@@ -1525,134 +1523,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 "campaign_id": str(campaign_id) if campaign_id is not None else "",
                 "urgency": urgency,
             })
-
-            # Script d'installation de secours (.bat/.sh) : spawne un processus
-            # enfant → refusé sur postes durcis (WinError 5, AppLocker / Defender
-            # ASR), et son cycle unopkg remove/add est un vecteur de corruption du
-            # registre. DÉSACTIVÉ par défaut ; réactivable explicitement
-            # via MIRAI_UPDATE_ALLOW_SCRIPT=1 (postes non durcis, diagnostic).
-            if os.environ.get("MIRAI_UPDATE_ALLOW_SCRIPT") == "1":
-                try:
-                    sys_name = platform.system()  # Darwin, Windows, Linux
-
-                    # Find unopkg
-                    unopkg = None
-                    if sys_name == "Darwin":
-                        for candidate in [
-                            "/Applications/LibreOffice.app/Contents/MacOS/unopkg",
-                            os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/unopkg"),
-                        ]:
-                            if os.path.isfile(candidate):
-                                unopkg = candidate
-                                break
-                    elif sys_name == "Windows":
-                        for candidate in [
-                            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "LibreOffice", "program", "unopkg.com"),
-                            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "LibreOffice", "program", "unopkg.com"),
-                        ]:
-                            if os.path.isfile(candidate):
-                                unopkg = candidate
-                                break
-                    else:  # Linux
-                        for candidate in ["/usr/bin/unopkg", "/usr/lib/libreoffice/program/unopkg"]:
-                            if os.path.isfile(candidate):
-                                unopkg = candidate
-                                break
-                    if not unopkg:
-                        # Generic fallback: look relative to extension install
-                        fallback = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                            os.path.dirname(os.path.abspath(__file__))))), "program", "unopkg")
-                        if os.path.isfile(fallback):
-                            unopkg = fallback
-                    if not unopkg:
-                        raise FileNotFoundError("unopkg not found")
-                    log_to_file(f"_perform_update: unopkg={unopkg} platform={sys_name}")
-
-                    # Stage the update: quit LO → wait → remove old → install new → relaunch
-                    log_path = log_setup.path() or os.path.join(self._data_dir(), log_setup.LOG_FILE)
-                    _ts = 'date "+%Y-%m-%d %H:%M:%S"'
-
-                    if sys_name == "Windows":
-                        soffice_path = os.path.join(os.path.dirname(unopkg), "soffice.exe")
-                        install_script = os.path.join(stable_dir, "mirai_update.bat")
-                        # Windows: use %TIME% for timestamp
-                        with open(install_script, "w") as sf:
-                            sf.write("@echo off\r\n")
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] script started >> "{log_path}"\r\n')
-                            sf.write(":wait_lo\r\n")
-                            sf.write("tasklist /FI \"IMAGENAME eq soffice.bin\" 2>nul | find /I \"soffice.bin\" >nul\r\n")
-                            sf.write("if not errorlevel 1 (\r\n")
-                            sf.write("  timeout /t 2 /nobreak >nul\r\n")
-                            sf.write("  goto wait_lo\r\n")
-                            sf.write(")\r\n")
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] LO quit detected >> "{log_path}"\r\n')
-                            sf.write(f'"{unopkg}" remove fr.gouv.interieur.mirai 2>nul\r\n')
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] old extension removed >> "{log_path}"\r\n')
-                            sf.write(f'"{unopkg}" add --force --suppress-license "{stable_oxt}"\r\n')
-                            sf.write('if errorlevel 1 (\r\n')
-                            sf.write(f'  echo %DATE% %TIME% - [UPDATE] unopkg add FAILED >> "{log_path}"\r\n')
-                            sf.write(') else (\r\n')
-                            sf.write(f'  echo %DATE% %TIME% - [UPDATE] extension installed OK >> "{log_path}"\r\n')
-                            sf.write(')\r\n')
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] launching LibreOffice >> "{log_path}"\r\n')
-                            sf.write(f'start "" "{soffice_path}"\r\n')
-                            sf.write(f'del "{stable_oxt}" 2>nul\r\n')
-                            sf.write(f'del "{install_script}" 2>nul\r\n')
-                        self._pending_install_script = install_script
-                    else:
-                        # macOS / Linux
-                        # Capture current document path to reopen after update
-                        _doc_path = ""
-                        try:
-                            _desktop = self.ctx.getServiceManager().createInstanceWithContext(
-                                "com.sun.star.frame.Desktop", self.ctx
-                            )
-                            _doc = _desktop.getCurrentComponent() if _desktop else None
-                            if _doc and hasattr(_doc, "getURL") and _doc.getURL():
-                                _parsed = urllib.parse.urlparse(_doc.getURL())
-                                if _parsed.scheme == "file":
-                                    _doc_path = urllib.parse.unquote(_parsed.path)
-                        except Exception:
-                            pass
-                        soffice_bin = os.path.join(os.path.dirname(unopkg), "soffice")
-                        if sys_name == "Darwin":
-                            if _doc_path:
-                                relaunch_cmd = f'"{soffice_bin}" "{_doc_path}" &'
-                            else:
-                                relaunch_cmd = f'"{soffice_bin}" --writer &'
-                            wait_cmd = "while pgrep -x soffice >/dev/null 2>&1 || pgrep -x oosplash >/dev/null 2>&1; do sleep 1; done"
-                        else:
-                            relaunch_cmd = f'"{soffice_bin}" &' if os.path.isfile(soffice_bin) else "libreoffice &"
-                            if _doc_path:
-                                relaunch_cmd = f'"{soffice_bin}" "{_doc_path}" &' if os.path.isfile(soffice_bin) else f'libreoffice "{_doc_path}" &'
-                            wait_cmd = "while pgrep -x soffice >/dev/null 2>&1; do sleep 1; done"
-                        install_script = os.path.join(stable_dir, "mirai_update.sh")
-                        with open(install_script, "w") as sf:
-                            sf.write("#!/bin/bash\n")
-                            sf.write(f'LOG="{log_path}"\n')
-                            sf.write(f'echo "$({_ts}) - [UPDATE] script started" >> "$LOG"\n')
-                            sf.write(f'{wait_cmd}\n')
-                            sf.write(f'echo "$({_ts}) - [UPDATE] LO quit detected" >> "$LOG"\n')
-                            sf.write("sleep 5\n")
-                            sf.write(f'"{unopkg}" remove fr.gouv.interieur.mirai 2>/dev/null || true\n')
-                            sf.write(f'echo "$({_ts}) - [UPDATE] old extension removed" >> "$LOG"\n')
-                            sf.write(f'"{unopkg}" add --force --suppress-license "{stable_oxt}"\n')
-                            sf.write('RC=$?\n')
-                            sf.write('if [ "$RC" -eq 0 ]; then\n')
-                            sf.write(f'  echo "$({_ts}) - [UPDATE] extension installed OK" >> "$LOG"\n')
-                            sf.write('else\n')
-                            sf.write(f'  echo "$({_ts}) - [UPDATE] unopkg add FAILED rc=$RC" >> "$LOG"\n')
-                            sf.write('fi\n')
-                            sf.write("sync\n")
-                            sf.write("sleep 3\n")
-                            sf.write(f'echo "$({_ts}) - [UPDATE] launching LibreOffice" >> "$LOG"\n')
-                            sf.write(f'{relaunch_cmd}\n')
-                            sf.write(f'rm -f "{stable_oxt}" "{install_script}"\n')
-                        os.chmod(install_script, 0o755)
-                        self._pending_install_script = install_script
-                    log_to_file("_perform_update: fallback install script staged (opt-in)")
-                except Exception as pkg_err:
-                    log_to_file(f"_perform_update: script staging failed (non-fatal): {pkg_err}")
 
             log_to_file(f"_perform_update: install staged for version={target_version}")
             # « deferred » = artefact prêt, installation à suivre (acceptation
@@ -1665,7 +1535,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._wait_before_prompting()
             log_to_file("_perform_update: showing update dialog to user")
 
-            # Ask user BEFORE launching the install script
+            # Ask the user before installing and restarting
             user_wants_restart = False
             try:
                 desktop = self.ctx.getServiceManager().createInstanceWithContext(
@@ -1701,7 +1571,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "route": "directed",
                 })
                 # In-process (ExtensionManager sur le main thread) : la seule voie
-                # automatique par défaut — aucun processus enfant (WinError 5-immune).
+                # automatique — aucun processus enfant (WinError 5-immune).
                 if self._install_and_restart_in_process(
                         self._pending_install_oxt, target_version, campaign_id):
                     log_to_file("_perform_update: installed in-process, closing for restart")
@@ -1725,28 +1595,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         "issue tranchée à la réconciliation")
                     self._save_update_state(directive, "installed_inprocess", route="directed")
                     return
-                # Script de secours : uniquement si explicitement réactivé
-                # (MIRAI_UPDATE_ALLOW_SCRIPT=1). Sinon, dégradation directe vers
-                # le message manuel validé GPO (bouton « Ouvrir le dossier »).
-                install_script = self._pending_install_script
-                if install_script and os.path.isfile(install_script):
-                    log_to_file("_perform_update: in-process install failed, using opt-in install script")
-                    try:
-                        if platform.system() == "Windows":
-                            try:
-                                subprocess.Popen(["cmd", "/c", "start", "/min", "", install_script], close_fds=True)
-                            except Exception:
-                                subprocess.Popen(["cmd", "/c", install_script])
-                        else:
-                            subprocess.Popen(["bash", install_script], start_new_session=True)
-                        # Pas de desktop.terminate() depuis ce thread sous macOS/Linux :
-                        # SIGTERM, voir _terminate_on_main_thread
-                        self._terminate_on_main_thread()
-                        return
-                    except Exception as launch_err:
-                        # WinError 5 (AppLocker / Defender ASR "block child
-                        # process") atterrit ici — on continue vers le manuel.
-                        log_to_file(f"_perform_update: failed to launch install script: {launch_err}")
                 # L'install auto n'a pas abouti : anti-boucle (ne pas re-prompter
                 # ce target), rapport DM, puis message manuel (voie validée).
                 if target_version:
@@ -1764,7 +1612,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "fallback": "manual",
                     "route": "directed",
                 })
-                self._notify_update_blocked(target_version, install_script)
+                self._notify_update_blocked(target_version)
             else:
                 log_to_file("_perform_update: user postponed restart")
                 self._save_update_state(directive, "postponed", route="directed",
@@ -1787,23 +1635,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 except Exception:
                     pass
 
-    def _notify_update_blocked(self, target_version, install_script):
-        """Inform the user once that the automatic update could not be launched.
+    def _notify_update_blocked(self, target_version, oxt_path=""):
+        """Inform the user once that the automatic update could not be installed.
 
-        On a locked-down workstation an AppLocker / Defender-ASR policy can deny
-        spawning the install script (WinError 5). We stop the re-prompt loop and
-        point to the ready-to-install package so an admin can finish manually.
+        We stop the re-prompt loop and point to the ready-to-install package so
+        an admin can finish manually: `oxt_path` when given, the pending_update
+        folder otherwise.
         Uses the same message-box path as the update prompt (known to work from
         this worker thread).
         """
         try:
-            oxt = ""
-            try:
-                base = os.path.dirname(install_script or "")
-                if base:
-                    oxt = os.path.join(base, "mirai_update.oxt")
-            except Exception:
-                oxt = ""
+            oxt = oxt_path
             # Dossier à proposer à l'ouverture : celui du .oxt téléchargé, sinon
             # le dossier pending_update du profil. Sert au bouton « Ouvrir le
             # dossier » (ouverture native, sans cmd.exe — cf. _open_folder_native).
@@ -2005,15 +1847,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         inside the soffice process — then close LibreOffice cleanly.
 
         This is the key path for locked-down postes: it spawns **no** child
-        process (no cmd.exe / soffice.exe), so it is not affected by the
-        AppLocker / Defender-ASR policy that denies the install script (WinError
+        process (no cmd.exe / soffice.exe), so it is not affected by an
+        AppLocker / Defender-ASR policy that denies child processes (WinError
         5). L'installation passe par ExtensionManager.addExtension sur le MAIN
         thread (voie du Gestionnaire des extensions — remplace proprement, pas
         de corruption du registre).
 
         Returns True on success; any failure returns False so the caller falls
-        back to the manual-install message (ou au script si explicitement
-        réactivé). UNO usage is lazy so the module imports under test stubs.
+        back to the manual-install message. UNO usage is lazy so the module
+        imports under test stubs.
         """
         self.runtime.self_update_in_flight = True
         try:
@@ -2338,7 +2180,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Clôt la mise à jour précédente de façon idempotente.
 
         - version active == target → rapport « installed » au DM + télémétrie,
-          purge de pending_update (OXT stagé, scripts, état), retrait du target
+          purge de pending_update (OXT stagé, état), retrait du target
           de l'anti-boucle runtime.update_launch_blocked ;
         - `at_startup` et étape installed_* dont la cible n'est pas active,
           confirmé par deux lectures espacées du registre → l'installation a
@@ -6092,15 +5934,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                 try:
                                     pend = about_self._pending_update_dir()
                                     os.makedirs(pend, exist_ok=True)
-                                    open(os.path.join(pend, "mirai_update.oxt"), "a").close()
+                                    oxt = os.path.join(pend, "mirai_update.oxt")
+                                    open(oxt, "a").close()
                                     if update_status:
                                         update_status.getModel().Label = (
                                             _t("about.selftest_blocked")
                                         )
                                         update_status.getModel().TextColor = _UI["info"]
-                                    about_self._notify_update_blocked(
-                                        "SELFTEST", os.path.join(pend, "mirai_update.bat")
-                                    )
+                                    about_self._notify_update_blocked("SELFTEST", oxt)
                                 except Exception as _e:
                                     log_to_file(f"selftest update-blocked: {str(_e)}")
                                 return

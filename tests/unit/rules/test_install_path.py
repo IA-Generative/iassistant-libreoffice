@@ -1,10 +1,12 @@
 """Chemin d'installation unique : la mise à jour passe par
-ExtensionManager.addExtension, et plus jamais par le gestionnaire de paquets
-bas niveau.
+ExtensionManager.addExtension, jamais par le gestionnaire de paquets bas
+niveau ni par unopkg.
 
-Le remove/add de ce dernier ajoute le paquet sans l'enregistrer : après
-redémarrage, la nouvelle version est listée mais désactivée (incident du
-2026-10-05).
+Le remove/add du gestionnaire bas niveau ajoute le paquet sans l'enregistrer :
+après redémarrage, la nouvelle version est listée mais désactivée (incident du
+2026-10-05). unopkg passe bien par l'ExtensionManager, mais il tourne dans un
+processus enfant, refusé sur les postes durcis (WinError 5), et son remove
+précède l'add : un add en échec laisse le poste sans l'extension.
 """
 
 import ast
@@ -38,6 +40,11 @@ def test_the_low_level_package_manager_is_never_called():
     offenders = [site for name, site in calls if name in ("removePackage", "addPackage")]
     offenders += [site for value, site in strings if "thePackageManagerFactory" in value]
     assert offenders == []
+
+
+def test_unopkg_is_never_run():
+    _, strings = _calls_and_strings()
+    assert [site for value, site in strings if "unopkg" in value.lower()] == []
 
 
 def test_add_extension_has_a_single_call_site():

@@ -47,11 +47,6 @@ def install(data_dir):
         _handler = handler
 
 
-def path():
-    with _lock:
-        return _handler.baseFilename if _handler is not None else ""
-
-
 def uninstall():
     global _handler
     with _lock:

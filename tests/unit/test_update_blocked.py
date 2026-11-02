@@ -1,5 +1,5 @@
-"""Dégradation propre + anti-boucle quand l'install auto de la MAJ est bloquée
-par la politique du poste (WinError 5 — AppLocker / Defender ASR).
+"""Installation automatique d'une mise à jour en échec : anti-boucle, message
+d'installation manuelle, ouverture native du dossier du paquet.
 
 Run:  pytest tests/unit/test_update_blocked.py -v
 """
@@ -43,7 +43,7 @@ def test_notify_update_blocked_never_raises():
     """Le message d'échec ne doit jamais faire planter le worker (UNO best-effort)."""
     job = make_job()
     # Ne lève pas, même si le toolkit/MSG_BUTTONS n'est pas pleinement stubbé.
-    assert job._notify_update_blocked("0.0.1.0.14", r"C:\x\pending_update\mirai_update.bat") is None
+    assert job._notify_update_blocked("0.0.1.0.14", r"C:\x\pending_update\mirai_update.oxt") is None
 
 
 def test_report_update_status_sends_relay_headers():
@@ -82,8 +82,7 @@ def test_in_process_install_guard_rejects_bad_path():
 
 def test_in_process_install_degrades_gracefully(tmp_path):
     """Fichier réel mais installation en échec sur le thread principal → False,
-    LibreOffice reste ouvert (l'appelant retombera sur le script puis le message
-    manuel)."""
+    LibreOffice reste ouvert (l'appelant retombera sur le message manuel)."""
     path = str(tmp_path / "u.oxt")
     open(path, "w").close()
     job = make_job()
@@ -124,8 +123,8 @@ def test_notify_update_blocked_opens_folder_on_yes(tmp_path):
     """Quand le .oxt téléchargé existe et que l'utilisateur clique « Oui » (result==2),
     la boîte déclenche l'ouverture native du dossier."""
     d = str(tmp_path)
-    open(os.path.join(d, "mirai_update.oxt"), "w").close()
-    script = os.path.join(d, "mirai_update.bat")
+    oxt = os.path.join(d, "mirai_update.oxt")
+    open(oxt, "w").close()
 
     job = make_job()
     job._open_folder_native = MagicMock()
@@ -133,7 +132,7 @@ def test_notify_update_blocked_opens_folder_on_yes(tmp_path):
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 2
 
-    job._notify_update_blocked("0.0.1.0.16", script)
+    job._notify_update_blocked("0.0.1.0.16", oxt)
 
     job._open_folder_native.assert_called_once_with(d)
 
@@ -141,33 +140,31 @@ def test_notify_update_blocked_opens_folder_on_yes(tmp_path):
 def test_notify_update_blocked_no_open_on_no(tmp_path):
     """« Non » (result==3) : aucune ouverture de dossier."""
     d = str(tmp_path)
-    open(os.path.join(d, "mirai_update.oxt"), "w").close()
-    script = os.path.join(d, "mirai_update.bat")
+    oxt = os.path.join(d, "mirai_update.oxt")
+    open(oxt, "w").close()
 
     job = make_job()
     job._open_folder_native = MagicMock()
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 3
 
-    job._notify_update_blocked("0.0.1.0.16", script)
+    job._notify_update_blocked("0.0.1.0.16", oxt)
 
     job._open_folder_native.assert_not_called()
 
 
-def test_notify_update_blocked_uses_querybox_when_folder_offered(tmp_path):
-    """Régression : avec un dossier connu, la boîte doit être un QUERYBOX (type 4)
-    pour afficher Oui/Non. Un INFOBOX (type 1) n'affiche qu'OK → le bouton « Oui »
-    ne s'affichait pas (bug observé en test réel sur la 0.0.1.0.18)."""
+def test_update_blocked_with_a_folder_offers_yes_and_no(tmp_path):
+    """Quand un dossier est proposé, la boîte pose une question (Oui/Non)."""
     d = str(tmp_path)
-    open(os.path.join(d, "mirai_update.oxt"), "w").close()
-    script = os.path.join(d, "mirai_update.bat")
+    oxt = os.path.join(d, "mirai_update.oxt")
+    open(oxt, "w").close()
 
     job = make_job()
     job._open_folder_native = MagicMock()
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 3
 
-    job._notify_update_blocked("0.0.1.0.18", script)
+    job._notify_update_blocked("0.0.1.0.18", oxt)
 
     args = toolkit.createMessageBox.call_args.args
     assert args[1] == 4, "doit être un QUERYBOX (4) pour afficher Oui/Non"
@@ -179,10 +176,28 @@ def test_notify_update_blocked_uses_infobox_without_folder(tmp_path):
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 1
 
-    job._notify_update_blocked("0.0.1.0.18", r"C:\nope\pending_update\mirai_update.bat")
+    job._notify_update_blocked("0.0.1.0.18", r"C:\nope\pending_update\mirai_update.oxt")
 
     args = toolkit.createMessageBox.call_args.args
     assert args[1] == 1, "doit rester un INFOBOX (1) quand il n'y a pas de dossier à ouvrir"
+
+
+def test_update_blocked_without_a_package_offers_the_pending_update_folder(tmp_path):
+    """Sans paquet nommé, la boîte désigne le dossier pending_update du profil
+    et propose de l'ouvrir."""
+    pending = tmp_path / "mirai" / "pending_update"
+    pending.mkdir(parents=True)
+    job = make_job(config_dir=str(tmp_path))
+    job._open_folder_native = MagicMock()
+    toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
+    toolkit.createMessageBox.return_value.execute.return_value = 2
+
+    job._notify_update_blocked("0.0.1.0.18")
+
+    args = toolkit.createMessageBox.call_args.args
+    assert args[1] == 4
+    assert i18n.t("update.blocked_pending_folder") in args[4]
+    job._open_folder_native.assert_called_once_with(str(pending))
 
 
 def test_notify_update_blocked_follows_the_interface_language():
@@ -199,7 +214,7 @@ def test_notify_update_blocked_follows_the_interface_language():
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 3
 
-    job._notify_update_blocked("0.0.1.0.18", os.path.join(d, "mirai_update.bat"))
+    job._notify_update_blocked("0.0.1.0.18", oxt)
 
     title, message = toolkit.createMessageBox.call_args.args[3:5]
     assert title == "MIrAI — Update blocked"
