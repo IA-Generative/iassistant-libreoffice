@@ -98,6 +98,21 @@ def test_unknown_action_is_not_a_shell_action():
     assert job._handle_shell_action("ExtendSelection") is False
 
 
+def test_an_action_no_route_serves_is_announced_and_traced():
+    job = make_job()
+    job._wait_for_config = lambda _action: None
+    spans = []
+    job._send_telemetry = lambda span, attrs=None: spans.append((span, dict(attrs or {})))
+    messages = []
+    job._show_message = lambda title, body: messages.append((title, body))
+
+    job.trigger("ExtendSelection&src=toolbar")
+
+    assert ("ActionUnhandled", "ExtendSelection") in [(s, a.get("action")) for s, a in spans]
+    assert messages == [(t("msg.action_unavailable_title"),
+                         t("msg.action_unavailable_body", action="ExtendSelection"))]
+
+
 # ── Santé technique : les pannes muettes deviennent des spans ───────────
 
 def _telemetry_recorder(job):
