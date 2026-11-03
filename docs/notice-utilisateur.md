@@ -291,16 +291,21 @@ Pour construire un OXT avec un profil spécifique :
 
 ### 5.3 🔵 Proxy et certificats SSL
 
-Le proxy se règle dans `mirai/settings.json` ; le Device Management ne le pilote pas. Un mot de passe (`proxy_password`) écrit dans ce fichier passe dans le coffre du système au démarrage suivant de LibreOffice, et le fichier ne le garde pas (voir [Vos données](#vos-données)) :
+Le proxy se règle dans `mirai/settings.json`, LibreOffice fermé ; le Device Management ne le pilote pas. Pour tout un parc, l'administrateur peut placer ces clés, sauf le mot de passe, dans le profil de build de l'OXT (voir 5.2) ; une valeur de `settings.json` l'emporte.
 
 ```json
 {
-  "proxy_enabled": false,
+  "proxy_enabled": true,
   "proxy_url": "proxy.example.local:8080",
-  "proxy_allow_insecure_ssl": true,
-  "proxy_username": ""
+  "proxy_username": "jdupont",
+  "proxy_password": "votre-mot-de-passe"
 }
 ```
+
+- **Mot de passe** : il n'est pris en compte qu'au démarrage suivant de LibreOffice, où il quitte le fichier pour le coffre du système (Windows, macOS). Sous Linux, il n'est gardé qu'en mémoire : réécrivez-le dans le fichier avant chaque session (voir [Vos données](#vos-données)).
+- **Retirer un mot de passe rangé** : un `proxy_password` vide ne l'efface pas du coffre. Supprimez l'entrée `proxy_password` du service `MIrAI-LibreOffice` (noms exacts et commandes : [donnees-locales.md](donnees-locales.md)).
+- **JSON valide** : un fichier invalide est ignoré, puis remplacé à la prochaine écriture de l'extension ; les réglages qu'il portait sont perdus.
+- **`proxy_allow_insecure_ssl`** : à `true`, il coupe la vérification des certificats pour toutes les connexions de l'extension, pas seulement celles qui passent par le proxy. Réservé au diagnostic.
 
 Un bundle de certificats CA peut être spécifié via `ca_bundle_path`. Par défaut, le bundle Scaleway est inclus dans l'extension.
 
