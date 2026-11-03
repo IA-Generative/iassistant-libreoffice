@@ -28,7 +28,7 @@
   "settings.no_description": "No hay descripción disponible",
   "settings.id_prefix": "ID: {value}",
   "settings.token_error_unknown": "desconocido",
-  "settings.token_error_proxy": "No se puede acceder al endpoint OWUI a través del proxy.\n\nURL probada: {url}\nDetalle: {detail}\n\nCompruebe el proxy (botón Proxy > Probar conexión).",
+  "settings.token_error_proxy": "No se puede acceder al endpoint OWUI a través del proxy.\n\nURL probada: {url}\nDetalle: {detail}\n\nCompruebe las claves proxy_* de mirai/settings.json.",
   "settings.token_error_unreachable": "No se puede acceder al endpoint OWUI.\n\nURL probada: {url}\nDetalle: {detail}",
   "settings.token_invalid": "Token no válido, ausente o rechazado.",
   "settings.no_models": "No hay ningún modelo disponible (compruebe el endpoint y el token).",

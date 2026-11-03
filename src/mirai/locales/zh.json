@@ -28,7 +28,7 @@
   "settings.no_description": "暂无说明",
   "settings.id_prefix": "ID：{value}",
   "settings.token_error_unknown": "未知",
-  "settings.token_error_proxy": "无法通过代理访问 OWUI 端点。\n\n测试的 URL：{url}\n详情：{detail}\n\n请检查代理（代理按钮 > 测试连接）。",
+  "settings.token_error_proxy": "无法通过代理访问 OWUI 端点。\n\n测试的 URL：{url}\n详情：{detail}\n\n请检查 mirai/settings.json 中的 proxy_* 键。",
   "settings.token_error_unreachable": "无法访问 OWUI 端点。\n\n测试的 URL：{url}\n详情：{detail}",
   "settings.token_invalid": "令牌无效、缺失或被拒绝。",
   "settings.no_models": "没有可用的模型（请检查端点和令牌）。",
