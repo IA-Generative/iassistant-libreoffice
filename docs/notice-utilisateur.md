@@ -368,8 +368,8 @@ Sans sélection, la demande libre et les actions rapides de Writer portent sur t
 - Vérifiez l'URL du backend dans Paramètres
 - Si vous êtes derrière un proxy, réglez-le dans `mirai/settings.json` (voir [Proxy et certificats SSL](#53--proxy-et-certificats-ssl))
 
-**"Token invalide"**
-- Une boîte de dialogue vous proposera d'ouvrir les paramètres pour vérifier votre token API
+**"Votre poste n'est pas authentifié auprès du service IA"**
+- La fenêtre de l'assistant affiche ce message quand le service IA refuse votre jeton, après une tentative de renouvellement. Ouvrez MIrAI → Paramètres pour vous reconnecter.
 
 > 🔵 **Expert** — Diagnostic avancé :
 >
