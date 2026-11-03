@@ -99,6 +99,19 @@ class TestFetchModels(unittest.TestCase):
         self.assertIn("llama3", models)
         self.assertEqual(descriptions["llama3"], "Fast LLM")
 
+    def test_models_are_listed_under_api_unless_the_endpoint_names_its_path(self):
+        urls = []
+
+        def record(request, context=None, timeout=None):
+            urls.append(request.full_url)
+            return http_response({"data": []})
+
+        self.job._urlopen = record
+        for endpoint in ("https://h.example", "https://h.example/api", "https://h.example/v1/"):
+            self.job._fetch_models(endpoint, "key")
+        self.assertEqual(urls, ["https://h.example/api/models", "https://h.example/api/models",
+                                "https://h.example/v1/models"])
+
 
 if __name__ == "__main__":
     unittest.main()
