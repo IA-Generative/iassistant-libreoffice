@@ -260,7 +260,6 @@ Accessible depuis le menu **🤖 MIrAI 🤖 → ⚙️ Paramètres**. Vous pouve
 - **URL du backend** — L'adresse du serveur IA
 - **Modèle par défaut** — Le modèle de langage à utiliser
 - **Token API** — Votre clé d'authentification
-- **Proxy** — Si votre réseau nécessite un proxy
 
 Dans la plupart des cas, ces paramètres sont préconfigurés par votre administrateur via le Device Management.
 
@@ -292,16 +291,21 @@ Pour construire un OXT avec un profil spécifique :
 
 ### 5.3 🔵 Proxy et certificats SSL
 
-Le proxy se règle depuis **🤖 MIrAI 🤖 → ⚙️ Paramètres**, bouton **Proxy**. Les réglages sont enregistrés dans `mirai/settings.json` ; le mot de passe du proxy, lui, va dans le coffre du système (voir [Vos données](#vos-données)) :
+Le proxy se règle dans `mirai/settings.json`, LibreOffice fermé ; le Device Management ne le pilote pas. Pour tout un parc, l'administrateur peut placer ces clés, sauf le mot de passe, dans le profil de build de l'OXT (voir 5.2) ; une valeur de `settings.json` l'emporte.
 
 ```json
 {
-  "proxy_enabled": false,
+  "proxy_enabled": true,
   "proxy_url": "proxy.example.local:8080",
-  "proxy_allow_insecure_ssl": true,
-  "proxy_username": ""
+  "proxy_username": "jdupont",
+  "proxy_password": "votre-mot-de-passe"
 }
 ```
+
+- **Mot de passe** : il n'est pris en compte qu'au démarrage suivant de LibreOffice, où il quitte le fichier pour le coffre du système (Windows, macOS). Sous Linux, il n'est gardé qu'en mémoire : réécrivez-le dans le fichier avant chaque session (voir [Vos données](#vos-données)).
+- **Retirer un mot de passe rangé** : un `proxy_password` vide ne l'efface pas du coffre. Supprimez l'entrée `proxy_password` du service `MIrAI-LibreOffice` (noms exacts et commandes : [donnees-locales.md](donnees-locales.md)).
+- **JSON valide** : un fichier invalide est ignoré, puis remplacé à la prochaine écriture de l'extension ; les réglages qu'il portait sont perdus.
+- **`proxy_allow_insecure_ssl`** : à `true`, il coupe la vérification des certificats pour toutes les connexions de l'extension, pas seulement celles qui passent par le proxy. Réservé au diagnostic.
 
 Un bundle de certificats CA peut être spécifié via `ca_bundle_path`. Par défaut, le bundle Scaleway est inclus dans l'extension.
 
@@ -362,7 +366,7 @@ Sans sélection, la demande libre et les actions rapides de Writer portent sur t
 **"Erreur de connexion"**
 - Vérifiez votre accès réseau
 - Vérifiez l'URL du backend dans Paramètres
-- Si vous êtes derrière un proxy, configurez-le dans les paramètres
+- Si vous êtes derrière un proxy, réglez-le dans `mirai/settings.json` (voir [Proxy et certificats SSL](#53--proxy-et-certificats-ssl))
 
 **"Token invalide"**
 - Une boîte de dialogue vous proposera d'ouvrir les paramètres pour vérifier votre token API
