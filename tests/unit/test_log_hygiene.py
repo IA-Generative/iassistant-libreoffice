@@ -53,15 +53,15 @@ def test_dm_response_is_not_logged(tmp_path):
     assert [line for line in lines if SECRET in str(line)] == []
 
 
-def test_llm_request_body_is_not_logged(tmp_path):
+def test_llm_request_logs_neither_the_document_nor_the_token(tmp_path):
     job = make_job(config_dir=str(tmp_path))
-    values = {"llm_base_urls": "https://llm.example/v1", "llm_api_tokens": SECRET,
-              "llm_default_models": "model-a"}
-    job.get_config = MagicMock(side_effect=lambda key, default=None: values.get(key, default))
+    job.set_config("llm_base_urls", "https://llm.example/v1")
+    job.set_config("llm_api_tokens", SECRET)
+    job._urlopen = MagicMock(return_value=http_response({"data": [{"id": "model-a"}]}))
     lines = _entrypoint_log(lambda: job.make_chat_request(
         [{"role": "system", "content": "Consigne"}, {"role": "user", "content": DOCUMENT}],
         max_tokens=100))
-    assert lines
+    assert [line for line in lines if line.startswith("Models fetch curl")]
     assert _leaks(lines) == []
 
 
