@@ -38,7 +38,6 @@
   "addon.test_model": "🔬 Tester le modèle",
   "addon.documentation": "📚 Documentation",
   "addon.about": "ℹ️ À propos de l'IA'ssistant...",
-  "addon.toolbar": "Assistant MIrAI",
   "common.ok": "OK",
   "common.close": "Fermer",
   "common.error": "Erreur : {detail}",

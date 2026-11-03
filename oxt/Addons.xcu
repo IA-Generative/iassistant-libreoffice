@@ -108,46 +108,5 @@
       </node>
     </node>
 
-    <!-- Toolbar : un seul bouton — la palette -->
-    <node oor:name="OfficeToolBar">
-      <node oor:name="fr.gouv.interieur.mirai.toolbar" oor:op="replace">
-        <node oor:name="A1" oor:op="replace">
-          <prop oor:name="URL" oor:type="xs:string">
-            <value>service:fr.gouv.interieur.mirai.do?OpenAssistant&amp;src=toolbar</value>
-          </prop>
-          <prop oor:name="Title" oor:type="xs:string">
-            <value>Assistant MIrAI</value>
-            <value xml:lang="fr">Assistant MIrAI</value>
-            <value xml:lang="en">MIrAI assistant</value>
-            <value xml:lang="es">Asistente MIrAI</value>
-            <value xml:lang="pt">Assistente MIrAI</value>
-            <value xml:lang="zh">MIrAI 助手</value>
-          </prop>
-          <prop oor:name="Target" oor:type="xs:string">
-            <value>_self</value>
-          </prop>
-          <prop oor:name="Context" oor:type="xs:string">
-            <value>com.sun.star.sheet.SpreadsheetDocument,com.sun.star.text.GlobalDocument,com.sun.star.text.TextDocument,com.sun.star.text.WebDocument</value>
-          </prop>
-        </node>
-      </node>
-    </node>
-
-    <node oor:name="Images">
-      <node oor:name="fr.gouv.interieur.mirai.img.assistant" oor:op="replace">
-        <prop oor:name="URL" oor:type="xs:string">
-          <value>service:fr.gouv.interieur.mirai.do?OpenAssistant&amp;src=toolbar</value>
-        </prop>
-        <node oor:name="UserDefinedImages">
-          <prop oor:name="ImageSmallURL" oor:type="xs:string">
-            <value>%origin%/icons/toolbar-mirai_16.png</value>
-          </prop>
-          <prop oor:name="ImageBigURL" oor:type="xs:string">
-            <value>%origin%/icons/toolbar-mirai_26.png</value>
-          </prop>
-        </node>
-      </node>
-    </node>
-
   </node>
 </oor:component-data>

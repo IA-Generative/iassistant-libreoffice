@@ -6793,7 +6793,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             raise RuntimeError(_t("msg.no_browser"))
 
     def trigger(self, args):
-        # Parse &src= suffix if present (menu, toolbar, key)
+        # Parse &src= suffix if present (menu, key)
         if "&src=" in args:
             action, source = args.split("&src=", 1)
         else:

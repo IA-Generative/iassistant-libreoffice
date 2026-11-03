@@ -38,7 +38,6 @@
   "addon.test_model": "🔬 测试模型",
   "addon.documentation": "📚 文档",
   "addon.about": "ℹ️ 关于 IA'ssistant...",
-  "addon.toolbar": "MIrAI 助手",
   "common.ok": "确定",
   "common.close": "关闭",
   "common.error": "错误：{detail}",

@@ -51,7 +51,6 @@ _ADDON_KEYS = (
     "addon.test_model",
     "addon.documentation",
     "addon.about",
-    "addon.toolbar",
 )
 
 # (cle, kwargs) — chaque couple doit s'interpoler dans les cinq locales.
