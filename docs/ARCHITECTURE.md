@@ -370,12 +370,10 @@ faux documents à état réel).
 La refacto de la coquille et les suppressions décidées sont suivies par
 [l'ADR 0001](adr/0001-refacto-strangler.md) et le ticket #98.
 
-1. Supprimer le client LLM legacy d'entrypoint.py (`stream_request`,
-   `make_api_request`), une release après la suppression des menus legacy.
-2. Unifier `=PROMPT()` (`calc_prompt_function.py`) sur la façade (≈150 lignes
+1. Unifier `=PROMPT()` (`calc_prompt_function.py`) sur la façade (≈150 lignes
    dupliquées de la coquille, sans Keycloak ni relais).
-3. `ui_ask_user` (questions de clarification interactives dans la palette).
-4. Multi-conversations + recherche ; sidebar historique ;
+2. `ui_ask_user` (questions de clarification interactives dans la palette).
+3. Multi-conversations + recherche ; sidebar historique ;
    permissions par tool ; rafraîchir les chips quand l'app change sous une
    palette ouverte.
 

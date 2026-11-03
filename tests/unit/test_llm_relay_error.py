@@ -131,48 +131,20 @@ def test_each_error_code_keeps_its_own_window(relay_error_codes):
     assert relay_error_codes == ["rate_limit_exceeded", "timeout"]
 
 
-class TestStreamRequest429(unittest.TestCase):
-    """Le 429 du proxy traverse stream_request : télémétrie + message utilisateur."""
+def test_a_429_from_the_palette_is_correlated_with_the_server_audit():
+    """Le 429 du relais remonte de la palette par la façade : un LlmRelayError
+    conforme au § 8 bis, corrélé à l'audit serveur par X-Request-Id."""
+    job = make_job()
+    sent = []
+    job._send_telemetry = lambda name, attrs=None: sent.append((name, attrs))
+    error = _http_error(429, headers={"X-Request-Id": "trace-429"})
 
-    def setUp(self):
-        self.job = make_job()
-        self.sent = []
-        self.messages = []
-        self.job._send_telemetry = lambda name, attrs=None: self.sent.append((name, attrs))
-        self.job._show_message = lambda title, msg: self.messages.append((title, msg))
-        self.job._show_thinking = lambda: None
-        self.job._update_thinking_dots = lambda: None
-        self.job._close_thinking = lambda: None
-        self.job.get_ssl_context = lambda *a, **k: None
+    MainJobShell(job).report_llm_error(429, _RATE_LIMITED, error.headers)
 
-    def test_429_emits_telemetry_and_user_message(self):
-        body = (b'{"error": {"message": "Rate limit exceeded", '
-                b'"type": "rate_limit_exceeded", "code": "rate_limit_exceeded"}, '
-                b'"retry_after": 30}')
-
-        def raising_urlopen(request, context=None, timeout=None, use_proxy=True):
-            raise _http_error(429, body, {"X-Request-Id": "trace-429",
-                                          "Retry-After": "30"})
-
-        self.job._urlopen = raising_urlopen
-        request = urllib.request.Request("https://dm.test/llm/v1/chat/completions")
-        chunks = []
-        self.job.stream_request(request, "chat", chunks.append)
-
-        # Télémétrie LlmRelayError conforme § 8 bis, corrélée au serveur.
-        relay_events = [(n, a) for n, a in self.sent if n == "LlmRelayError"]
-        self.assertEqual(len(relay_events), 1)
-        _, attrs = relay_events[0]
-        self.assertEqual(attrs["llm.status_code"], 429)
-        self.assertEqual(attrs["llm.error_code"], "rate_limit_exceeded")
-        self.assertEqual(attrs["llm.retry_after_s"], 30)
-        self.assertEqual(attrs["llm.request_id"], "trace-429")
-        self.assertFalse(attrs["llm.will_retry"])
-        # UX : retry_after affiché à l'utilisateur, pas de réessai automatique.
-        self.assertEqual(len(self.messages), 1)
-        self.assertIn("30 secondes", self.messages[0][1])
-        # Aucun chunk de contenu n'a été produit.
-        self.assertEqual(chunks, [])
+    assert [(name, attrs["llm.status_code"], attrs["llm.error_code"],
+             attrs["llm.retry_after_s"], attrs["llm.request_id"], attrs["llm.will_retry"])
+            for name, attrs in sent] == [
+        ("LlmRelayError", 429, "rate_limit_exceeded", 30, "trace-429", False)]
 
 
 if __name__ == "__main__":
