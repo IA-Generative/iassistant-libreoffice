@@ -17,7 +17,8 @@ from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai.core.shell_facade import MainJobShell  # install() doit précéder l'import
+from src.mirai.core import sse_pump  # install() doit précéder l'import
+from src.mirai.core.shell_facade import MainJobShell
 
 _RATE_LIMITED = '{"error": {"code": "rate_limit_exceeded"}, "retry_after": 30}'
 
@@ -131,15 +132,20 @@ def test_each_error_code_keeps_its_own_window(relay_error_codes):
     assert relay_error_codes == ["rate_limit_exceeded", "timeout"]
 
 
-def test_a_429_from_the_palette_is_correlated_with_the_server_audit():
-    """Le 429 du relais remonte de la palette par la façade : un LlmRelayError
+def test_a_429_from_the_relay_is_correlated_with_the_server_audit():
+    """Le 429 du relais, lu par le flux de la palette, émet un LlmRelayError
     conforme au § 8 bis, corrélé à l'audit serveur par X-Request-Id."""
     job = make_job()
     sent = []
     job._send_telemetry = lambda name, attrs=None: sent.append((name, attrs))
-    error = _http_error(429, headers={"X-Request-Id": "trace-429"})
+    shell = MainJobShell(job)
 
-    MainJobShell(job).report_llm_error(429, _RATE_LIMITED, error.headers)
+    def refuse(request, timeout=None):
+        raise _http_error(429, _RATE_LIMITED.encode("utf-8"), {"X-Request-Id": "trace-429"})
+
+    shell.urlopen = refuse
+
+    sse_pump.run_stream(shell, object(), lambda event: None)
 
     assert [(name, attrs["llm.status_code"], attrs["llm.error_code"],
              attrs["llm.retry_after_s"], attrs["llm.request_id"], attrs["llm.will_retry"])
