@@ -78,7 +78,7 @@ Analyse la plage sélectionnée et insère un résumé des tendances et anomalie
 
 Chaque action génère une trace OpenTelemetry avec :
 - `plugin.action` : nom condensé (`extend`, `edit`, `summarize`, `formula`…)
-- `trigger.source` : origine (`menu`, `toolbar`, `key`, `auto`)
+- `trigger.source` : origine (`menu`, `key`, `auto`)
 - Header `X-Client-UUID` envoyé pour identification pré-enrollment
 
 ---
@@ -233,10 +233,10 @@ src/mirai/
 └── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
 
 oxt/                           # Fichiers statiques packagés dans l'OXT
-├── Addons.xcu                 # Menus et toolbar
+├── Addons.xcu                 # Menu MIrAI
 ├── Accelerators.xcu           # Raccourcis clavier
 ├── Jobs.xcu                   # Job d'initialisation
-├── icons/                     # Icônes toolbar
+├── icons/                     # Icônes
 └── META-INF/manifest.xml
 
 config/profiles/               # Profils de configuration
