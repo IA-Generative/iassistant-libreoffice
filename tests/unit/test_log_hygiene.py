@@ -3,7 +3,6 @@
 import io
 import json
 import urllib.error
-import urllib.request
 from unittest.mock import MagicMock, patch
 
 from tests.stubs.helpers import base_config, http_response
@@ -54,16 +53,16 @@ def test_dm_response_is_not_logged(tmp_path):
     assert [line for line in lines if SECRET in str(line)] == []
 
 
-def test_llm_request_body_is_not_logged(tmp_path):
+def test_llm_request_logs_neither_the_document_nor_the_token(tmp_path):
     job = make_job(config_dir=str(tmp_path))
-    values = {"llm_base_urls": "https://llm.example/v1", "llm_api_tokens": SECRET,
-              "llm_default_models": "model-a"}
-    job.get_config = MagicMock(side_effect=lambda key, default=None: values.get(key, default))
-    lines = []
-    with patch("src.mirai.entrypoint.log_to_file", side_effect=lines.append):
-        job.make_api_request(DOCUMENT, system_prompt="Consigne", max_tokens=100)
-    leaked = [line for line in lines if DOCUMENT in str(line) or SECRET in str(line)]
-    assert leaked == []
+    job.set_config("llm_base_urls", "https://llm.example/v1")
+    job.set_config("llm_api_tokens", SECRET)
+    job._urlopen = MagicMock(return_value=http_response({"data": [{"id": "model-a"}]}))
+    lines = _entrypoint_log(lambda: job.make_chat_request(
+        [{"role": "system", "content": "Consigne"}, {"role": "user", "content": DOCUMENT}],
+        max_tokens=100))
+    assert [line for line in lines if line.startswith("Models fetch curl")]
+    assert _leaks(lines) == []
 
 
 def test_journal_detail_shows_in_actions_tab_but_only_size_is_logged(palette_module):
@@ -113,21 +112,6 @@ def test_enroll_payload_does_not_log_the_user_email(tmp_path):
     lines = _entrypoint_log(job._ensure_device_management_state)
     assert any("enroll payload" in line for line in lines)
     assert [line for line in lines if "jeanne.martin" in line] == []
-
-
-def test_llm_error_body_is_not_logged(tmp_path):
-    job = make_job(config_dir=str(tmp_path))
-    job._send_telemetry = lambda name, attrs=None: None
-    job._show_message = lambda title, msg: None
-    job._show_thinking = lambda: None
-    job._update_thinking_dots = lambda: None
-    job._close_thinking = lambda: None
-    job.get_ssl_context = lambda *a, **k: None
-    job._urlopen = MagicMock(side_effect=_http_error(500))
-    request = urllib.request.Request("https://dm.example/llm/v1/chat/completions")
-    lines = _entrypoint_log(lambda: job.stream_request(request, "chat", lambda chunk: None))
-    assert any("HTTP 500" in line for line in lines)
-    assert _leaks(lines) == []
 
 
 def test_palette_stream_error_body_is_not_logged():

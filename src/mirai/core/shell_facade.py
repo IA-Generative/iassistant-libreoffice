@@ -9,9 +9,8 @@ Invariant : aucune logique métier ici — uniquement de l'adaptation.
 import json
 import urllib.request
 
-# Clamps max_tokens par modèle. Source unique : make_api_request (coquille)
-# importe cette table. make_chat_request ne l'applique pas ; la façade
-# comble ce trou.
+# Clamps max_tokens par modèle. make_chat_request ne les applique pas ; la
+# façade comble ce trou.
 MODEL_TOKEN_LIMITS = {
     "deepseek-r1-distill-llama-70b": 8196,
     "llama-3.3-70b-instruct": 4096,

@@ -79,8 +79,6 @@ _PLACEHOLDER_CASES = (
     ("enroll.error_config_text", {"error": "boom"}),
     ("enroll.failed_text", {"reason": "boom"}),
     ("msg.kc_expired_body", {"redirect_uri": "http://localhost:28443/callback"}),
-    ("msg.quota_body", {"delay": "30 secondes"}),
-    ("msg.delay_seconds", {"seconds": 30}),
     ("msg.action_failed_body", {"action": "OuvrirAssistant", "exc": "boom"}),
     ("msg.action_unavailable_body", {"action": "OuvrirAssistant"}),
     ("preset.resized", {"target": 7}),
@@ -420,14 +418,6 @@ def _assert_document_language(system):
     assert i18n.t("llm.answer_language") not in system
 
 
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_shell_requests_keep_the_document_language(code):
-    job = make_job()
-    i18n.set_locale(code)
-    request = job.make_api_request("ping", "", 10)
-    _assert_document_language(json.loads(request.data)["messages"][0]["content"])
-
-
 def _writer_target():
     return FakeWriterDoc(selection_text="The quick brown fox jumps over the lazy dog."), "writer"
 
@@ -462,14 +452,6 @@ def test_palette_transformations_keep_the_document_language(runner, make_target)
 def _assert_interface_language(system):
     assert i18n.t("llm.answer_language") in system
     assert "MÊME LANGUE" not in system
-
-
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_shell_suggestion_requests_follow_the_interface_language(code):
-    job = make_job()
-    i18n.set_locale(code)
-    request = job.make_api_request("ping", "", 10, answer_in_ui_language=True)
-    _assert_interface_language(json.loads(request.data)["messages"][0]["content"])
 
 
 @pytest.mark.parametrize("code", i18n.SUPPORTED)

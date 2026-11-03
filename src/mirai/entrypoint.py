@@ -245,12 +245,6 @@ def _redact_header_value(name, value):
         return "<redacted>"
     return value
 
-def _redacted_headers(headers):
-    safe = {}
-    for key, value in (headers or {}).items():
-        safe[key] = _redact_header_value(key, value)
-    return safe
-
 def _curl_headers_for_log(headers):
     parts = []
     for key, value in (headers or {}).items():
@@ -2796,9 +2790,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             endpoint = self.get_config("llm_base_urls", "http://127.0.0.1:5000")
             api_key = self.get_config("llm_api_tokens", "")
-            is_openwebui = True
 
-            models = self._get_cached_models(str(endpoint), str(api_key), is_openwebui)
+            models = self._get_cached_models(str(endpoint), str(api_key))
 
             if local_model:
                 if not models or local_model in models:
@@ -2868,123 +2861,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not isinstance(exp, (int, float)):
             return False
         return time.time() >= (exp - skew_seconds)
-
-    _thinking_widget = None
-    _thinking_dots_count = 0
-
-    def _show_thinking(self):
-        """Show a small floating window with the plume icon
-        and an animated 'MIrAI réfléchit...' label.
-        Minimal chrome: no close button, not sizeable, empty title."""
-        try:
-            self._close_thinking()
-            from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-            ctx = uno.getComponentContext()
-            sm = ctx.getServiceManager()
-            def _cr(n):
-                return sm.createInstanceWithContext(n, ctx)
-
-            W, H = 180, 64
-            dlg = _cr("com.sun.star.awt.UnoControlDialog")
-            dlg_m = _cr("com.sun.star.awt.UnoControlDialogModel")
-            dlg.setModel(dlg_m)
-            dlg.setVisible(False)
-            dlg.setTitle("")
-            dlg.setPosSize(0, 0, W, H, SIZE)
-            try:
-                dlg_m.BackgroundColor = 0xFFFFFF
-                dlg_m.Closeable = False
-                dlg_m.Sizeable = False
-                dlg_m.Moveable = True
-            except Exception:
-                pass
-
-            def _add(name, ctrl_type, x, y, w, h, props):
-                m = dlg_m.createInstance(
-                    "com.sun.star.awt.UnoControl" + ctrl_type + "Model")
-                dlg_m.insertByName(name, m)
-                c = dlg.getControl(name)
-                c.setPosSize(x, y, w, h, POSSIZE)
-                for k, v in props.items():
-                    try:
-                        setattr(m, k, v)
-                    except Exception:
-                        pass
-                return c
-
-            # Icon
-            plume_path = os.path.join(
-                os.path.dirname(__file__), "icons", "plume.png")
-            plume_url = ""
-            if os.path.exists(plume_path):
-                plume_url = uno.systemPathToFileUrl(plume_path)
-            _add("img_plume", "ImageControl", 6, 6, 48, 48, {
-                "ImageURL": plume_url,
-                "BackgroundColor": 0xFFFFFF,
-                "Border": 0,
-                "ScaleImage": True,
-            })
-
-            # Label "MIrAI"
-            from com.sun.star.awt.FontWeight import BOLD
-            _add("lbl_thinking", "FixedText", 60, 10, W - 68, 20, {
-                "Label": "MIrAI",
-                "FontHeight": 11,
-                "FontWeight": BOLD,
-                "TextColor": _UI["primary"],
-                "BackgroundColor": 0xFFFFFF,
-            })
-
-            # Sub-label "réfléchit..."
-            from com.sun.star.awt.FontSlant import ITALIC
-            _add("lbl_dots", "FixedText", 60, 32, W - 68, 18, {
-                "Label": "réfléchit...",
-                "FontHeight": 9,
-                "FontSlant": ITALIC,
-                "TextColor": _UI["text_secondary"],
-                "BackgroundColor": 0xFFFFFF,
-            })
-
-            # Position: centered horizontally, 2/3 down the document window
-            frame = _cr("com.sun.star.frame.Desktop").getCurrentFrame()
-            window = frame.getContainerWindow() if frame else None
-            toolkit = _cr("com.sun.star.awt.Toolkit")
-            dlg.createPeer(toolkit, window)
-            if window:
-                ps = window.getPosSize()
-                _x = ps.X + (ps.Width - W) // 2
-                _y = ps.Y + int(ps.Height * 2 / 3) - H // 2
-                dlg.setPosSize(_x, _y, 0, 0, POS)
-            dlg.setVisible(True)
-            self._thinking_widget = dlg
-            self._thinking_dots_count = 0
-
-            pump_events(toolkit)
-        except Exception:
-            pass
-
-    def _update_thinking_dots(self):
-        """Animate the dots on the thinking widget (call from main loop)."""
-        if not self._thinking_widget:
-            return
-        try:
-            self._thinking_dots_count = (self._thinking_dots_count + 1) % 4
-            dots = "." * (self._thinking_dots_count + 1)
-            lbl = self._thinking_widget.getControl("lbl_dots")
-            if lbl:
-                lbl.getModel().Label = f"réfléchit{dots}"
-        except Exception:
-            pass
-
-    def _close_thinking(self):
-        """Close the thinking widget if open."""
-        try:
-            if self._thinking_widget:
-                self._thinking_widget.setVisible(False)
-                self._thinking_widget.dispose()
-        except Exception:
-            pass
-        self._thinking_widget = None
 
     def _show_message(self, title, message):
         try:
@@ -3322,43 +3198,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 _t("msg.connection_redirect_short")
             )
             return proceed, None, None, None, None
-
-    def _show_message_and_open_settings(self, title, message):
-        try:
-            toolkit = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.awt.Toolkit", self.ctx
-            )
-            frame = self.desktop.getCurrentFrame() if self.desktop else None
-            window = frame.getContainerWindow() if frame else None
-            if not window:
-                return
-            from com.sun.star.awt.MessageBoxType import MESSAGEBOX
-            try:
-                box = toolkit.createMessageBox(
-                    window,
-                    uno.createUnoStruct("com.sun.star.awt.Rectangle"),
-                    MESSAGEBOX,
-                    MSG_BUTTONS.BUTTONS_OK_CANCEL,
-                    str(title),
-                    str(message)
-                )
-            except Exception:
-                box = toolkit.createMessageBox(
-                    window,
-                    MESSAGEBOX,
-                    MSG_BUTTONS.BUTTONS_OK_CANCEL,
-                    str(title),
-                    str(message)
-                )
-            result = box.execute()
-            box.dispose()
-            if result == 1:
-                try:
-                    self.settings_box("Settings")
-                except Exception:
-                    pass
-        except Exception as e:
-            log_to_file(f"Failed to show message box: {str(e)}")
 
     def _keycloak_config(self, config_data):
         if not isinstance(config_data, dict):
@@ -4701,12 +4540,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
-    def _split_endpoint_api_path(self, endpoint, is_openwebui):
+    def _split_endpoint_api_path(self, endpoint):
         endpoint = (endpoint or "").rstrip("/")
         if endpoint.endswith("/api") or endpoint.endswith("/v1"):
             return endpoint, ""
-        api_path = "/api" if is_openwebui else "/v1"
-        return endpoint, api_path
+        return endpoint, "/api"
 
     def _build_auth_headers(self, api_key):
         """Build standard JSON + auth headers for API calls."""
@@ -4716,14 +4554,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             headers[header_name] = f"{header_prefix}{api_key}"
         return headers
 
-    def _fetch_models(self, endpoint, api_key, is_openwebui, include_info=False):
+    def _fetch_models(self, endpoint, api_key, include_info=False):
         """
         Fetch models from the API endpoint.
 
         Returns a list of model IDs when include_info=False,
         or a (list, dict) tuple of (model_ids, descriptions) when include_info=True.
         """
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
+        endpoint, api_path = self._split_endpoint_api_path(endpoint)
         api_key = self._effective_api_token(api_key)
         url = endpoint + api_path + "/models" if api_path else endpoint + "/models"
         headers = self._build_auth_headers(api_key)
@@ -4974,13 +4812,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return {key: str(value).strip() for key, value in keycloak_map.items()
                 if value is not None and str(value).strip()}
 
-    def _get_cached_models(self, endpoint, api_key, is_openwebui):
-        key = (endpoint, api_key, bool(is_openwebui))
+    def _get_cached_models(self, endpoint, api_key):
+        key = (endpoint, api_key)
         now = time.time()
         if self._models_cache and self._models_cache_key == key:
             if (now - self._models_cache_loaded_at) < self._models_cache_ttl:
                 return self._models_cache
-        models = self._fetch_models(endpoint, api_key, is_openwebui)
+        models = self._fetch_models(endpoint, api_key)
         self._models_cache = models
         self._models_cache_key = key
         self._models_cache_loaded_at = now
@@ -5012,15 +4850,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as e:
             return False, {"url": url, "status": None, "error": str(e)}
 
-    def _endpoint_connectivity_status(self, endpoint, is_openwebui):
+    def _endpoint_connectivity_status(self, endpoint):
         headers = {"Content-Type": "application/json"}
-        endpoint_base, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
-        checks = []
-        if is_openwebui:
-            checks.append("/health")
+        endpoint_base, api_path = self._split_endpoint_api_path(endpoint)
         models_path = (api_path + "/models") if api_path else "/models"
-        checks.append(models_path)
-        checks.append("/")
+        checks = ["/health", models_path, "/"]
         last_detail = {"url": endpoint_base, "status": None, "error": "unknown"}
         for path in checks:
             ok, detail = self._api_probe(endpoint_base, headers, path)
@@ -5029,15 +4863,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             last_detail = detail
         return False, last_detail
 
-    def _api_status(self, endpoint, api_key, is_openwebui):
-        anon_ok, _ = self._endpoint_connectivity_status(endpoint, is_openwebui)
+    def _api_status(self, endpoint, api_key):
+        anon_ok, _ = self._endpoint_connectivity_status(endpoint)
 
         api_key = self._effective_api_token(api_key)
         auth_headers = self._build_auth_headers(api_key)
 
         auth_ok = False
         if api_key:
-            endpoint_base, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
+            endpoint_base, api_path = self._split_endpoint_api_path(endpoint)
             models_path = (api_path + "/models") if api_path else "/models"
             _, detail = self._api_probe(endpoint_base, auth_headers, models_path)
             status = detail.get("status")
@@ -5053,119 +4887,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         return anon_ok, auth_ok
 
-    def make_api_request(self, prompt, system_prompt="", max_tokens=15000, api_type=None,
-                         answer_in_ui_language=False):
-        """
-        Build a streaming chat/completions request for OpenAI-compatible endpoints.
-        The api_type parameter is accepted for backwards compatibility but ignored
-        — all requests use the chat/completions format.
+    def make_chat_request(self, messages, max_tokens=2000):
+        """Construit une requête de chat en flux à partir d'un messages[] complet.
 
-        The answer keeps the language of the provided text, since it is written
-        into the document. Pass answer_in_ui_language=True when the answer is
-        read by the user instead (suggestions): it then follows the UI language.
-        """
-        try:
-            max_tokens = int(max_tokens)
-        except (TypeError, ValueError):
-            max_tokens = 15000
-
-        endpoint = str(self.get_config("llm_base_urls", "http://127.0.0.1:5000")).rstrip("/")
-        api_key = self._effective_api_token(self.get_config("llm_api_tokens", ""))
-        api_type = "chat"
-        model = str(self.get_config("llm_default_models", ""))
-
-        if answer_in_ui_language:
-            language_rule = _t("llm.answer_language")
-        else:
-            language_rule = (
-                "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
-                "fourni par l'utilisateur. Si le texte est en français, réponds en "
-                "français. Si le texte est en anglais, réponds en anglais. Ne change "
-                "jamais la langue."
-            )
-
-        # Default system prompt: ask for structured Markdown and set the
-        # answer language. /no_thinking prefix minimises reasoning tokens
-        # on Qwen3-style models.
-        default_system_prompt = (
-            "/no_thinking\n"
-            "Mets en forme ta réponse en Markdown standard : **gras**, *italique*, "
-            "titres avec #, listes avec - ou 1., citations avec >, liens en "
-            "[texte](url), tableaux avec des barres verticales. N'utilise JAMAIS de "
-            "balises HTML, sauf pour un alignement explicitement demandé "
-            "(centré, justifié, à droite), à indiquer uniquement avec "
-            "<p style=\"text-align:center\">...texte...</p> (ou right/justify) "
-            "autour du paragraphe concerné. "
-            + language_rule
-        )
-        if system_prompt:
-            system_prompt = default_system_prompt + " " + system_prompt
-        else:
-            system_prompt = default_system_prompt
-
-        log_to_file("=== API Request Debug ===")
-        log_to_file(f"Endpoint: {endpoint}")
-        log_to_file(f"API Type: {api_type}")
-        log_to_file(f"Model: {model}")
-        log_to_file(f"Max Tokens: {max_tokens}")
-
-        headers = self._build_auth_headers(api_key)
-
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, True)
-        log_to_file(f"[llm-auth] {self._llm_auth_debug()}")
-
-        url = endpoint + api_path + "/chat/completions"
-        log_to_file(f"Full URL: {url}")
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        data = {
-            'messages': messages,
-            'max_tokens': max_tokens,
-            'temperature': 1,
-            'top_p': 0.9,
-            'stream': True
-        }
-
-        if model:
-            data["model"] = model
-            try:
-                model_lower = model.lower()
-                from .core.shell_facade import MODEL_TOKEN_LIMITS as model_limits
-                limit = None
-                for key, value in model_limits.items():
-                    if key in model_lower:
-                        limit = value
-                        break
-                if limit:
-                    if max_tokens > limit:
-                        max_tokens = limit
-                        data["max_tokens"] = limit
-                    data["max_completion_tokens"] = min(int(data.get("max_tokens", limit)), limit)
-                    log_to_file(f"Max tokens clamped for {model}: {data['max_completion_tokens']}")
-            except Exception:
-                pass
-
-        json_data = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        # Jamais le corps : il contient le texte du document.
-        log_to_file(
-            f"Request: model={data.get('model', '')} max_tokens={data.get('max_tokens')} "
-            f"messages={len(messages)} body={len(json_data)} octets"
-        )
-        log_to_file(f"Headers: {_redacted_headers(headers)}")
-
-        # Note: method='POST' is implicit when data is provided
-        request = urllib.request.Request(url, data=json_data, headers=_with_user_agent(headers))
-        return request
-
-    def make_chat_request(self, messages, max_tokens=2000, api_type=None):
-        """Build a streaming chat request from a full messages[] array.
-
-        Unlike make_api_request, the messages list is forwarded as-is
-        (no default system-prompt prepended).  Useful for multi-turn
-        conversations where the caller manages the history.
-        The api_type parameter is accepted for backwards compatibility but ignored.
+        La liste part telle quelle : l'appelant gère le prompt système et
+        l'historique.
         """
         try:
             max_tokens = int(max_tokens)
@@ -5177,7 +4903,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         model = str(self.get_config("llm_default_models", ""))
 
         headers = self._build_auth_headers(api_key)
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, True)
+        endpoint, api_path = self._split_endpoint_api_path(endpoint)
         log_to_file(f"[llm-auth] {self._llm_auth_debug()}")
 
         url = endpoint + api_path + "/chat/completions"
@@ -5193,17 +4919,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         json_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(url, data=json_data, headers=_with_user_agent(headers))
         return request
-
-    def extract_content_from_response(self, chunk, api_type="chat"):
-        """Extract text content from an OpenAI chat/completions SSE chunk.
-
-        The api_type parameter is accepted for backwards compatibility but ignored
-        — always uses the chat format (delta.content).
-        """
-        if "choices" in chunk and len(chunk["choices"]) > 0:
-            delta = chunk["choices"][0].get("delta", {})
-            return delta.get("content", ""), chunk["choices"][0].get("finish_reason")
-        return "", None
 
     def get_ssl_context(self, target_url=None):
         """
@@ -5276,168 +4991,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self._last_logged_ca_bundle_error = self._last_ca_bundle_error
 
         return ssl_context
-
-    def stream_request(self, request, api_type, append_callback):
-        """
-        Stream a completion/chat response and append incremental chunks via
-        the provided callback.  The HTTP I/O runs in a background thread so
-        the LibreOffice UI stays responsive (processEventsToIdle pumped on
-        the main thread).
-        """
-        import queue as _queue
-
-        toolkit = self.ctx.getServiceManager().createInstanceWithContext(
-            "com.sun.star.awt.Toolkit", self.ctx
-        )
-        ssl_context = self.get_ssl_context()
-        try:
-            request_timeout = int(self.get_config("llm_request_timeout_seconds", 45))
-        except Exception:
-            request_timeout = 45
-        if request_timeout < 5:
-            request_timeout = 5
-
-        log_to_file("=== Starting stream request ===")
-        log_to_file(f"Request URL: {request.full_url}")
-        log_to_file(f"Request timeout: {request_timeout}s")
-
-        _DONE = object()          # sentinel
-        _ERROR_401 = object()     # sentinel for auth error
-        _ERROR_403 = object()     # sentinel for permission error (token not yet synced)
-        _ERROR_429 = object()     # sentinel for quota exceeded (paired with retry_after)
-        chunk_queue = _queue.Queue()
-
-        def _network_thread():
-            """Runs in background – reads HTTP stream, pushes chunks."""
-            try:
-                with self._urlopen(request, context=ssl_context,
-                                   timeout=request_timeout) as response:
-                    log_to_file(f"Response status: {response.status}")
-                    _line_count = 0
-                    _data_count = 0
-                    for line in response:
-                        _line_count += 1
-                        try:
-                            if line.strip() and line.startswith(b"data: "):
-                                _data_count += 1
-                                payload = line[len(b"data: "):].decode("utf-8").strip()
-                                if payload == "[DONE]":
-                                    log_to_file(f"[stream] [DONE] after {_line_count} lines, {_data_count} data")
-                                    break
-                                chunk = json.loads(payload)
-                                content, finish_reason = \
-                                    self.extract_content_from_response(chunk, api_type)
-                                if _data_count <= 2:
-                                    log_to_file(f"[stream] sample chunk keys={list(chunk.keys())} content_len={len(content)} finish={finish_reason}")
-                                if content:
-                                    chunk_queue.put(content)
-                                if finish_reason:
-                                    log_to_file(f"[stream] finish_reason={finish_reason} after {_data_count} data chunks")
-                                    break
-                        except Exception as e:
-                            log_to_file(f"Error processing line: {str(e)}")
-                            chunk_queue.put(str(e))
-                    else:
-                        log_to_file(f"[stream] stream ended: {_line_count} lines, {_data_count} data chunks")
-            except urllib.error.HTTPError as e:
-                try:
-                    body = e.read().decode("utf-8")
-                except Exception:
-                    body = ""
-                error_code, retry_after = self._parse_llm_error(e.code, body, e.headers)
-                request_id = ""
-                try:
-                    if e.headers:
-                        request_id = str(e.headers.get("X-Request-Id", "") or "")
-                except Exception:
-                    pass
-                if e.code == 429:
-                    chunk_queue.put((_ERROR_429, retry_after))
-                elif e.code == 401 or ("\"401\"" in body or "status\":401" in body
-                                       or "code\":401" in body):
-                    chunk_queue.put(_ERROR_401)
-                elif e.code == 403:
-                    chunk_queue.put(_ERROR_403)
-                # Vue « parc côté client » : journalisation fonctionnelle de
-                # l'erreur relais (429/401/403/5xx), corrélée à l'audit serveur
-                # par X-Request-Id — jamais de contenu (protocole DM § 8 bis).
-                self._send_llm_relay_error(
-                    e.code, error_code, retry_after=retry_after,
-                    request_id=request_id, will_retry=(e.code == 403))
-                log_to_file(
-                    f"ERROR in stream_request: HTTP {e.code} {e.reason} "
-                    f"request_id={request_id} body_len={len(body)}")
-            except Exception as e:
-                reason = str(e)
-                self._send_llm_relay_error(
-                    0, "timeout" if "timed out" in reason.lower() else "network_error")
-                log_to_file(f"ERROR in stream_request: {reason}")
-            finally:
-                chunk_queue.put(_DONE)
-
-        t = threading.Thread(target=_network_thread, daemon=True)
-        t.start()
-
-        # Show the thinking widget (plume icon + animated dots)
-        self._show_thinking()
-        _dots_tick = 0
-        _got_first_chunk = False
-
-        # Main-thread loop: drain queue, call callback, keep UI alive
-        try:
-            while True:
-                try:
-                    item = chunk_queue.get(timeout=0.05)
-                except _queue.Empty:
-                    # No data yet — animate dots and pump UI events
-                    _dots_tick += 1
-                    if _dots_tick % 6 == 0:  # ~every 300ms
-                        self._update_thinking_dots()
-                    pump_events(toolkit)
-                    continue
-
-                if item is _DONE:
-                    break
-                if item is _ERROR_401:
-                    try:
-                        self._show_message_and_open_settings(
-                            _t("msg.token_invalid_title"),
-                            _t("msg.token_invalid_body")
-                        )
-                    except Exception:
-                        pass
-                    continue
-                if item is _ERROR_403:
-                    log_to_file("[stream] 403 received — caller should retry after config refresh")
-                    continue
-                if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR_429:
-                    # Quota atteint : respecter retry_after (pas de réessai
-                    # automatique) et l'afficher à l'utilisateur.
-                    try:
-                        delay = (
-                            _t("msg.delay_seconds", seconds=int(item[1]))
-                            if item[1]
-                            else _t("msg.delay_moment")
-                        )
-                    except (TypeError, ValueError):
-                        delay = _t("msg.delay_moment")
-                    try:
-                        self._show_message(
-                            _t("msg.quota_title"),
-                            _t("msg.quota_body", delay=delay))
-                    except Exception:
-                        pass
-                    continue
-
-                # Close thinking widget on first real chunk
-                if not _got_first_chunk:
-                    _got_first_chunk = True
-                    self._close_thinking()
-
-                append_callback(item)
-                pump_events(toolkit)
-        finally:
-            self._close_thinking()
 
     #retrieved from https://wiki.documentfoundation.org/Macros/General/IO_to_Screen
     #License: Creative Commons Attribution-ShareAlike 3.0 Unported License,
@@ -5943,7 +5496,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             api_key_value, request_token = self._settings_token_values()
             log_to_file(f"Settings open: llm_api_tokens length={len(request_token)}")
             current_model = str(self._get_config_from_file("llm_default_models","")).strip()
-            models, model_descriptions = self._fetch_models(endpoint_value, request_token, True, include_info=True)
+            models, model_descriptions = self._fetch_models(endpoint_value, request_token, include_info=True)
             if current_model and current_model not in models:
                 models = [current_model] + models
             if not models and current_model:
@@ -6127,7 +5680,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         access_token = str(self._get_config_from_file("access_token", "")).strip()
         email = self._token_email(access_token, allow_network=False) if access_token else None
-        anon_ok, auth_ok = self._api_status(endpoint_value, request_token, True)
+        anon_ok, auth_ok = self._api_status(endpoint_value, request_token)
 
         def _status_style(anon_ok, auth_ok, email_value):
             if auth_ok:
@@ -6243,7 +5796,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return ""
 
         def _update_api_status_label(endpoint_val, api_key_val, email_value=None):
-            anon_ok, auth_ok = self._api_status(endpoint_val, api_key_val, True)
+            anon_ok, auth_ok = self._api_status(endpoint_val, api_key_val)
             label, color = _status_style(anon_ok, auth_ok, email_value)
             status_text = label + (f" ({email_value})" if email_value else "")
             if status_dot_label:
@@ -6267,7 +5820,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             api_key_val = _read_api_key_value()
             effective_api_key = self._effective_api_token(api_key_val or request_token)
             log_to_file("Token test: start")
-            conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val, True)
+            conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val)
             if not conn_ok:
                 proxy_cfg = self._get_proxy_config()
                 err = conn_detail.get("error", _t("settings.token_error_unknown"))
@@ -6300,7 +5853,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file("Token test: token saved")
             except Exception:
                 pass
-            models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, True, include_info=True)
+            models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, include_info=True)
             if not models:
                 self._show_message(
                     _t("settings.models_failed_title"),
@@ -6526,7 +6079,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 endpoint_val = str(self.get_config("llm_base_urls", ""))
                 api_key_val = str(self.get_config("llm_api_tokens", ""))
                 model_val = str(self.get_config("llm_default_models", ""))
-                models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, True, include_info=True)
+                models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, include_info=True)
                 if not models:
                     self._show_message(
                         _t("settings.models_failed_title"),

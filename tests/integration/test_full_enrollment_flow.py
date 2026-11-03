@@ -582,7 +582,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
     def test_05_llm_call_uses_secret_token(self):
         """
-        Step 9: make_api_request targets /chat/completions with the LLM secret token.
+        Step 9: make_chat_request targets /chat/completions with the LLM secret token.
         """
         # Simulate post-enrollment state: config cache holds LLM secrets
         self.job.config_cache = DM_SECRET_CONFIG
@@ -590,17 +590,15 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.job.set_config("llm_base_urls", LLM_BASE)
         self.job.set_config("llm_api_tokens", LLM_SECRET_TOKEN)
         self.job.set_config("llm_default_models", "mistral:7b")
-        self.job.set_config("api_type", "chat")
 
         with self._patch_urlopen():
-            req = self.job.make_api_request(
-                prompt="Dis bonjour.",
-                system_prompt="Tu es un assistant.",
+            req = self.job.make_chat_request(
+                [{"role": "system", "content": "Tu es un assistant."},
+                 {"role": "user", "content": "Dis bonjour."}],
                 max_tokens=50,
-                api_type="chat",
             )
 
-        self.assertIsNotNone(req, "make_api_request must return a Request object")
+        self.assertIsNotNone(req, "make_chat_request must return a Request object")
         req_headers = {k.lower(): v for k, v in dict(req.headers).items()}
         auth = req_headers.get("authorization", "")
         self.assertIn(LLM_SECRET_TOKEN, auth,
@@ -685,10 +683,10 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.job.config_loaded_at = time.time()
         self.job.set_config("llm_base_urls", LLM_BASE)
         self.job.set_config("llm_api_tokens", LLM_SECRET_TOKEN)
-        self.job.set_config("api_type", "chat")
 
         with self._patch_urlopen():
-            req = self.job.make_api_request("Dis bonjour.", max_tokens=20, api_type="chat")
+            req = self.job.make_chat_request([{"role": "user", "content": "Dis bonjour."}],
+                                             max_tokens=20)
 
         req_headers = {k.lower(): v for k, v in dict(req.headers).items()}
         self.assertIn(LLM_SECRET_TOKEN, req_headers.get("authorization", ""),
