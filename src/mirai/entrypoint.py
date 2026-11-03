@@ -4888,10 +4888,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return anon_ok, auth_ok
 
     def make_chat_request(self, messages, max_tokens=2000):
-        """Build a streaming chat request from a full messages[] array.
+        """Construit une requête de chat en flux à partir d'un messages[] complet.
 
-        The messages list is forwarded as-is: the caller manages the system
-        prompt and the history.
+        La liste part telle quelle : l'appelant gère le prompt système et
+        l'historique.
         """
         try:
             max_tokens = int(max_tokens)
