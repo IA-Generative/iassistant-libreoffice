@@ -54,25 +54,25 @@ class TestFetchModels(unittest.TestCase):
     def test_openai_data_format(self):
         payload = {"data": [{"id": "gpt-4"}, {"id": "gpt-3.5-turbo"}]}
         with self._patch_urlopen(http_response(payload)):
-            models = self.job._fetch_models("https://api.example.com", "key", False)
+            models = self.job._fetch_models("https://api.example.com", "key")
         self.assertEqual(models, ["gpt-4", "gpt-3.5-turbo"])
 
     def test_ollama_models_format(self):
         payload = {"models": [{"name": "llama3"}, {"name": "mistral"}]}
         with self._patch_urlopen(http_response(payload)):
-            models = self.job._fetch_models("https://api.example.com", "key", False)
+            models = self.job._fetch_models("https://api.example.com", "key")
         self.assertEqual(models, ["llama3", "mistral"])
 
     def test_plain_list_format(self):
         payload = ["model-a", "model-b"]
         with self._patch_urlopen(http_response(payload)):
-            models = self.job._fetch_models("https://api.example.com", "key", False)
+            models = self.job._fetch_models("https://api.example.com", "key")
         self.assertEqual(models, ["model-a", "model-b"])
 
     def test_http_error_returns_empty_list(self):
         import urllib.error
         self.job._urlopen = MagicMock(side_effect=urllib.error.URLError("timeout"))
-        models = self.job._fetch_models("https://api.example.com", "key", False)
+        models = self.job._fetch_models("https://api.example.com", "key")
         self.assertEqual(models, [])
 
     def test_include_info_returns_descriptions(self):
@@ -82,7 +82,7 @@ class TestFetchModels(unittest.TestCase):
         ]}
         with self._patch_urlopen(http_response(payload)):
             models, descriptions = self.job._fetch_models(
-                "https://api.example.com", "key", False, include_info=True
+                "https://api.example.com", "key", include_info=True
             )
         self.assertEqual(models, ["gpt-4", "gpt-3.5-turbo"])
         self.assertEqual(descriptions["gpt-4"], "Most capable model")
@@ -94,7 +94,7 @@ class TestFetchModels(unittest.TestCase):
         ]}
         with self._patch_urlopen(http_response(payload)):
             models, descriptions = self.job._fetch_models(
-                "https://api.example.com/api", "key", True, include_info=True
+                "https://api.example.com/api", "key", include_info=True
             )
         self.assertIn("llama3", models)
         self.assertEqual(descriptions["llama3"], "Fast LLM")

@@ -2790,9 +2790,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             endpoint = self.get_config("llm_base_urls", "http://127.0.0.1:5000")
             api_key = self.get_config("llm_api_tokens", "")
-            is_openwebui = True
 
-            models = self._get_cached_models(str(endpoint), str(api_key), is_openwebui)
+            models = self._get_cached_models(str(endpoint), str(api_key))
 
             if local_model:
                 if not models or local_model in models:
@@ -4541,12 +4540,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
-    def _split_endpoint_api_path(self, endpoint, is_openwebui):
+    def _split_endpoint_api_path(self, endpoint):
         endpoint = (endpoint or "").rstrip("/")
         if endpoint.endswith("/api") or endpoint.endswith("/v1"):
             return endpoint, ""
-        api_path = "/api" if is_openwebui else "/v1"
-        return endpoint, api_path
+        return endpoint, "/api"
 
     def _build_auth_headers(self, api_key):
         """Build standard JSON + auth headers for API calls."""
@@ -4556,14 +4554,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             headers[header_name] = f"{header_prefix}{api_key}"
         return headers
 
-    def _fetch_models(self, endpoint, api_key, is_openwebui, include_info=False):
+    def _fetch_models(self, endpoint, api_key, include_info=False):
         """
         Fetch models from the API endpoint.
 
         Returns a list of model IDs when include_info=False,
         or a (list, dict) tuple of (model_ids, descriptions) when include_info=True.
         """
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
+        endpoint, api_path = self._split_endpoint_api_path(endpoint)
         api_key = self._effective_api_token(api_key)
         url = endpoint + api_path + "/models" if api_path else endpoint + "/models"
         headers = self._build_auth_headers(api_key)
@@ -4814,13 +4812,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return {key: str(value).strip() for key, value in keycloak_map.items()
                 if value is not None and str(value).strip()}
 
-    def _get_cached_models(self, endpoint, api_key, is_openwebui):
-        key = (endpoint, api_key, bool(is_openwebui))
+    def _get_cached_models(self, endpoint, api_key):
+        key = (endpoint, api_key)
         now = time.time()
         if self._models_cache and self._models_cache_key == key:
             if (now - self._models_cache_loaded_at) < self._models_cache_ttl:
                 return self._models_cache
-        models = self._fetch_models(endpoint, api_key, is_openwebui)
+        models = self._fetch_models(endpoint, api_key)
         self._models_cache = models
         self._models_cache_key = key
         self._models_cache_loaded_at = now
@@ -4852,15 +4850,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as e:
             return False, {"url": url, "status": None, "error": str(e)}
 
-    def _endpoint_connectivity_status(self, endpoint, is_openwebui):
+    def _endpoint_connectivity_status(self, endpoint):
         headers = {"Content-Type": "application/json"}
-        endpoint_base, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
-        checks = []
-        if is_openwebui:
-            checks.append("/health")
+        endpoint_base, api_path = self._split_endpoint_api_path(endpoint)
         models_path = (api_path + "/models") if api_path else "/models"
-        checks.append(models_path)
-        checks.append("/")
+        checks = ["/health", models_path, "/"]
         last_detail = {"url": endpoint_base, "status": None, "error": "unknown"}
         for path in checks:
             ok, detail = self._api_probe(endpoint_base, headers, path)
@@ -4869,15 +4863,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             last_detail = detail
         return False, last_detail
 
-    def _api_status(self, endpoint, api_key, is_openwebui):
-        anon_ok, _ = self._endpoint_connectivity_status(endpoint, is_openwebui)
+    def _api_status(self, endpoint, api_key):
+        anon_ok, _ = self._endpoint_connectivity_status(endpoint)
 
         api_key = self._effective_api_token(api_key)
         auth_headers = self._build_auth_headers(api_key)
 
         auth_ok = False
         if api_key:
-            endpoint_base, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
+            endpoint_base, api_path = self._split_endpoint_api_path(endpoint)
             models_path = (api_path + "/models") if api_path else "/models"
             _, detail = self._api_probe(endpoint_base, auth_headers, models_path)
             status = detail.get("status")
@@ -4909,7 +4903,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         model = str(self.get_config("llm_default_models", ""))
 
         headers = self._build_auth_headers(api_key)
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, True)
+        endpoint, api_path = self._split_endpoint_api_path(endpoint)
         log_to_file(f"[llm-auth] {self._llm_auth_debug()}")
 
         url = endpoint + api_path + "/chat/completions"
@@ -5502,7 +5496,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             api_key_value, request_token = self._settings_token_values()
             log_to_file(f"Settings open: llm_api_tokens length={len(request_token)}")
             current_model = str(self._get_config_from_file("llm_default_models","")).strip()
-            models, model_descriptions = self._fetch_models(endpoint_value, request_token, True, include_info=True)
+            models, model_descriptions = self._fetch_models(endpoint_value, request_token, include_info=True)
             if current_model and current_model not in models:
                 models = [current_model] + models
             if not models and current_model:
@@ -5686,7 +5680,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         access_token = str(self._get_config_from_file("access_token", "")).strip()
         email = self._token_email(access_token, allow_network=False) if access_token else None
-        anon_ok, auth_ok = self._api_status(endpoint_value, request_token, True)
+        anon_ok, auth_ok = self._api_status(endpoint_value, request_token)
 
         def _status_style(anon_ok, auth_ok, email_value):
             if auth_ok:
@@ -5802,7 +5796,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return ""
 
         def _update_api_status_label(endpoint_val, api_key_val, email_value=None):
-            anon_ok, auth_ok = self._api_status(endpoint_val, api_key_val, True)
+            anon_ok, auth_ok = self._api_status(endpoint_val, api_key_val)
             label, color = _status_style(anon_ok, auth_ok, email_value)
             status_text = label + (f" ({email_value})" if email_value else "")
             if status_dot_label:
@@ -5826,7 +5820,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             api_key_val = _read_api_key_value()
             effective_api_key = self._effective_api_token(api_key_val or request_token)
             log_to_file("Token test: start")
-            conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val, True)
+            conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val)
             if not conn_ok:
                 proxy_cfg = self._get_proxy_config()
                 err = conn_detail.get("error", _t("settings.token_error_unknown"))
@@ -5859,7 +5853,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     log_to_file("Token test: token saved")
             except Exception:
                 pass
-            models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, True, include_info=True)
+            models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, include_info=True)
             if not models:
                 self._show_message(
                     _t("settings.models_failed_title"),
@@ -6085,7 +6079,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 endpoint_val = str(self.get_config("llm_base_urls", ""))
                 api_key_val = str(self.get_config("llm_api_tokens", ""))
                 model_val = str(self.get_config("llm_default_models", ""))
-                models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, True, include_info=True)
+                models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, include_info=True)
                 if not models:
                     self._show_message(
                         _t("settings.models_failed_title"),
