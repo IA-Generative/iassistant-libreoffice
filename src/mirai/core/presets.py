@@ -2,8 +2,7 @@
 
 Deux modes :
 - "pipeline" : Python pilote, le LLM n'est qu'une fonction texte (marqueurs,
-  stop phrases, retry sur question, colonne Résultat IA…), robuste petits
-  modèles.
+  stop phrases, colonne Résultat IA…), robuste petits modèles.
 - "agentic"  : le LLM pilote les tools (edit, formule, analyse libre).
 
 Chaque preset émet son span de télémétrie avec {"via": "palette"} pour
@@ -45,7 +44,6 @@ class Preset:
     #            Written s'il a écrit son résultat, Failed si le modèle a échoué
     runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
-    prompt_template: object = None  # agentic : fn(user_text) -> prompt utilisateur
 
     @property
     def label(self):
@@ -62,17 +60,16 @@ def _legacy_telemetry(ctx, span, attrs=None):
     ctx.shell.telemetry(span, payload)
 
 
-def _read_target(ctx, current_paragraph=False):
+def _read_target(ctx):
     """Cible d'une action directe, lue en un seul passage sur le thread
-    principal avant l'appel au modèle : la sélection si elle existe, sinon,
-    avec `current_paragraph`, le PARAGRAPHE COURANT (sous le curseur).
+    principal avant l'appel au modèle : la sélection.
 
     Rend (texte, plage) ; Writer fait suivre à la plage les modifications du
     document, c'est elle qui recevra le résultat. ("", None) si aucun texte
-    n'est ciblable : les actions portent alors sur tout le document.
+    n'est sélectionné : les actions portent alors sur tout le document.
     ("", _NOT_TEXT) ou ("", _SEVERAL_RANGES) si la sélection ne se prête pas
     à l'action : `_refusal` en donne le message."""
-    return ctx.on_main(lambda: _read_target_on_main(ctx, current_paragraph))
+    return ctx.on_main(lambda: _read_target_on_main(ctx))
 
 
 # Sélection qui n'est pas du texte : cellules de tableau, cadre, image.
@@ -90,24 +87,16 @@ def _refusal(target):
     return None
 
 
-def _read_target_on_main(ctx, current_paragraph):
+def _read_target_on_main(ctx):
     try:
         selection = ctx.controller.getSelection()
         if selection.getCount() > 1:
             return "", _SEVERAL_RANGES
         rng = selection.getByIndex(0)
         text = rng.getString()
-        if text.strip():
-            return text, rng
-        if not current_paragraph:
-            return "", None
-        cursor = rng.getText().createTextCursorByRange(rng)
-        cursor.gotoStartOfParagraph(False)
-        cursor.gotoEndOfParagraph(True)
-        paragraph = cursor.getString()
     except Exception:
         return "", _NOT_TEXT
-    return (paragraph, cursor) if paragraph.strip() else ("", None)
+    return (text, rng) if text.strip() else ("", None)
 
 
 def _text_client(shell, max_tokens):
@@ -160,64 +149,6 @@ def _outcome(sink, done_message):
 def _system(specific):
     """Système par défaut + consigne spécifique."""
     return PIPELINE_TEXT_SYSTEM + " " + specific if specific else PIPELINE_TEXT_SYSTEM
-
-
-def run_extend(ctx, shell, user_text, tee, cancel_event=None,
-               dispatcher=None, progress=None):
-    base_text, target = _read_target(ctx, current_paragraph=True)
-    _legacy_telemetry(ctx, "ExtendSelection",
-                      {"action": "extend_selection",
-                       "text_length": str(len(base_text))})
-    if not base_text:
-        return _refusal(target) or _t("sel.no_target")
-
-    configured = str(shell.get_config("extend_selection_system_prompt", "") or "").strip()
-    directive = (
-        "Continue DIRECTEMENT le texte fourni par l'utilisateur. "
-        "Écris uniquement la suite naturelle, sans question, sans reformulation, "
-        "sans introduction."
-    )
-    system_prompt = _system((directive + " " + configured) if configured else directive)
-    max_tokens = shell.get_config("extend_selection_max_tokens", 15000)
-    llm = _text_client(shell, max_tokens)
-
-    sink = text_sink(
-        ctx, True, "\n\n---début-du-texte-généré---\n", "\n---fin-du-texte-généré---\n",
-        tee=tee, target=target, original=base_text, cancel_event=cancel_event,
-        undo_label=_t("preset.undo_extend"),
-        question_patterns=EXTEND_QUESTION_PATTERNS)
-
-    step = llm.step([{"role": "system", "content": system_prompt},
-                     {"role": "user", "content": base_text}],
-                    on_text_delta=sink.stream_delta,
-                    cancel_event=cancel_event, progress=progress)
-    if step.error:
-        return Failed(step.error)
-
-    if sink.question_detected:
-        # Retry unique avec directive renforcée ; son texte ne se colle pas à
-        # ce que le premier essai avait déjà affiché.
-        if sink.shown:
-            sink.insert_message("\n")
-        sink.done = False
-        sink.question_detected = False
-        sink.accumulated = ""
-        retry_system = _system(
-            "Tu dois CONTINUER le texte de l'utilisateur mot après mot, "
-            "comme si tu en étais l'auteur. Il est INTERDIT de poser une "
-            "question ou de reformuler. Commence immédiatement par les mots "
-            "qui suivent naturellement le texte fourni.")
-        retry_prompt = ("Voici le texte à continuer :\n\n" + base_text
-                        + "\n\nÉcris UNIQUEMENT la suite directe, sans "
-                          "aucune introduction.")
-        step = llm.step([{"role": "system", "content": retry_system},
-                         {"role": "user", "content": retry_prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event, progress=progress)
-        if step.error:
-            return Failed(step.error)
-    sink.finish(step.text, step.streamed)
-    return _outcome(sink, _t("preset.done_extend"))
 
 
 _SUMMARY_SYSTEM = (

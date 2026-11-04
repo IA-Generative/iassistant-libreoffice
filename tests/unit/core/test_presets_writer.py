@@ -1,6 +1,6 @@
 """Golden iso-fonctionnels Writer : chaque fonction historique rejouée via le
 moteur (vrai LLMClient + SSE scripté + faux document) — marqueurs, stop
-phrases, retry sur question, undo unique."""
+phrases, undo unique."""
 
 import threading
 from types import SimpleNamespace
@@ -37,43 +37,6 @@ class _BrokenSSEResponse(FakeSSEResponse):
     def __iter__(self):
         yield self._lines[0]
         raise ConnectionResetError("connexion interrompue")
-
-
-def test_extend_inserts_between_legacy_markers():
-    doc = FakeWriterDoc(selection_text="Il était une fois")
-    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(" un roi", " généreux."))])
-    message = presets.run_extend(_ctx(doc, shell), shell, "", None)
-    assert "---début-du-texte-généré---" in doc.inserted
-    assert " un roi généreux." in doc.inserted
-    assert doc.inserted.endswith("\n---fin-du-texte-généré---\n")
-    assert doc.undo.entered == ["Générer la suite"]
-    assert doc.undo.left == 1
-    assert "générée" in message.lower()
-    # span legacy avec via=palette
-    spans = dict(shell.telemetry_events)
-    assert spans["ExtendSelection"]["via"] == "palette"
-
-
-def test_extend_no_selection_no_paragraph_returns_hint():
-    doc = FakeWriterDoc(selection_text="", current_paragraph="")
-    shell = FakeShell()
-    message = presets.run_extend(_ctx(doc, shell), shell, "", None)
-    assert "curseur" in message
-    assert doc.inserted == ""
-
-
-def test_extend_targets_current_paragraph_without_selection():
-    # Action directe : pas de sélection → le paragraphe sous le curseur est
-    # identifié et utilisé comme cible, sans être sélectionné.
-    doc = FakeWriterDoc(selection_text="",
-                        current_paragraph="Le paragraphe en cours de rédaction")
-    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(" continue ici."))])
-    message = presets.run_extend(_ctx(doc, shell), shell, "", None)
-    assert " continue ici." in doc.inserted
-    assert "générée" in message.lower()
-    # le prompt envoyé au LLM est bien le paragraphe
-    prompt = shell.requests[0]["messages"][-1]["content"]
-    assert prompt == "Le paragraphe en cours de rédaction"
 
 
 # Sans sélection : tout le document, section par section, écrit une fois la
@@ -386,10 +349,9 @@ def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
     assert shell.requests == []
 
 
-@pytest.mark.parametrize("runner", [presets.run_extend, presets.run_summarize,
-                                    presets.run_simplify, presets.run_shorten,
-                                    presets.run_lengthen],
-                         ids=["extend", "summarize", "simplify", "shorten", "lengthen"])
+@pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
+                                    presets.run_shorten, presets.run_lengthen],
+                         ids=["summarize", "simplify", "shorten", "lengthen"])
 def test_several_selected_passages_are_refused_without_calling_the_model(runner):
     """Une sélection multiple (Ctrl) : l'action ne traiterait que le premier
     passage. Elle le dit, sans rien envoyer ni écrire."""
@@ -433,62 +395,6 @@ def test_stopped_shorten_keeps_the_selection():
                                   cancel_event=cancel)
     assert doc.replaced is None
     assert message == _t("run.stopped")
-
-
-def test_extend_question_triggers_single_retry():
-    doc = FakeWriterDoc(selection_text="Texte de départ")
-    shell = FakeShell(responses=[
-        FakeSSEResponse(text_chunks("Comment puis-je vous aider ?")),
-        FakeSSEResponse(text_chunks("la suite réelle du texte.")),
-    ])
-    presets.run_extend(_ctx(doc, shell), shell, "", None)
-    assert "Comment puis-je" not in doc.inserted
-    assert "la suite réelle du texte." in doc.inserted
-    # le retry porte la directive renforcée
-    retry_system = shell.requests[1]["messages"][0]["content"]
-    assert "INTERDIT" in retry_system
-
-
-def test_extend_stopped_during_its_retry_writes_nothing():
-    cancel = threading.Event()
-    doc = FakeWriterDoc(selection_text="Texte de départ")
-    shell = FakeShell(responses=[
-        FakeSSEResponse(text_chunks("Comment puis-je vous aider ?")),
-        StoppedSSEResponse(text_chunks("la suite ", "réelle."), cancel),
-    ])
-    message = presets.run_extend(_ctx(doc, shell), shell, "", None, cancel_event=cancel)
-    assert doc.inserted == ""
-    assert message == _t("run.stopped")
-
-
-def test_extend_retry_starts_its_own_line_after_text_already_shown():
-    """Le premier essai a affiché un début de texte avant de poser sa question :
-    le second essai commence sur une nouvelle ligne de la palette."""
-    doc = FakeWriterDoc(selection_text="Il était une fois")
-    shell = FakeShell(responses=[
-        FakeSSEResponse(text_chunks("Voici la suite. ", "Pouvez-vous préciser ?")),
-        FakeSSEResponse(text_chunks(" un roi", " généreux.")),
-    ])
-    shown = []
-    presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
-    assert "".join(shown) == "Voici la suite. \n un roi généreux."
-    assert " un roi généreux." in doc.inserted
-    assert "Voici la suite." not in doc.inserted
-
-
-def test_extend_double_question_is_reported_once_and_writes_nothing():
-    """Deux questions de suite : le bilan le dit, une seule fois, et la
-    palette ne montre aucun message de repli en plus."""
-    doc = FakeWriterDoc(selection_text="Texte")
-    shell = FakeShell(responses=[
-        FakeSSEResponse(text_chunks("Voulez-vous que je continue ?")),
-        FakeSSEResponse(text_chunks("Souhaitez-vous que je poursuive ?")),
-    ])
-    shown = []
-    message = presets.run_extend(_ctx(doc, shell), shell, "", shown.append)
-    assert "".join(shown) == ""
-    assert message == _t("preset.question_asked")
-    assert doc.inserted == ""
 
 
 def test_summarize_markers_and_stop_phrase():

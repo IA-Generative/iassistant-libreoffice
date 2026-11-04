@@ -430,7 +430,6 @@ def _calc_target():
 @pytest.mark.parametrize(
     "runner,make_target",
     (
-        ("run_extend", _writer_target),
         ("run_summarize", _writer_target),
         ("run_simplify", _writer_target),
         ("run_shorten", _writer_target),

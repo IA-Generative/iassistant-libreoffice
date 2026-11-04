@@ -337,7 +337,7 @@ def send_telemetry_trace_async(config, span_name, attributes=None):
 
     Args:
         config: Configuration object with telemetry settings
-        span_name: Name of the span (e.g., "ExtendSelection", "AnalyzeRange")
+        span_name: Name of the span (e.g., "SummarizeSelection", "AnalyzeRange")
         attributes: Optional dictionary of additional attributes
     """
     thread = threading.Thread(
@@ -356,7 +356,7 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
 
     Args:
         config: MainJob object with get_config() method
-        span_name: Name of the span (e.g., "ExtendSelection", "AnalyzeRange")
+        span_name: Name of the span (e.g., "SummarizeSelection", "AnalyzeRange")
         attributes: Optional dictionary of additional attributes
     """
     endpoint = "unknown"  # Initialize endpoint for error handling
@@ -596,17 +596,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self._last_logged_ca_bundle_error = None
         # Update & feature toggling (schema_version 2)
         self._features_cache = {}
-        # handling different situations (inside LibreOffice or other process)
-        try:
-            self.sm = ctx.getServiceManager()
-            self.desktop = XSCRIPTCONTEXT.getDesktop()
-            self.document = XSCRIPTCONTEXT.getDocument()
-            log_to_file("MainJob initialized with XSCRIPTCONTEXT")
-        except NameError:
-            self.sm = ctx.ServiceManager
-            self.desktop = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.frame.Desktop", self.ctx)
-            log_to_file("MainJob initialized without XSCRIPTCONTEXT")
+        self.sm = ctx.ServiceManager
+        self.desktop = self.ctx.getServiceManager().createInstanceWithContext(
+            "com.sun.star.frame.Desktop", self.ctx)
 
         try:
             self._prepare_local_storage()
@@ -691,7 +683,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "FeedRewrite": "update",
         "UpdateNativeDialogShown": "update",
         "UpdateCloseDeferred": "update",
-        "ExtendSelection": "extend",
         "ResizeSelection": "resize",
         "SummarizeSelection": "summarize",
         "SimplifySelection": "simplify",

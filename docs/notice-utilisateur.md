@@ -25,7 +25,7 @@ Extension LibreOffice intégrant un assistant IA directement dans **Writer** et 
 
 MIrAI est un assistant d'écriture intégré à LibreOffice. Il vous aide à rédiger, reformuler, résumer et corriger vos documents sans quitter votre traitement de texte. Vous sélectionnez du texte, vous choisissez une action dans le menu MIrAI (ou via un raccourci clavier), et l'IA vous propose un résultat en quelques secondes.
 
-Dans **Writer**, vous pouvez par exemple : continuer un brouillon, reformuler un paragraphe en langage simple, résumer un long rapport, ou ajuster la longueur d'un passage. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
+Dans **Writer**, vous pouvez par exemple : reformuler un paragraphe en langage simple, résumer un long rapport, ou ajuster la longueur d'un passage. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
 
 Toutes les modifications sont annulables d'un simple Ctrl+Z.
 
@@ -87,22 +87,7 @@ Si l'assistant d'enrôlement ne s'affiche pas, la configuration a été fournie 
 
 Toutes les fonctionnalités Writer sont accessibles depuis le menu **🤖 MIrAI 🤖** ou par raccourci clavier. Elles agissent sur le **texte sélectionné** dans votre document.
 
-### 3.1 ✨ Générer la suite 
-
-Génère la continuation naturelle du texte sélectionné. L'IA écrit la suite comme si elle en était l'auteur.
-
-> 🟢 **Novice** — Mode d'emploi :
->
-> 1. Sélectionnez un passage de texte (un début de phrase, un paragraphe…)
-> 2. Ouvrez l'assistant (**Ctrl+Alt+Espace**, macOS **Ctrl+Opt+Espace**) puis cliquez sur **Générer la suite**
-> 3. Le texte généré apparaît directement après votre sélection, entre des marqueurs `---début-du-texte-généré---` et `---fin-du-texte-généré---`
-> 4. Relisez le résultat et supprimez les marqueurs si le texte vous convient
->
-> *Exemple : sélectionnez "Le projet vise à améliorer" et l'IA complétera avec la suite logique de votre texte.*
-
-> 🔵 **Expert** — Le prompt système injecte une directive de continuation directe (pas de question, pas de reformulation). Si le modèle répond par une question malgré tout, un **retry automatique** est déclenché avec un prompt renforcé. Le budget de tokens est configurable via `extend_selection_max_tokens` (défaut : 15 000). Le prompt système additionnel peut être personnalisé via `extend_selection_system_prompt`.
-
-### 3.2 🖊️ Modifier la sélection 
+### 3.1 🖊️ Modifier la sélection 
 
 Ouvre une boîte de dialogue pour donner une instruction libre à l'IA sur le texte sélectionné.
 
@@ -135,7 +120,7 @@ Si la génération IA échoue, des suggestions génériques sont proposées (cor
 
 > 🔵 **Expert** — Les suggestions sont générées via un appel LLM séparé (max 600 tokens). Le prompt impose une liste numérotée de 8 instructions en français. Les blocs `<think>` et les lignes non numérotées sont filtrés pour éviter que le raisonnement du modèle n'apparaisse dans les suggestions.
 
-### 3.3 📏 Ajuster la longueur 
+### 3.2 📏 Ajuster la longueur 
 
 Ouvre un mini-dialogue flottant avec deux boutons **−** et **+** pour réduire ou développer le texte sélectionné.
 
@@ -168,7 +153,7 @@ Après chaque clic, re-sélectionnez le nouveau texte et cliquez à nouveau. Cha
 
 > 🔵 **Expert** — Le prompt inclut le nombre de mots de l'original et un objectif précis (ex. : "57 mots maximum" pour une réduction). Le résultat est appliqué via `rng.setString()` (remplacement en place, pas d'insertion après). Les blocs `<think>` sont filtrés avec trois passes regex (blocs complets, `</think>` en début, `<think>` non fermé en fin). La zone de prévisualisation affiche le flux brut y compris le raisonnement pour transparence, mais seul le texte nettoyé est écrit dans le document.
 
-### 3.4 📝 Résumer la sélection 
+### 3.3 📝 Résumer la sélection 
 
 Génère un résumé concis du texte sélectionné.
 
@@ -183,7 +168,7 @@ Génère un résumé concis du texte sélectionné.
 
 > 🔵 **Expert** — Le prompt impose un résumé "ultra-concis" dans la même langue que l'original. Le budget de tokens est configurable via `summarize_selection_max_tokens`. Des stop phrases (`[END]`, `---END---`) sont détectées en streaming pour couper le flux si le modèle tente d'ajouter du contenu superflu.
 
-### 3.5 💬 Reformuler la sélection 
+### 3.4 💬 Reformuler la sélection 
 
 Réécrit le texte sélectionné en langage clair et accessible, en conservant le sens.
 
@@ -315,7 +300,6 @@ Chaque fonctionnalité dispose d'un prompt système configurable via `config.jso
 
 | Clé de configuration | Fonctionnalité |
 |---------------------|----------------|
-| `extend_selection_system_prompt` | Générer la suite |
 | `summarize_selection_system_prompt` | Résumer la sélection |
 | `simplify_selection_system_prompt` | Reformuler la sélection |
 | `systemPrompt` | Prompt système global (ajouté à toutes les requêtes) |
@@ -324,7 +308,6 @@ Les budgets de tokens sont également configurables :
 
 | Clé | Défaut |
 |-----|--------|
-| `extend_selection_max_tokens` | 15 000 |
 | `summarize_selection_max_tokens` | 15 000 |
 | `simplify_selection_max_tokens` | 15 000 |
 

@@ -222,12 +222,6 @@ def _run_guarded(thread_guard, fake, shell, run):
         dispatcher.close()
 
 
-TARGETS = pytest.mark.parametrize("selection,paragraph", [
-    ("Un texte administratif sélectionné.", ""),
-    ("", "Le paragraphe sous le curseur."),
-], ids=["selection", "current_paragraph"])
-
-
 WRITER_PRESETS = pytest.mark.parametrize("runner", ["run_summarize", "run_simplify",
                                                    "run_shorten", "run_lengthen"])
 APPEND_MODES = pytest.mark.parametrize("append_mode", [True, False],
@@ -277,19 +271,6 @@ def test_writer_presets_count_the_tables_of_the_document_on_the_main_thread(
         ctx, shell, "", None))
 
     assert message.endswith(_t("palette.tables_left", count=1))
-
-
-@TARGETS
-def test_extend_touches_the_document_only_on_the_main_thread(
-        thread_guard, selection, paragraph):
-    fake = FakeWriterDoc(selection_text=selection, current_paragraph=paragraph)
-    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(" et la suite."))])
-
-    _run_guarded(thread_guard, fake, shell,
-                 lambda ctx: presets.run_extend(ctx, shell, "", None))
-
-    assert shell.requests[0]["messages"][-1]["content"] == (selection or paragraph)
-    assert " et la suite." in fake.inserted
 
 
 # Annulation
