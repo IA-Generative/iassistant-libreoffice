@@ -11,7 +11,6 @@
   "settings.show": "显示",
   "settings.hide": "隐藏",
   "settings.refresh_token": "♻️ 刷新令牌",
-  "settings.section_connection": "连接",
   "settings.section_status": "连接状态",
   "settings.status_connected": "已连接",
   "settings.status_anonymous": "匿名可用",

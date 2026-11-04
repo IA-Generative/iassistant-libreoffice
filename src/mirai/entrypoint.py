@@ -5354,7 +5354,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         VERT_SEP = 8
         LABEL_HEIGHT = 22
         EDIT_HEIGHT = 28
-        IMAGE_HEIGHT = 132
         EXTRA_BOTTOM = 60
         DESC_HEIGHT = EDIT_HEIGHT * 2
         TEST_ROW_HEIGHT = BUTTON_HEIGHT + VERT_SEP
@@ -5509,7 +5508,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         num_fields = len(field_specs)
         total_field_height = num_fields * (LABEL_HEIGHT + EDIT_HEIGHT + VERT_SEP * 2) + TEST_ROW_HEIGHT + (BUTTON_HEIGHT - LABEL_HEIGHT)
         desc_block_height = LABEL_HEIGHT + VERT_SEP + DESC_HEIGHT + VERT_SEP * 2
-        HEIGHT = VERT_MARGIN * 2 + IMAGE_HEIGHT + VERT_SEP + total_field_height + desc_block_height + LABEL_HEIGHT + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + EXTRA_BOTTOM
+        HEIGHT = VERT_MARGIN * 2 + total_field_height + desc_block_height + LABEL_HEIGHT + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + EXTRA_BOTTOM
         dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
 
         def add(name, type, x_, y_, width_, height_, props):
@@ -5537,61 +5536,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         field_controls = {}
         current_y = VERT_MARGIN
-
-        image_path = os.path.join(os.path.dirname(__file__), "icons", "iassistant.png")
-        if os.path.exists(image_path):
-            try:
-                image_url = uno.systemPathToFileUrl(image_path)
-                available_width = WIDTH - HORI_MARGIN * 2
-                image_width = int(min(available_width, IMAGE_HEIGHT * (1505.0 / 400.0)))
-                image_x = HORI_MARGIN + int((available_width - image_width) / 2)
-                img_splash = add("img_splash", "ImageControl", image_x, current_y,
-                    image_width, IMAGE_HEIGHT, {
-                        "ImageURL": image_url,
-                        "Border": 0,
-                        "ScaleImage": True
-                    })
-
-                # Make image clickable → opens mirai website
-                if img_splash:
-                    class SplashClickListener(unohelper.Base, XMouseListener):
-                        def __init__(self, outer):
-                            self.outer = outer
-                        def mousePressed(self, event):
-                            try:
-                                import webbrowser
-                                webbrowser.open("https://mirai.interieur.gouv.fr")
-                            except Exception as e:
-                                log_to_file(f"Splash click open URL failed: {str(e)}")
-                        def mouseReleased(self, event):
-                            return
-                        def mouseEntered(self, event):
-                            return
-                        def mouseExited(self, event):
-                            return
-                        def disposing(self, event):
-                            return
-                    try:
-                        img_splash.addMouseListener(SplashClickListener(self))
-                    except Exception:
-                        pass
-
-                current_y += IMAGE_HEIGHT + VERT_SEP
-                # Separator after image
-                add("line_after_image", "FixedLine", HORI_MARGIN, current_y,
-                    WIDTH - HORI_MARGIN * 2, 2, {})
-                current_y += VERT_SEP
-                # Section header: Connexion
-                add("section_connexion", "FixedText", HORI_MARGIN, current_y,
-                    WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-                        "Label": _t("settings.section_connection"), "NoLabel": True,
-                        "FontHeight": _UI["font_section"],
-                        "TextColor": _UI["primary"],
-                        "FontWeight": 150,
-                    })
-                current_y += LABEL_HEIGHT + VERT_SEP
-            except Exception:
-                pass
         api_key_plain_control = None
         for field in field_specs:
             label_name = f"label_{field['name']}"

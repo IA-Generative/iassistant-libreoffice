@@ -11,7 +11,6 @@
   "settings.show": "Mostrar",
   "settings.hide": "Ocultar",
   "settings.refresh_token": "♻️ Actualizar el token",
-  "settings.section_connection": "Conexión",
   "settings.section_status": "Estado de la conexión",
   "settings.status_connected": "Conectado",
   "settings.status_anonymous": "Anónimo OK",
