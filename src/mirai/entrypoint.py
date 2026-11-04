@@ -337,7 +337,7 @@ def send_telemetry_trace_async(config, span_name, attributes=None):
 
     Args:
         config: Configuration object with telemetry settings
-        span_name: Name of the span (e.g., "ExtendSelection", "AnalyzeRange")
+        span_name: Name of the span (e.g., "SummarizeSelection", "AnalyzeRange")
         attributes: Optional dictionary of additional attributes
     """
     thread = threading.Thread(
@@ -356,7 +356,7 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
 
     Args:
         config: MainJob object with get_config() method
-        span_name: Name of the span (e.g., "ExtendSelection", "AnalyzeRange")
+        span_name: Name of the span (e.g., "SummarizeSelection", "AnalyzeRange")
         attributes: Optional dictionary of additional attributes
     """
     endpoint = "unknown"  # Initialize endpoint for error handling
@@ -691,7 +691,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "FeedRewrite": "update",
         "UpdateNativeDialogShown": "update",
         "UpdateCloseDeferred": "update",
-        "ExtendSelection": "extend",
         "ResizeSelection": "resize",
         "SummarizeSelection": "summarize",
         "SimplifySelection": "simplify",

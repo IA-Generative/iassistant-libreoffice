@@ -1986,16 +1986,18 @@ class AssistantPalette:
             dispatcher=self.dispatcher,
             progress=self._progress)
 
-        extra, user_prompt, sink = self._prepare_agentic_run(preset, prompt_text, ctx)
+        extra = ""
+        if preset is not None and preset.build_extra:
+            extra = preset.build_extra(ctx, self.shell, prompt_text)
         self._append_response(_t("palette.assistant_prefix"))
-        result = orchestrator.run_agentic(user_prompt, sink, preset_extra=extra)
+        result = orchestrator.run_agentic(prompt_text,
+                                          PaletteSink(on_delta=self._stream_response),
+                                          preset_extra=extra)
         self._delta_buffer.flush()
         if result.reason == "cancelled":
             self._report_stop(observer)
         elif not result.ok:
             self._stream_response("⚠ " + (result.text or result.reason))
-        elif not isinstance(sink, PaletteSink):
-            self._stream_response(result.text or _t("palette.applied"))
         return {"ok": result.ok, "reason": result.reason,
                 "mode": orchestrator.llm.effective_mode(),
                 "iterations": result.iterations,
@@ -2278,17 +2280,6 @@ class AssistantPalette:
                "finish.reason": (step.finish_reason or "unknown")})
         self._stream_response(_t("palette.unusable"))
         return {"ok": False, "reason": "empty_reply", "bilan": _t("palette.unusable")}
-
-    def _prepare_agentic_run(self, preset, prompt_text, ctx):
-        """Résout prompt, contexte supplémentaire et destination de la sortie."""
-        extra = ""
-        user_prompt = prompt_text
-        if preset is not None:
-            if preset.build_extra:
-                extra = preset.build_extra(ctx, self.shell, prompt_text)
-            if preset.prompt_template:
-                user_prompt = preset.prompt_template(prompt_text)
-        return extra, user_prompt, PaletteSink(on_delta=self._stream_response)
 
     def _report_stop(self, observer=None):
         """Un arrêt voulu, rendu de la même façon sur chaque chemin de run.

@@ -77,7 +77,7 @@ Analyse la plage sélectionnée et insère un résumé des tendances et anomalie
 ### Télémétrie
 
 Chaque action génère une trace OpenTelemetry avec :
-- `plugin.action` : nom condensé (`extend`, `edit`, `summarize`, `formula`…)
+- `plugin.action` : nom condensé (`edit`, `summarize`, `formula`…)
 - `trigger.source` : origine (`menu`, `key`, `auto`)
 - Header `X-Client-UUID` envoyé pour identification pré-enrollment
 
