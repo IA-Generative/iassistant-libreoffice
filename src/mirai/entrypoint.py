@@ -596,17 +596,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self._last_logged_ca_bundle_error = None
         # Update & feature toggling (schema_version 2)
         self._features_cache = {}
-        # handling different situations (inside LibreOffice or other process)
-        try:
-            self.sm = ctx.getServiceManager()
-            self.desktop = XSCRIPTCONTEXT.getDesktop()
-            self.document = XSCRIPTCONTEXT.getDocument()
-            log_to_file("MainJob initialized with XSCRIPTCONTEXT")
-        except NameError:
-            self.sm = ctx.ServiceManager
-            self.desktop = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.frame.Desktop", self.ctx)
-            log_to_file("MainJob initialized without XSCRIPTCONTEXT")
+        self.sm = ctx.ServiceManager
+        self.desktop = self.ctx.getServiceManager().createInstanceWithContext(
+            "com.sun.star.frame.Desktop", self.ctx)
 
         try:
             self._prepare_local_storage()
