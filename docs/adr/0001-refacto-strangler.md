@@ -61,7 +61,7 @@ ajoute ou justifie la hausse en revue.
 - **Suppressions** : le menu contextuel Writer (fait), `menu_actions/` (fait),
   `formatting/` (fait), `security_flow.py` (fait), `run_extend` (fait), le dialogue proxy (fait),
   l'action `OpenmiraiWebsite` (fait), le bloc script `unopkg` (`MIRAI_UPDATE_ALLOW_SCRIPT`) (fait),
-  `_KEYWORD_MAP` (fait), les scripts morts, et le dossier `prompts/` une
+  `_KEYWORD_MAP` (fait), les scripts morts (fait), et le dossier `prompts/` une
   fois ses décisions reprises en ADR (fait : [ADR 0002](0002-moteur-et-palette.md)).
   « Corriger » et « Traduire » reviennent comme chips de la palette (#81).
 - **Rangement** : les modules communs restent à plat dans `src/mirai/`
