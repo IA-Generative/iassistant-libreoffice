@@ -609,4 +609,4 @@ Parmi ces idées, on trouve :
 ```
 
 ---
-*Généré par `tests/sim_scaleway_models.py`*
+*Généré par `tests/sim_scaleway_models.py`, qui n'est plus dans le dépôt : `git log -- tests/sim_scaleway_models.py` le retrouve.*

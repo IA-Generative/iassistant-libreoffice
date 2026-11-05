@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 5
     env:
       # Erreurs ruff tolérées sur src et tests : ce plafond ne fait que baisser.
-      RUFF_BUDGET: "12"
+      RUFF_BUDGET: "11"
     steps:
       - uses: actions/checkout@v4
 

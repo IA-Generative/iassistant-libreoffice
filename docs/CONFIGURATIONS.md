@@ -178,9 +178,8 @@ et `/update/status`.
 
 ```bash
 cd <racine du dépôt>
-./scripts/06-use-config-profile.sh --profile dev      # bootstrap http://localhost:8089, ?profile=dev
 ./scripts/00-clean-install.sh --uninstall
-./scripts/02-build-oxt.sh
+./scripts/02-build-oxt.sh --config config/profiles/config.default.dev.json   # bootstrap http://localhost:8089, ?profile=dev
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
   "$PWD/dist/mirai.oxt"
 ```
@@ -223,9 +222,8 @@ Disponibilité vérifiée le 2026-07-26 : ✅ `/config?profile=prod` → **HTTP 
 ```bash
 cd <racine du dépôt>
 cp config/profiles/config.default.production.example.json config/profiles/config.default.production.json   # renseigner bootstrap_urls
-./scripts/06-use-config-profile.sh --profile production
 ./scripts/00-clean-install.sh --uninstall
-./scripts/02-build-oxt.sh
+./scripts/02-build-oxt.sh --config config/profiles/config.default.production.json
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
   "$PWD/dist/mirai.oxt"
 ```

@@ -39,8 +39,7 @@ max-complexity = 10
 # Signatures uniformes imposées par un contrat, pas par négligence :
 #  - presets  : tous les runners partagent (ctx, shell, user_text, tee,
 #               cancel_event, dispatcher) pour être interchangeables ; chacun
-#               n'en consomme qu'une partie. La factorisation `run_text_pipeline`
-#               prévue au plan supprimera ce besoin — dette nommée, pas oubliée.
+#               n'en consomme qu'une partie.
 #  - sinks / tools / ui_thread / dsfr : implémentations d'interfaces (stream_delta,
 #               finish, handler de tool, callback) dont la signature est fixée
 #               par l'appelant.
@@ -57,6 +56,4 @@ max-complexity = 10
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration"]
-# tests/fixtures contient des générateurs de documents qui dépendent d'odfpy —
-# hors périmètre de la suite, et absent du poste par défaut.
-norecursedirs = ["tests/fixtures", "tests/simulation"]
+norecursedirs = ["tests/simulation"]

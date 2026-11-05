@@ -1,17 +1,15 @@
 """Réécriture du document entier — pilotée par Python, pas par le modèle.
 
-Pourquoi ne pas s'en remettre au tool calling : sur `llama-3.3-70b-instruct`,
-une demande comme « réécris l'article en deux paragraphes » sans sélection
-donnait invariablement `iterations=2` — le modèle appelait bien l'outil de
-LECTURE, recevait la carte du document… puis répondait du texte, sans jamais
-appeler l'outil d'écriture. Trois renforts successifs (consigne système, rappel
-dans le résultat de l'outil, ligne de portée en tête de la demande) ont amélioré
-la situation sans la régler : les modèles de cette taille n'enchaînent pas deux
-tool calls de façon fiable.
+Pourquoi ne pas s'en remettre au tool calling : un modèle de la taille de
+`llama-3.3-70b-instruct` n'enchaîne pas deux tool calls de façon fiable. Sur
+« réécris l'article en deux paragraphes » sans sélection, il appelle l'outil de
+LECTURE, reçoit la carte du document, puis répond du texte sans appeler l'outil
+d'écriture. Ni la consigne système, ni le rappel dans le résultat de l'outil, ni
+la ligne de portée en tête de la demande n'y changent rien.
 
-La parade est celle du plan pour les presets « pipeline » : **le LLM n'est
-qu'une fonction texte**, et Python applique le résultat. Aucun tool call n'est
-requis, donc plus rien à espérer du modèle — c'est déterministe.
+La parade est celle des presets « pipeline » : **le LLM n'est qu'une fonction
+texte**, et Python applique le résultat. Aucun tool call n'est requis, donc
+plus rien à espérer du modèle — c'est déterministe.
 
 Ce module ne connaît pas UNO : il reçoit des paragraphes, rend des paragraphes.
 """
