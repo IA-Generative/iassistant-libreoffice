@@ -166,7 +166,7 @@ if leaked:
 print("✓ embedded config.default.json: transport-only (no SSO/keycloak/LLM leak)")
 PY
 
-# Anti-fuite (2/2) : aucun nom d'hôte interne dans les fichiers suivis par git (profils, docs, tests, prompts).
+# Anti-fuite (2/2) : aucun nom d'hôte interne dans les fichiers suivis par git (profils, docs, tests).
 python3 - "$ROOT_DIR" <<'PY' || { err "Des noms d'hôtes internes sont présents dans des fichiers suivis par git"; exit 1; }
 import re, subprocess, sys
 
