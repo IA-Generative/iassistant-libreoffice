@@ -158,7 +158,7 @@ Tous les chemins ci-dessous sont **derrière relay-assistant**. Le plug-in ne pa
     ├─▶ GET /config?profile=... avec X-Relay-Client/Key (refresh périodique 30 min)
     │      ▼ si update.action == "update" et target_version != current → planifier update
     │
-    ├─▶ Sur chaque action utilisateur : appel LLM via /llm/... avec X-Relay-*
+    ├─▶ Sur chaque action utilisateur : appel LLM via /llm/v1 avec le llmToken seul (Bearer), jamais X-Relay-*
     │
     ├─▶ Périodiquement (≤ 5 min) : refresh telemetry_token via /telemetry/token
     │
@@ -398,9 +398,14 @@ Le serveur vérifie : (1) `timestamp` dans une fenêtre ±5 min, (2) `nonce` non
 | `X-Plugin-Version` | manifest natif | oui |
 | `X-Platform-Type` | constante (`libreoffice`, `chrome`, …) | oui |
 | `X-Platform-Version` | host introspectable | recommandé |
-| `X-Relay-Client` | enrollment | dès qu'enrôlé |
-| `X-Relay-Key` | enrollment | dès qu'enrôlé |
-| `Authorization: Bearer …` | PKCE ou telemetry mint | sur `/enroll`, `/telemetry/v1/traces` |
+| `X-Relay-Client` | enrollment | dès qu'enrôlé, sauf sur `/llm/v1` |
+| `X-Relay-Key` | enrollment | dès qu'enrôlé, sauf sur `/llm/v1` |
+| `Authorization: Bearer …` | PKCE, telemetry mint ou `llmToken` (servi par `/config`) | sur `/enroll`, `/telemetry/v1/traces` ; seul sur `/llm/v1` |
+
+Sur `/llm/v1`, la présence de `X-Relay-Client` engage la vérification relais, qui
+échoue en 401 sans repli vers le Bearer : envoyer le `llmToken` seul. La paire
+relais vit 30 jours et ouvre aussi la configuration et la télémétrie ; le `llmToken`
+ne vaut que pour le LLM et vit une heure.
 
 ---
 

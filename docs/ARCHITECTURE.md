@@ -291,7 +291,8 @@ comme « la demande porte sur le document entier ».
   désormais les demandes documentaires (« restructure en deux paragraphes »)
   grâce à `writer_replace_paragraphs`.
 - Les chips « Continuer » et « Modifier » ont été retirées : le prompt libre
-  les couvre, et une rangée courte tient sur une seule ligne (piège n°17).
+  les couvre, et une rangée courte tient sur une seule ligne
+  ([ADR 0002](adr/0002-moteur-et-palette.md), point 4).
 - Télémétrie : spans historiques conservés (`SummarizeSelection`, …) avec
   `{"via": "palette"}` + nouveaux spans `assistant.open/run/tool`.
 
@@ -376,6 +377,22 @@ La refacto de la coquille et les suppressions décidées sont suivies par
 3. Multi-conversations + recherche ; sidebar historique ;
    permissions par tool ; rafraîchir les chips quand l'app change sous une
    palette ouverte.
+
+## Diagnostic
+
+- **« Il ne se passe rien »** recouvre plusieurs causes : demande prise pour une
+  question, modèle qui n'enchaîne pas lecture et écriture, réglage débranché,
+  chemin sans écriture, réponse absente parce que le raisonnement a épuisé
+  `max_tokens`. On lit d'abord le chemin emprunté (`run.kind` du span
+  `AssistantRun`, lignes `[journal]` de `mirai/mirai.log`), avant de chercher
+  pourquoi il a échoué.
+- **Palette restée « occupée »** : une pile du processus LibreOffice (par exemple
+  `sample <pid>` sous macOS) distingue deux gels.
+  - Thread principal dans `SalYieldMutex::doAcquire` : interblocage, un thread
+    détient le SolarMutex. Sa pile porte l'appel fautif.
+  - Thread principal au repos dans `Application::Yield`, sans thread Python
+    vivant : le run est fini, mais ses messages postés n'ont pas été délivrés.
+    `heal_if_stuck()` rattrape ce cas à l'activation de la fenêtre.
 
 ## Environnement de dev macOS — piège connu
 
