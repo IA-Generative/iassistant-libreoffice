@@ -64,6 +64,12 @@ les font respecter.
    durées et noms de tools seulement.
 5. **Bibliothèque standard et UNO seulement** : `urllib.request` pour le réseau,
    validateur JSON maison dans `core/tool_calls.py`, dialogues `com.sun.star.awt`.
+6. **Aucun secret, jeton ni nom d'hôte interne dans un fichier suivi par git** : le
+   dépôt est public. Les profils à URL réelle restent gitignorés, seul leur
+   `.example` est versionné. `02-build-oxt.sh` refuse de construire si un hôte
+   `*.minint.fr` ou `*.interieur.gouv.fr` (hors portail public
+   `mirai.interieur.gouv.fr`) apparaît dans un fichier suivi ; rien ne vérifie les
+   secrets, la relecture s'en charge.
 
 ## Base de code saine
 
