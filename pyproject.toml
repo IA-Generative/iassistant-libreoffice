@@ -56,6 +56,4 @@ max-complexity = 10
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration"]
-# tests/fixtures contient des générateurs de documents qui dépendent d'odfpy —
-# hors périmètre de la suite, et absent du poste par défaut.
-norecursedirs = ["tests/fixtures", "tests/simulation"]
+norecursedirs = ["tests/simulation"]
