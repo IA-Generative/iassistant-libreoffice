@@ -146,7 +146,15 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 
 cp -R "$ROOT_DIR/oxt/." "$STAGE_DIR/"
 cp "$ROOT_DIR/main.py" "$STAGE_DIR/main.py"
-cp -R "$ROOT_DIR/src" "$STAGE_DIR/src"
+# De src/, seuls partent les modules Python et les données lues à l'exécution.
+(
+  cd "$ROOT_DIR"
+  find src -name "*.py"
+  ls src/mirai/locales/*.json src/mirai/CAbundle/*.pem
+) | while IFS= read -r rel; do
+  mkdir -p "$STAGE_DIR/$(dirname "$rel")"
+  cp "$ROOT_DIR/$rel" "$STAGE_DIR/$rel"
+done
 cp "$CONFIG_IN_USE" "$STAGE_DIR/config.default.json"
 # Anti-fuite : la config embarquée d'un profil ONLINE doit être transport-only
 # (bootstrap_urls/config_path/enabled). Aucun SSO/keycloak/LLM baké : ils sont servis
@@ -250,8 +258,6 @@ mkdir -p "$STAGE_DIR/docs"
 [ -f "$ROOT_DIR/LICENSE" ] && cp "$ROOT_DIR/LICENSE" "$STAGE_DIR/LICENSE"
 
 find "$STAGE_DIR" -name ".DS_Store" -delete
-find "$STAGE_DIR" -name "*.pyc" -delete
-find "$STAGE_DIR" -name "__pycache__" -type d -prune -exec rm -rf {} +
 
 log "Creating package: $OUTPUT_PATH"
 (

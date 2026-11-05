@@ -36,6 +36,8 @@ REQUIRED_MEMBERS = [
     "dm-manifest.json",           # métadonnées Device Management
     "dm-config.json",             # template config DM
     "assets/logo.png",            # logo catalogue DM
+    "assets/mascot16.png",        # icône du bouton de mise à jour (À propos)
+    "src/mirai/CAbundle/scaleway-bootstrap-ca-chain.pem",
     "LICENSE",                    # texte de la MPL 2.0
 ] + [f"src/mirai/locales/{lang}.json" for lang in SUPPORTED]
 
@@ -83,6 +85,22 @@ def test_oxt_is_a_valid_zip(oxt_path):
 @pytest.mark.parametrize("member", REQUIRED_MEMBERS)
 def test_required_member_present(oxt_path, member):
     assert member in _names(oxt_path), f"membre requis absent de l'archive: {member}"
+
+
+def test_every_python_module_ships(oxt_path):
+    names = set(_names(oxt_path))
+    modules = [
+        os.path.relpath(os.path.join(folder, name), ROOT).replace(os.sep, "/")
+        for folder, _dirs, files in os.walk(os.path.join(ROOT, "src"))
+        for name in files if name.endswith(".py")
+    ]
+    assert modules
+    assert [m for m in modules if m not in names] == []
+
+
+def test_package_stays_under_two_megabytes(oxt_path):
+    """Chaque poste télécharge l'OXT entier à chaque mise à jour."""
+    assert os.path.getsize(oxt_path) < 2 * 1024 * 1024
 
 
 def test_no_leaked_build_artifacts(oxt_path):

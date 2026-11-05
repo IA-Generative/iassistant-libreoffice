@@ -5112,7 +5112,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         btn_y = HEIGHT - VERT_MARGIN - BTN_HEIGHT - 18
 
         # Check updates button
-        _mascot_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16.png")
+        _mascot_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "mascot16.png"))
         btn_update_props = {
             "Label": _t("about.updates_button"),
             "FontHeight": _UI["font_small"],

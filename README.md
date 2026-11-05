@@ -236,7 +236,7 @@ oxt/                           # Fichiers statiques packagés dans l'OXT
 ├── Addons.xcu                 # Menu MIrAI
 ├── Accelerators.xcu           # Raccourcis clavier
 ├── Jobs.xcu                   # Job d'initialisation
-├── icons/                     # Icônes
+├── assets/                    # Logo et icône du bouton de mise à jour
 └── META-INF/manifest.xml
 
 config/profiles/               # Profils de configuration
