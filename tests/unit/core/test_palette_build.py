@@ -2321,3 +2321,58 @@ def test_a_stop_after_streamed_text_starts_its_own_line(palette_module, monkeypa
 
     assert (_t("palette.assistant_prefix") + "PE\n⏹ " + _t("run.stopped")
             in palette._models["response"].Text)
+
+
+def test_footer_shows_the_dm_links_it_knows_and_only_those(palette_module):
+    """Un lien servi par le DM pour un rôle connu a sa ligne ; les autres rôles, non."""
+    from tests.stubs.fake_palette_dialog import build_palette as _build
+
+    links = {"search-portal": {"id": "search-portal", "label": "Portail", "url": "https://p.fake-domain.name/",
+                               "hint": "en bêta"}}
+    with patch_get_link(links):
+        palette = _build(palette_module)
+    names = set(palette_module._fake_dialog.model.names)
+    assert "link_search_portal" in names
+    assert "link_beta_feedback" not in names
+    assert palette._models["link_search_portal"].Label == "Portail (en bêta) ↗"
+    palette._layout(width=900)   # la ligne de lien se place sans erreur
+
+
+def test_footer_has_no_link_line_when_the_dm_serves_none(palette_module):
+    palette = build_palette(palette_module)
+    assert not palette._link_names
+    assert "link_search_portal" not in set(palette_module._fake_dialog.model.names)
+
+
+def test_clicking_a_dm_link_opens_it_through_the_shell(palette_module):
+    palette = build_palette(palette_module)
+    palette._on_link("beta-feedback", "https://p.fake-domain.name/avis")
+    palette.shell.open_link.assert_called_once_with("https://p.fake-domain.name/avis")
+    palette.shell.telemetry.assert_called_with("LinkClick", {"link": "beta-feedback"})
+
+
+class patch_get_link:
+    """Fait répondre `shell.get_link` depuis un dict de rôles, le temps du build."""
+
+    def __init__(self, links):
+        self._links = links
+        self._orig = None
+
+    def __enter__(self):
+        from unittest.mock import MagicMock
+
+        import tests.stubs.fake_palette_dialog as stub
+        self._orig = stub.MagicMock
+        links = self._links
+
+        class _Shell(MagicMock):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.get_link = lambda link_id: links.get(link_id)
+
+        stub.MagicMock = _Shell
+        return self
+
+    def __exit__(self, *exc):
+        import tests.stubs.fake_palette_dialog as stub
+        stub.MagicMock = self._orig
