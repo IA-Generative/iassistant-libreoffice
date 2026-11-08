@@ -158,6 +158,7 @@ def build_palette(palette_module, app="writer"):
     shell.toolkit.return_value = MagicMock()
     shell.data_dir.return_value = "/tmp/mirai-test-palette"
     shell.get_config.side_effect = lambda key, default=None: default
+    shell.get_link.return_value = None
     shell.log = lambda _m: None
 
     uno_ctx = MagicMock()

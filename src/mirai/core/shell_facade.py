@@ -9,6 +9,8 @@ Invariant : aucune logique métier ici — uniquement de l'adaptation.
 import json
 import urllib.request
 
+from .links import find_link
+
 # Clamps max_tokens par modèle. make_chat_request ne les applique pas ; la
 # façade comble ce trou.
 MODEL_TOKEN_LIMITS = {
@@ -44,6 +46,14 @@ class MainJobShell:
 
     def data_dir(self):
         return self._job._data_dir()
+
+    def get_link(self, link_id):
+        """Lien distribué par le DM pour ce rôle ({label, url, hint?, hintUrl?}) ou None."""
+        return find_link(self.get_config("links", []), link_id)
+
+    def open_link(self, url):
+        """Ouvre l'URL dans le navigateur de l'utilisateur (jamais dans le journal)."""
+        self._job._open_url_config("", url)
 
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):
         """Request chat/completions authentifiée, clamps réappliqués, corps enrichi.
