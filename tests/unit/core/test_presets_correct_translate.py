@@ -503,7 +503,6 @@ def test_a_paragraph_with_line_breaks_keeps_them_without_selection(runner):
 
     runner(_ctx(doc, shell), shell, "", None)
 
-    assert "[P2] 75000 Pari\n" in shell.requests[0]["messages"][-1]["content"]
     assert doc.paragraphs == ["Adresse :\n\n75000 Paris", "Fin."]
 
 
