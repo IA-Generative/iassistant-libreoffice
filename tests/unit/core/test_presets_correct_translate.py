@@ -9,7 +9,7 @@ from src.mirai.core import presets, prompts
 from src.mirai.core.context import ToolContext
 from src.mirai.i18n import t as _t
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
-from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc, FakeParagraph
+from tests.stubs.fake_writer_body import BREAK, TABLE, Anchored, FakeBodyDoc
 
 BOLD = "gras"
 ITALIC = "italique"
@@ -38,21 +38,10 @@ def test_correct_replaces_only_the_wrong_word_of_the_selection():
     assert message == _t("preset.done_correct_replaced")
 
 
-FIELD = "￹"
-
-
-class _FieldParagraph(FakeParagraph):
-    """Passage qui contient un champ (numéro de page) : le texte lu montre sa
-    valeur, le curseur le compte pour un seul caractère."""
-
-    def getString(self):
-        return self.text.replace(FIELD, "12")
-
-
 def test_correct_writes_the_whole_text_when_a_field_shifts_the_positions():
-    doc = FakeBodyDoc(["Avant."])
-    doc.selection = _FieldParagraph(doc, "Voir page " + FIELD + ", le délai est fixer.",
-                                    "Standard")
+    """Un numéro de page qui affiche « 12 » ne compte que pour une position."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Voir page ", None), Anchored("TextField", "12"),
+                                             (", le délai est fixer.", None)])
     shell = _reply("Voir page 12, le délai est fixé.")
 
     presets.run_correct(_ctx(doc, shell), shell, "", None)
@@ -334,12 +323,13 @@ def test_a_paragraph_with_line_breaks_keeps_them_without_selection(runner):
 def test_translate_writes_a_selection_of_several_paragraphs_line_by_line():
     """Writer fond en un seul paragraphe une plage récrite d'un coup : écrite
     ligne à ligne, chaque paragraphe garde sa place et sa mise en forme."""
-    doc = FakeBodyDoc(["Avant."], selection=[("Premier.\n", None), ("Titre", BOLD)])
+    doc = FakeBodyDoc(["Avant."], selection=[("Premier.", None), BREAK, ("Titre", BOLD)])
     shell = _reply("First.\nTitle")
 
     presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
 
     assert doc.selection.runs() == [("First.\n", None), ("Title", BOLD)]
+    assert doc.selection.anchored() == ["ParagraphBreak"]
 
 
 def test_correct_still_writes_word_by_word_when_the_model_joins_two_lines():
