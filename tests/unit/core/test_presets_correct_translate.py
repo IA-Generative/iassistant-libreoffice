@@ -306,7 +306,7 @@ def test_translate_without_a_typed_language_targets_the_interface_language(
 
     presets.run_translate(_ctx(doc, shell), shell, "", None)
 
-    assert f"en {language}" in shell.requests[0]["messages"][-1]["content"]
+    assert f"Langue cible : {language}." in shell.requests[0]["messages"][-1]["content"]
 
 
 def test_translate_targets_the_language_typed_in_the_prompt():
@@ -315,10 +315,22 @@ def test_translate_targets_the_language_typed_in_the_prompt():
 
     message = presets.run_translate(_ctx(doc, shell), shell, "allemand", None)
 
-    assert "en allemand" in shell.requests[0]["messages"][-1]["content"]
+    assert "Langue cible : allemand." in shell.requests[0]["messages"][-1]["content"]
     assert doc.selection.getString() == "Die Frist ist festgelegt."
     assert doc.undo.entered == [_t("preset.undo_translate")]
     assert message == _t("preset.done_translate_replaced")
+
+
+def test_translate_reads_a_typed_phrase_as_the_target_language():
+    """« en anglais » tapé dans le champ ne donne pas « traduis en en anglais »."""
+    doc = FakeBodyDoc(["Avant."], selection="Le délai est fixé.")
+    shell = _reply("The deadline is set.")
+
+    presets.run_translate(_ctx(doc, shell), shell, "en anglais", None)
+
+    prompt = shell.requests[0]["messages"][-1]["content"]
+    assert "Langue cible : en anglais." in prompt
+    assert "en en " not in prompt
 
 
 def test_translate_never_asks_the_model_to_keep_the_language():

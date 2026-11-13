@@ -388,11 +388,14 @@ _LANGUAGE_NAMES = {"fr": "français", "en": "anglais", "es": "espagnol",
 
 def _translate_rules(user_text):
     """Consigne de traduction vers la langue tapée dans le champ, sinon vers
-    celle de l'interface. Un texte déjà dans cette langue revient tel quel :
-    c'est ce qui permet de demander une autre langue à l'utilisateur."""
+    celle de l'interface. Le champ est cité tel quel : « anglais » et « en
+    anglais » y nomment la même langue. Un texte déjà dans cette langue
+    revient tel quel : c'est ce qui permet de demander une autre langue à
+    l'utilisateur."""
     language = user_text.strip() or _LANGUAGE_NAMES[get_locale()]
-    return (f"Traduis le texte en {language}. Un passage déjà en {language} est "
-            "rendu tel quel. Conserve le sens, le ton et les noms propres.")
+    return (f"Langue cible : {language}. Traduis le texte dans cette langue. Un passage "
+            "déjà dans cette langue est rendu tel quel. Conserve le sens, le ton et les "
+            "noms propres.")
 
 
 def _rewrite_budget(chars):
