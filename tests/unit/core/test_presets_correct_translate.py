@@ -287,6 +287,28 @@ def test_correct_without_selection_writes_nothing_when_each_fix_would_damage_an_
     assert message == _t("preset.paragraphs_kept", count=1)
 
 
+def test_correct_without_selection_keeps_a_line_that_opens_a_code_block():
+    """Une ligne « ``` » du document fait partie du texte, pas de la réponse."""
+    doc = FakeBodyDoc(["Exemple :", "```", "Le délai est fixer."])
+    shell = _reply("```\nExemple :\n```\nLe délai est fixé.\n```")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Exemple :", "```", "Le délai est fixé."]
+
+
+def test_correct_without_selection_never_empties_a_line_the_reply_left_blank():
+    """Un marqueur rendu seul ne compte pas pour une ligne : la réponse n'en a
+    plus assez, et rien n'est écrit."""
+    doc = FakeBodyDoc(["Rapport", "Les pièces sont jointes.", "Le délai est fixer."])
+    shell = _reply("[P1] Rapport\n[P2]\n[P3] Le délai est fixé.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Rapport", "Les pièces sont jointes.", "Le délai est fixer."]
+    assert message == _t("run.err_paragraphs")
+
+
 def test_correct_without_selection_leaves_tables_aside_and_says_so():
     doc = FakeBodyDoc(["Raport", TABLE, "Le délai est fixer."], ["Heading 1", "", "Standard"])
     shell = _reply("Rapport\nLe délai est fixé.")

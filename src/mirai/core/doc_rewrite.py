@@ -173,14 +173,17 @@ def build_paragraph_prompt(lines, instruction: str) -> str:
 
 
 def parse_lines(text: str):
-    """Les lignes d'une réponse à `build_paragraph_prompt`, sans les lignes
-    vides, les clôtures de bloc de code ni les marqueurs [Pn]. Une puce en
-    tête de ligne reste : elle peut appartenir au texte."""
-    lines = []
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if line and not line.startswith("```"):
-            lines.append(re.sub(r"^\[P\d+\]\s*", "", line))
+    """Les lignes d'une réponse à `build_paragraph_prompt`, sans les marqueurs
+    [Pn] ni les lignes vides : un marqueur seul ne rend aucune ligne. Une
+    clôture de bloc de code n'est retirée qu'en tête ou en fin de réponse ;
+    ailleurs, elle peut être une ligne du texte, comme une puce en tête de
+    ligne."""
+    lines = [re.sub(r"^\[P\d+\]\s*", "", raw.strip()) for raw in (text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if lines and lines[0].startswith("```"):
+        del lines[0]
+    if lines and lines[-1].startswith("```"):
+        del lines[-1]
     return lines
 
 
