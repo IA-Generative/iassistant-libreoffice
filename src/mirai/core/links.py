@@ -13,6 +13,10 @@ MAX_LABEL = 80
 MAX_HINT = 200
 MAX_URL = 2048
 
+# beta-feedback : le DM sert la BASE du portail, le plugin complète le chemin de
+# la page de retour et s'y nomme (contrat DM §4.2 bis).
+ROLE_PATHS = {"beta-feedback": "/_beta/retour?app=libreoffice"}
+
 
 def _https(value):
     return (isinstance(value, str) and value.startswith("https://")
@@ -60,3 +64,9 @@ def find_link(raw, link_id):
         if link["id"] == link_id:
             return link
     return None
+
+
+def target_url(link):
+    """L'URL que le clic ouvre : celle du DM, complétée pour les rôles qui l'exigent."""
+    path = ROLE_PATHS.get(link["id"])
+    return link["url"].rstrip("/") + path if path else link["url"]

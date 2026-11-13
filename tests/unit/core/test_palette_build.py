@@ -2346,3 +2346,14 @@ def test_clicking_a_dm_link_opens_it_through_the_shell(palette_module):
     palette._on_link("beta-feedback", "https://p.fake-domain.name/avis")
     palette.shell.open_link.assert_called_once_with("https://p.fake-domain.name/avis")
     palette.shell.telemetry.assert_called_with("LinkClick", {"link": "beta-feedback"})
+
+
+def test_the_beta_feedback_row_opens_the_feedback_page_not_the_portal_home(palette_module):
+    """Le DM sert la base du portail : le clic ouvre la page de retour du plugin."""
+    links = {"beta-feedback": {"id": "beta-feedback", "label": "Mon avis",
+                               "url": "https://p.fake-domain.name"}}
+    palette = build_palette(palette_module, links=links)
+    row = palette_module._fake_dialog.getControl("link_beta_feedback")
+    next(h for h in row.listeners if hasattr(h, "mousePressed")).mousePressed(None)
+    palette.shell.open_link.assert_called_once_with(
+        "https://p.fake-domain.name/_beta/retour?app=libreoffice")

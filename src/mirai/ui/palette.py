@@ -59,6 +59,7 @@ from ..core import (
 from ..core import presets as presets_module
 from ..core.context import ToolContext
 from ..core.conversation import ConversationStore
+from ..core.links import target_url
 from ..core.llm_client import LLMClient
 from ..core.orchestrator import Orchestrator, RunObserver, error_message, is_outage
 from ..core.progress import RunProgress
@@ -1666,7 +1667,7 @@ class AssistantPalette:
             label = link["label"] + (f" ({link['hint']})" if link.get("hint") else "") + " ↗"
             _, link_model = dsfr.add_link(
                 dialog, model, name, label, 0, 0, 120, 16, font,
-                lambda u=link["url"], i=link_id: self._on_link(i, u))
+                lambda u=target_url(link), i=link_id: self._on_link(i, u))
             self._models[name] = link_model
             self._link_names.append(name)
 

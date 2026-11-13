@@ -1,6 +1,6 @@
 """Liens distribués par le DM : lecture par rôle, contrat appliqué entrée par entrée."""
 
-from src.mirai.core.links import find_link, normalize_links
+from src.mirai.core.links import find_link, normalize_links, target_url
 
 PORTAL = {
     "id": "search-portal",
@@ -46,3 +46,11 @@ def test_a_bad_hint_url_is_dropped_but_the_link_and_its_hint_stay():
 def test_duplicate_roles_keep_the_first_entry():
     other = dict(FEEDBACK, url="https://b.fake-domain.name/")
     assert normalize_links([FEEDBACK, other]) == [FEEDBACK]
+
+
+def test_the_beta_feedback_link_opens_the_feedback_page_under_the_portal_base():
+    """Le DM sert la base du portail ; la page de retour et le nom du plugin s'y ajoutent."""
+    page = "https://portail.fake-domain.name/_beta/retour?app=libreoffice"
+    assert target_url(FEEDBACK) == page
+    assert target_url(dict(FEEDBACK, url=FEEDBACK["url"] + "/")) == page
+    assert target_url(PORTAL) == PORTAL["url"]
