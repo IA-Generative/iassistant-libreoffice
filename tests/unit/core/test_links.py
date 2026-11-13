@@ -27,6 +27,7 @@ def test_a_link_is_found_by_its_role_and_absent_roles_give_none():
 def test_an_entry_outside_the_contract_is_dropped_alone():
     bad = [
         {"id": "Majuscule", "label": "x", "url": "https://a.fake-domain.name/"},
+        {"id": "fin-de-ligne\n", "label": "x", "url": "https://a.fake-domain.name/"},
         {"id": "http-only", "label": "x", "url": "http://a.fake-domain.name/"},
         {"id": "sans-label", "url": "https://a.fake-domain.name/"},
         {"id": "gabarit", "label": "x", "url": "https://a.fake-domain.name/${{VAR}}"},

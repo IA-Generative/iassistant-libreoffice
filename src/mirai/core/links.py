@@ -25,7 +25,7 @@ def _normalize_one(raw):
         return None
     link_id = raw.get("id")
     label = raw.get("label")
-    if not isinstance(link_id, str) or not ID_RE.match(link_id):
+    if not isinstance(link_id, str) or not ID_RE.fullmatch(link_id):
         return None
     if not isinstance(label, str) or not label.strip() or len(label) > MAX_LABEL:
         return None
