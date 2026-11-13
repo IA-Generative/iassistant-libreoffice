@@ -438,6 +438,9 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
         on_text_delta=sink.stream_delta, cancel_event=cancel_event, progress=progress)
     if step.error:
         return Failed(step.error)
+    if step.finish_reason == "length":
+        # Le texte manquant deviendrait des suppressions.
+        return Failed("truncated")
     sink.finish(step.text, step.streamed)
     if sink.unchanged:
         return _t(action.unchanged_key)

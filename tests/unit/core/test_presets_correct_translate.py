@@ -124,6 +124,20 @@ def test_correct_does_not_walk_the_selection_again_for_each_fixed_word():
     assert doc.moved <= 4 * len(text)
 
 
+def test_correct_writes_nothing_when_the_reply_is_cut_short():
+    """Une réponse arrêtée par le plafond de jetons : la fin manquante
+    supprimerait la fin de la sélection."""
+    doc = FakeBodyDoc(["Avant."], selection="Le délai est fixer. Les pièces sont jointes.")
+    shell = FakeShell(responses=[FakeSSEResponse(
+        text_chunks("Le délai est fixé. Les pièces", finish="length"))])
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Le délai est fixer. Les pièces sont jointes."
+    assert doc.writes == 0
+    assert message == _t("run.err_truncated")
+
+
 @pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
 def test_correct_writes_nothing_when_the_selection_has_no_mistake(append_mode):
     """Une réponse identique au texte, aux espaces près, ne laisse rien à
