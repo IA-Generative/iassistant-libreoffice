@@ -63,6 +63,42 @@ def test_correct_writes_nothing_when_an_object_shifts_the_positions(anchored):
     assert message == _t("preset.objects_kept")
 
 
+def test_correct_keeps_a_footnote_glued_to_the_word_it_fixes():
+    """La note se lit comme son numéro, collé au mot : « delai1 »."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Le delai", None), Anchored("Footnote", "1"),
+                                             (" est fixé.", None)])
+    shell = _reply("Le délai1 est fixé.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Le délai1 est fixé."
+    assert doc.selection.anchored() == ["Footnote"]
+    assert message == _t("preset.done_correct_replaced")
+
+
+def test_translate_keeps_a_footnote_whose_number_ends_the_translated_line():
+    doc = FakeBodyDoc(["Avant."], selection=[("Le délai est fixé par décret.", None),
+                                             Anchored("Footnote", "1")])
+    shell = _reply("The deadline is set by decree.1")
+
+    presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
+
+    assert doc.selection.getString() == "The deadline is set by decree.1"
+    assert doc.selection.anchored() == ["Footnote"]
+
+
+def test_translate_writes_nothing_when_a_line_would_lose_its_footnote():
+    doc = FakeBodyDoc(["Avant."], selection=[("Le délai est fixé", None),
+                                             Anchored("Footnote", "1"), (" par décret.", None)])
+    shell = _reply("The deadline is set by decree.")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
+
+    assert doc.selection.getString() == "Le délai est fixé1 par décret."
+    assert doc.selection.anchored() == ["Footnote"]
+    assert message == _t("preset.objects_kept")
+
+
 def test_correct_reaches_a_mistake_beyond_what_one_cursor_move_covers():
     """Un curseur Writer avance d'au plus 32 767 caractères à la fois."""
     start = "".join(f"Ligne {number}.\n" for number in range(4000))

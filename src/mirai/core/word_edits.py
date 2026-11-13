@@ -8,6 +8,7 @@ mise en forme, et chaque paragraphe sa place.
 """
 
 import difflib
+import os
 import re
 
 # Un mot, une suite d'espaces ou un signe : la comparaison se fait à ce grain,
@@ -33,9 +34,13 @@ def plan(old, new, by_word=True):
     ligne est comparée mot à mot ; sans, une ligne qui change est remplacée
     entière.
 
+    Chaque remplacement se réduit aux caractères qui changent : une note
+    collée à un mot dont une lettre change reste hors du remplacement.
+
     Calcul pur, à faire dans le worker : comparer un long texte prend du
     temps, qui ne doit pas figer LibreOffice."""
-    old_lines, new_lines = _plain(old).split("\n"), _plain(new).split("\n")
+    old, new = _plain(old), _plain(new)
+    old_lines, new_lines = old.split("\n"), new.split("\n")
     if len(old_lines) != len(new_lines):
         old_lines, new_lines = [old], [new]
     edits, offset = [], 0
@@ -45,7 +50,15 @@ def plan(old, new, by_word=True):
         elif old_line != new_line:
             edits.append((offset, offset + len(old_line), new_line))
         offset += len(old_line) + 1
-    return edits[::-1]
+    return [_trim(old, edit) for edit in edits[::-1]]
+
+
+def _trim(old, edit):
+    start, end, new = edit
+    span = old[start:end]
+    head = len(os.path.commonprefix([span, new]))
+    tail = len(os.path.commonprefix([span[head:][::-1], new[head:][::-1]]))
+    return start + head, end - tail, new[head:len(new) - tail]
 
 
 def _plain(text):
@@ -64,22 +77,39 @@ def _segment(old, new, offset):
             for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
 
 
+def _fits(text, rng, cursor, old, edits):
+    """`cursor`, posé sur `rng`, se lit position par position comme `old`, et
+    aucun remplacement ne couvre un objet ancré, qu'il effacerait."""
+    if _plain(cursor.getString()) != old or text.compareRegionEnds(cursor, rng):
+        return False
+    objects = _objects(cursor)
+    if any(len(read) != 1 for _, read in objects):
+        return False
+    return not any(start <= offset < end for offset, _ in objects for start, end, _ in edits)
+
+
 def _objects(cursor):
-    """Ce que donne à lire chaque objet ancré que couvre `cursor`. Un tableau
-    compte pour un objet qui ne se lit pas."""
-    reads = []
+    """(position, lecture) de chaque objet ancré que couvre `cursor`, la
+    position comptée comme si chaque objet se lisait en un caractère. Un
+    tableau compte pour un objet qui ne se lit pas."""
+    found, offset = [], 0
     paragraphs = cursor.createEnumeration()
     while paragraphs.hasMoreElements():
         paragraph = paragraphs.nextElement()
         if not paragraph.supportsService("com.sun.star.text.Paragraph"):
-            reads.append("")
+            found.append((offset, ""))
             continue
         portions = paragraph.createEnumeration()
         while portions.hasMoreElements():
             portion = portions.nextElement()
+            read = _plain(portion.getString())
             if portion.TextPortionType in _OBJECTS:
-                reads.append(portion.getString())
-    return reads
+                found.append((offset, read))
+                offset += 1
+            else:
+                offset += len(read)
+        offset += 1          # la fin du paragraphe
+    return found
 
 
 def _go_right(cursor, count, expand):
@@ -103,8 +133,10 @@ def apply(rng, old, new, edits):
     couvre plus un texte remplacé à l'un de ses bords.
 
     Rend None sans rien écrire si la plage ne se lit pas position par position
-    comme `old` : un champ, un commentaire ou une image y occupe une position
-    mais se lit autrement, et les remplacements tomberaient à côté.
+    comme `old` (un champ, un commentaire ou une image y occupe une position
+    mais se lit autrement, et les remplacements tomberaient à côté), ou si un
+    remplacement couvre une note, un champ, un commentaire ou une image, qu'il
+    effacerait.
     Un seul curseur remonte la plage depuis sa fin, d'un remplacement au
     précédent : le thread principal ne la parcourt qu'une fois.
     Thread principal exclusivement."""
@@ -112,8 +144,7 @@ def apply(rng, old, new, edits):
     text = rng.getText()
     cursor = text.createTextCursorByRange(rng.getStart())
     _go_right(cursor, len(old), True)
-    if (_plain(cursor.getString()) != old or text.compareRegionEnds(cursor, rng)
-            or any(len(read) != 1 for read in _objects(cursor))):
+    if not _fits(text, rng, cursor, old, edits):
         return None
     cursor.collapseToEnd()
     position = len(old)
