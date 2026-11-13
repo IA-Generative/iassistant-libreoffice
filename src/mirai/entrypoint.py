@@ -558,7 +558,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                            "calc_transform_suggestions_cache", "last_bootstrap_url")
     # Émis par un DM précis : sans valeur pour un autre environnement.
     _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
-                               "relay_key_expires_at", "refresh_token",
+                               "relay_key_expires_at", "relay_dm_base", "refresh_token",
                                "access_token", "access_token_expires_at",
                                "dm_bootstrap_urls")
 
@@ -1072,7 +1072,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     try:
                         log_to_file(f"DM config fetch attempt: mode={mode} url={url}")
                         headers = {"Accept": "application/json"}
-                        headers.update(self._relay_headers())
+                        headers.update(self._relay_headers(base_url))
                         plugin_version = self._get_extension_version()
                         headers["X-Plugin-Version"] = plugin_version or "unknown"
                         headers["X-Platform-Type"] = "libreoffice"
@@ -1136,7 +1136,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self._config_last_failure_at = now
                 log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")
             else:
-                base_url, (config_data, _relay_present) = winner
+                base_url, (config_data, relay_present) = winner
                 # Handle EnrichedConfigResponse (schema_version=2)
                 meta = config_data.get("meta") if isinstance(config_data.get("meta"), dict) else {}
                 if meta.get("schema_version") == 2:
@@ -1173,6 +1173,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 announced = dm_bases.announced_list(config_data)
                 if announced is not None and announced != self._get_config_from_file("dm_bootstrap_urls", None):
                     self.set_config("dm_bootstrap_urls", announced)
+                # Une paire antérieure à l'émetteur enregistré : le DM qui l'accepte
+                # (il mint un llmToken) est celui qui l'a émise.
+                minted = str((local_config.select_settings(config_data) or {}).get("llmToken", "") or "").strip()
+                if relay_present and minted and not self._get_config_from_file("relay_dm_base", ""):
+                    self.set_config("relay_dm_base", base_url)
                 # Le DM signale ici une auth relais manquante/refusée.
                 # Réagir tout de suite évite de découvrir le problème
                 # seulement au premier 401 sur /llm/v1.
@@ -4065,6 +4070,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if relay_client_id and relay_client_key:
                 self.set_config("relay_client_id", relay_client_id)
                 self.set_config("relay_client_key", relay_client_key)
+                self.set_config("relay_dm_base", bootstrap_url)
                 if relay_expires_at > 0:
                     self.set_config("relay_key_expires_at", relay_expires_at)
                 self.set_config("enrolled", True)
@@ -4157,17 +4163,23 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         bootstrap = str(self._active_bootstrap_url() or "").strip().rstrip("/")
         return bool(bootstrap) and endpoint.startswith(bootstrap)
 
-    def _relay_credentials_valid(self, skew_seconds=300):
-        """True si le poste a des credentials relay exploitables.
+    def _relay_credentials_valid(self, skew_seconds=300, base=None):
+        """True si le poste a des credentials relay exploitables pour `base` (le DM
+        actif par défaut).
 
         C'est LA source de vérité de l'enrôlement effectif : le drapeau
         `enrolled` n'est posé qu'avec eux. Sans ces creds,
         /config repart sans X-Relay-*, le DM ne mint aucun llmToken, et tous les
-        appels /llm/v1 finissent en 401.
+        appels /llm/v1 finissent en 401. Une paire émise par un autre DM ne vaut
+        rien pour celui-ci : les DM ne partagent pas leur base relais.
         """
         client_id = str(self._get_config_from_file("relay_client_id", "") or "").strip()
         client_key = str(self._get_config_from_file("relay_client_key", "") or "").strip()
         if not client_id or not client_key:
+            return False
+        issuer = str(self._get_config_from_file("relay_dm_base", "") or "").strip()
+        target = str((self._active_bootstrap_url() if base is None else base) or "").strip()
+        if issuer and target and not dm_bases.same_base(issuer, target):
             return False
         return not self._token_expired_at(
             self._get_config_from_file("relay_key_expires_at", 0), skew_seconds
@@ -4332,11 +4344,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             prefix = prefix + " "
         return name, prefix
 
-    def _relay_headers(self):
+    def _relay_headers(self, base=""):
+        """En-têtes de la paire relais ; aucun pour un DM `base` qui ne l'a pas émise."""
         relay_client_id = str(self._get_config_from_file("relay_client_id", "") or "").strip()
         relay_client_key = str(self._get_config_from_file("relay_client_key", "") or "").strip()
         if not relay_client_id or not relay_client_key:
             log_to_file(f"[RELAY] no relay creds: id={'yes' if relay_client_id else 'no'} key={'yes' if relay_client_key else 'no'}")
+            return {}
+        issuer = str(self._get_config_from_file("relay_dm_base", "") or "").strip()
+        if issuer and base and not dm_bases.same_base(issuer, base):
+            log_to_file("[RELAY] relay creds issued by another DM: not sent")
             return {}
         if self._token_expired_at(self._get_config_from_file("relay_key_expires_at", 0)):
             # On envoie quand même : le serveur reste l'autorité sur la validité.

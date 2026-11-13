@@ -4,7 +4,7 @@ import time
 import urllib.error
 from unittest.mock import MagicMock
 
-from src.mirai import local_config
+from src.mirai import credentials, local_config
 from src.mirai.shell import runtime as shell_runtime
 from tests.stubs.helpers import http_response, make_update_directive
 from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
@@ -221,6 +221,86 @@ def test_a_relative_artifact_is_downloaded_in_the_announced_order(tmp_path):
     downloads = [url for url in tried if "/binaries/" in url]
     assert downloads[0].startswith(B + "/")
     assert downloads[1].startswith(A + "/")
+
+
+# ── paire relais liée à son émetteur ─────────────────────────
+
+def _enrolled_with(job, dms, base):
+    """Ce que l'enrôlement laisse quand le DM `base` a enrôlé le poste."""
+    job.set_config("relay_client_id", "relay-" + base)
+    job.set_config("relay_client_key", "key-" + base)
+    job.set_config("relay_dm_base", base)
+    job.set_config("enrolled", True)
+    dms.known[base].add("relay-" + base)
+
+
+def test_the_pair_goes_to_its_issuer_and_the_token_comes_back_from_it(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    _enrolled_with(job, dms, A)
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.requests == [(A, "relay-" + A)]
+    assert credentials.recall(credentials.DM_LLM_TOKEN) == "token-from-" + A
+
+
+def test_a_pair_issued_by_another_dm_is_neither_sent_nor_valid_for_the_active_one(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    _enrolled_with(job, dms, B)              # paire de B ; seul A est candidat
+    job._fetch_config(force=True)
+    assert dms.requests == [(A, None)]
+    assert job._relay_credentials_valid() is False
+    assert job._relay_credentials_valid(base=B) is True
+
+
+def test_a_pair_without_issuer_is_sent_to_any_dm_and_gets_its_issuer_from_the_first_token(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job.set_config("relay_client_id", "relay-legacy")
+    job.set_config("relay_client_key", "key-legacy")
+    dms.known[A].add("relay-legacy")
+    job._fetch_config(force=True)
+    assert dms.requests == [(A, "relay-legacy")]
+    assert job._get_config_from_file("relay_dm_base", "") == A
+
+
+def test_no_issuer_is_recorded_when_the_dm_mints_no_token(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job.set_config("relay_client_id", "relay-legacy")
+    job.set_config("relay_client_key", "key-legacy")
+    job._fetch_config(force=True)            # A ne connaît pas cette paire
+    assert job._get_config_from_file("relay_dm_base", "") == ""
+
+
+def _enrolling(job):
+    """Un MainJob prêt à enrôler auprès de B : session et e-mail obtenus, DM actif B,
+    /enroll qui rend une paire."""
+    job._device_management_enabled = MagicMock(return_value=True)
+    job._fetch_config = MagicMock(return_value={"config": {}})
+    job._ensure_access_token = MagicMock(return_value="tok")
+    job._token_email = MagicMock(return_value="a@b.c")
+    job._keycloak_config = MagicMock(return_value={})
+    job._keycloak_endpoint = MagicMock(return_value="")
+    job._ensure_extension_uuid = MagicMock(return_value="uuid")
+    job._active_bootstrap_url = MagicMock(return_value=B)
+    job._urlopen = MagicMock(return_value=http_response(
+        {"relayClientId": "id-" + B, "relayClientKey": "key-" + B}))
+    return job
+
+
+def _enroll_posts(job):
+    return [c for c in job._urlopen.call_args_list if c.args[0].full_url.endswith("/enroll")]
+
+
+def test_enrolling_records_the_active_dm_as_the_issuer_of_the_pair(tmp_path):
+    job = _enrolling(make_job(config_dir=str(tmp_path)))
+    job._ensure_device_management_state()
+    assert len(_enroll_posts(job)) == 1
+    assert job._get_config_from_file("relay_dm_base", "") == B
+    assert job._get_config_from_file("enrolled", False) is True
 
 
 # ── persist + hydrate du cache config ────────────────────────

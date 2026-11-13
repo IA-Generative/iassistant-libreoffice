@@ -59,6 +59,13 @@ def test_secret_roundtrip_and_empty_deletes():
     assert credentials.get_secret("proxy_password", "scope-a") == ""
 
 
+def test_the_relay_issuer_is_bound_to_the_environment_like_the_pair():
+    _fresh_store()
+    credentials.set_secret("relay_dm_base", "https://dm-a.example", "env-1")
+    assert credentials.get_secret("relay_dm_base", "env-1") == "https://dm-a.example"
+    assert credentials.get_secret("relay_dm_base", "env-2") == ""
+
+
 def test_scoped_secret_is_invisible_in_another_environment():
     # Une lecture avec une autre empreinte (lecture dégradée au démarrage) ne
     # doit pas effacer la paire : seul un changement de transport constaté
