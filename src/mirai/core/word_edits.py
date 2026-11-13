@@ -91,9 +91,16 @@ def _segment(old, new, offset):
     starts = [offset]
     for token in before:
         starts.append(starts[-1] + len(token))
-    matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
+    matcher = difflib.SequenceMatcher(None, [_key(t) for t in before],
+                                      [_key(t) for t in after], autojunk=False)
     return [(starts[i1], starts[i2], "".join(after[j1:j2]))
             for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
+
+
+def _key(token):
+    """Une espace simple rendue à la place d'une espace insécable ou d'une
+    tabulation n'est pas une correction : les deux comparent égales."""
+    return " " if len(token) == 1 and token.isspace() else token
 
 
 def _fits(text, rng, cursor, old, edits):

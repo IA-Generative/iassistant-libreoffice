@@ -124,6 +124,18 @@ def test_correct_does_not_walk_the_selection_again_for_each_fixed_word():
     assert doc.moved <= 4 * len(text)
 
 
+def test_correct_keeps_the_non_breaking_spaces_the_reply_turns_into_spaces():
+    """L'autocorrection française met une espace insécable avant « : » ; le
+    modèle peut rendre une espace simple."""
+    doc = FakeBodyDoc(["Avant."],
+                      selection="Le délai est fixer\u00a0: demain, soit 10\u202f000 euros.")
+    shell = _reply("Le délai est fixé : demain, soit 10 000 euros.")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Le délai est fixé\u00a0: demain, soit 10\u202f000 euros."
+
+
 def test_correct_writes_nothing_when_the_reply_is_cut_short():
     """Une réponse arrêtée par le plafond de jetons : la fin manquante
     supprimerait la fin de la sélection."""
