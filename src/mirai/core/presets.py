@@ -342,13 +342,24 @@ class _Rewrite:
     span: str
     action: str
     system: str
-    labels: tuple              # (texte envoyé, texte attendu), dans la consigne
-    markers: tuple             # (début, fin) du texte ajouté à la suite
+    sent_label: str            # titres, dans la consigne, du texte envoyé
+    answer_label: str          # et du texte attendu
+    begin_marker: str          # le texte ajouté à la suite va entre ces marqueurs
+    end_marker: str
     undo_key: str
-    done_keys: tuple           # sélection à la suite, à la place ; document idem
+    done_key: str              # bilans : sur la sélection, à la suite ou à sa place
+    done_replaced_key: str
+    done_document_key: str     # sur tout le document, à la suite ou à sa place
+    done_document_replaced_key: str
     unchanged_key: str
     edit_by: str = "line"      # grain des remplacements : "word" ou "line"
     question_patterns: tuple = ()
+
+    def done(self, document, append_mode):
+        """Bilan d'une écriture, sur tout le document ou sur la sélection."""
+        if document:
+            return _t(self.done_document_key if append_mode else self.done_document_replaced_key)
+        return _t(self.done_key if append_mode else self.done_replaced_key)
 
 
 _CORRECT = _Rewrite(
@@ -357,11 +368,12 @@ _CORRECT = _Rewrite(
         "Tu es un correcteur professionnel. Tu corriges l'orthographe, la grammaire, "
         "la conjugaison et la ponctuation, sans jamais reformuler : chaque mot juste "
         "reste à sa place, et le texte garde sa langue."),
-    labels=("TEXTE À CORRIGER", "TEXTE CORRIGÉ"),
-    markers=("---début-du-texte-corrigé---", "---fin-du-texte-corrigé---"),
+    sent_label="TEXTE À CORRIGER", answer_label="TEXTE CORRIGÉ",
+    begin_marker="---début-du-texte-corrigé---", end_marker="---fin-du-texte-corrigé---",
     undo_key="preset.undo_correct",
-    done_keys=("preset.done_correct", "preset.done_correct_replaced",
-               "preset.done_correct_document", "preset.done_correct_document_replaced"),
+    done_key="preset.done_correct", done_replaced_key="preset.done_correct_replaced",
+    done_document_key="preset.done_correct_document",
+    done_document_replaced_key="preset.done_correct_document_replaced",
     unchanged_key="preset.no_error",
     edit_by="word", question_patterns=tuple(EXTEND_QUESTION_PATTERNS))
 
@@ -373,11 +385,12 @@ _CORRECT_RULES = (
 # Sans motifs de question : traduire « Pouvez-vous préciser… » en donne un.
 _TRANSLATE = _Rewrite(
     span="TranslateSelection", action="translate_selection", system=TRANSLATION_SYSTEM,
-    labels=("TEXTE À TRADUIRE", "TRADUCTION"),
-    markers=("---début-de-la-traduction---", "---fin-de-la-traduction---"),
+    sent_label="TEXTE À TRADUIRE", answer_label="TRADUCTION",
+    begin_marker="---début-de-la-traduction---", end_marker="---fin-de-la-traduction---",
     undo_key="preset.undo_translate",
-    done_keys=("preset.done_translate", "preset.done_translate_replaced",
-               "preset.done_translate_document", "preset.done_translate_document_replaced"),
+    done_key="preset.done_translate", done_replaced_key="preset.done_translate_replaced",
+    done_document_key="preset.done_translate_document",
+    done_document_replaced_key="preset.done_translate_document_replaced",
     unchanged_key="preset.already_in_language")
 
 # Langue cible par défaut : celle de l'interface, nommée dans la langue des
@@ -429,17 +442,17 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
     _legacy_telemetry(ctx, action.span,
                       {"action": action.action, "text_length": str(len(original))})
     sink = text_sink(ctx, append_mode,
-                     "\n\n" + action.markers[0] + "\n", "\n" + action.markers[1] + "\n",
+                     "\n\n" + action.begin_marker + "\n", "\n" + action.end_marker + "\n",
                      tee=tee, target=target, original=original,
                      cancel_event=cancel_event, undo_label=_t(action.undo_key),
                      question_patterns=patterns_absent_from(original, action.question_patterns),
                      edit_by=action.edit_by, skip_unchanged=True)
-    prompt = (f"{action.labels[0]} :\n{original}\n\n{rules}\n"
+    prompt = (f"{action.sent_label} :\n{original}\n\n{rules}\n"
               "Garde les lignes du texte : une ligne rendue par ligne non vide reçue, "
               "dans le même ordre.\n"
               "Ne pose AUCUNE question.\n"
               "Produis UNIQUEMENT le texte demandé, sans introduction ni commentaire.\n\n"
-              f"{action.labels[1]} :\n")
+              f"{action.answer_label} :\n")
     step = _text_client(shell, _rewrite_budget(len(original))).step(
         [{"role": "system", "content": action.system},
          {"role": "user", "content": prompt}],
@@ -456,7 +469,7 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
         return Failed("paragraphs_mismatch")
     if sink.objects_kept:
         return _t("preset.objects_kept")
-    return _outcome(sink, _t(action.done_keys[0 if append_mode else 1]))
+    return _outcome(sink, action.done(document=False, append_mode=append_mode))
 
 
 def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode, progress):
@@ -475,7 +488,7 @@ def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode,
     kept = []
     apply = _paragraphs_writer(ctx, snapshot, result.drafts, changed, action, append_mode, kept)
     message = _write_document(ctx, snapshot, result, apply, _t(action.undo_key), cancel_event,
-                              _t(action.done_keys[2 if append_mode else 3]))
+                              action.done(document=True, append_mode=append_mode))
     return _with_kept(message, sum(kept), len(changed))
 
 
@@ -487,7 +500,8 @@ def _paragraphs_writer(ctx, snapshot, drafts, changed, action, append_mode, kept
     de paragraphes laissés tels quels (voir `whole_document.apply_edits`)."""
     if append_mode:
         lines = [(draft.paragraphs[0], snapshot.styles[draft.indexes[0]]) for draft in drafts]
-        return lambda: whole_document.append_block(ctx, snapshot, lines, *action.markers)
+        return lambda: whole_document.append_block(ctx, snapshot, lines, action.begin_marker,
+                                                   action.end_marker)
     edits = {draft.indexes[0]: (draft.paragraphs[0], word_edits.plan(
         snapshot.texts[draft.indexes[0]], draft.paragraphs[0], by_word=action.edit_by == "word"))
         for draft in changed}
