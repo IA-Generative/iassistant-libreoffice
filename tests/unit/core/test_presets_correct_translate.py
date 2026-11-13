@@ -9,7 +9,13 @@ from src.mirai.core import presets, prompts
 from src.mirai.core.context import ToolContext
 from src.mirai.i18n import t as _t
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
-from tests.stubs.fake_writer_body import BREAK, TABLE, Anchored, FakeBodyDoc
+from tests.stubs.fake_writer_body import (
+    BREAK,
+    TABLE,
+    WINDOWS_BREAK,
+    Anchored,
+    FakeBodyDoc,
+)
 
 BOLD = "gras"
 ITALIC = "italique"
@@ -329,6 +335,19 @@ def test_translate_writes_a_selection_of_several_paragraphs_line_by_line():
     presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
 
     assert doc.selection.runs() == [("First.\n", None), ("Title", BOLD)]
+    assert doc.selection.anchored() == ["ParagraphBreak"]
+
+
+def test_correct_keeps_the_paragraphs_of_a_selection_read_with_windows_breaks():
+    """Sous Windows, Writer sépare les paragraphes d'une plage lue par
+    « \\r\\n », qui n'occupe qu'une position."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Titre", None), WINDOWS_BREAK, ("Le ", None),
+                                             ("délai", BOLD), (" est fixer.", None)])
+    shell = _reply("Titre\nLe délai est fixé.")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.runs() == [("Titre\r\nLe ", None), ("délai", BOLD), (" est fixé.", None)]
     assert doc.selection.anchored() == ["ParagraphBreak"]
 
 

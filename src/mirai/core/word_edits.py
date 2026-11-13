@@ -30,7 +30,7 @@ def plan(old, new, by_word=True):
 
     Calcul pur, à faire dans le worker : comparer un long texte prend du
     temps, qui ne doit pas figer LibreOffice."""
-    old_lines, new_lines = old.split("\n"), new.split("\n")
+    old_lines, new_lines = _plain(old).split("\n"), _plain(new).split("\n")
     if len(old_lines) != len(new_lines):
         old_lines, new_lines = [old], [new]
     edits, offset = [], 0
@@ -41,6 +41,12 @@ def plan(old, new, by_word=True):
             edits.append((offset, offset + len(old_line), new_line))
         offset += len(old_line) + 1
     return edits[::-1]
+
+
+def _plain(text):
+    """Sous Windows, Writer sépare les paragraphes d'une plage lue par « \\r\\n »,
+    qui n'occupe pourtant qu'une position, comme le « \\n » des autres systèmes."""
+    return text.replace("\r\n", "\n")
 
 
 def _segment(old, new, offset):
@@ -69,11 +75,12 @@ def apply(rng, old, new, edits):
     texte lu), tout le texte est écrit d'un coup, comme les autres actions.
     Thread principal exclusivement."""
     text = rng.getText()
+    old = _plain(old)
     for start, end, replacement in edits:
         cursor = text.createTextCursorByRange(rng.getStart())
         _go_right(cursor, start, False)
         _go_right(cursor, end - start, True)
-        if cursor.getString() != old[start:end]:
+        if _plain(cursor.getString()) != old[start:end]:
             rng.setString(new)
             return
         cursor.setString(replacement)
