@@ -111,8 +111,9 @@ REASONING_PANE = "reasoning"
 BOTTOM_PANES = tuple(tab_id for tab_id, _ in TABS)
 
 # Liens distribués par le DM (config.links) que la palette sait montrer, dans
-# l'ordre d'affichage. Un rôle absent de la config n'a pas de ligne : rien n'est
-# codé en dur, le DM décide (contrat DM §4.2 bis).
+# l'ordre d'affichage : les rôles sont fixés ici, libellés et destinations
+# viennent du serveur (contrat DM §4.2 bis). Un rôle absent de la config n'a
+# pas de ligne. La liste est relue à chaque construction de la palette.
 LINK_IDS = ("search-portal", "beta-feedback")
 
 # Le retour d'un run doit se VOIR : une ligne de statut colorée selon l'issue.
