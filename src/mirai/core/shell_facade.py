@@ -53,7 +53,8 @@ class MainJobShell:
 
     def open_link(self, url):
         """Ouvre l'URL dans le navigateur de l'utilisateur (jamais dans le journal)."""
-        self._job._open_url_config("", url)
+        # Aucune clé de config à lire : l'URL explicite court-circuite la recherche.
+        self._job._open_url_config("", url=url)
 
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):
         """Request chat/completions authentifiée, clamps réappliqués, corps enrichi.
