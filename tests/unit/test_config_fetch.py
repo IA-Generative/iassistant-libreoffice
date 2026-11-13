@@ -1,8 +1,4 @@
-"""Perf du fetch de config : ordre de failover (DM gagnant en premier),
-timeout configurable, et cache-first (persist/hydrate hors réseau).
-
-Run:  pytest tests/unit/test_config_fetch_perf.py -v
-"""
+"""Récupération de la config DM : ordre des bases, cache et délai."""
 import os
 import time
 from unittest.mock import MagicMock

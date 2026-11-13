@@ -162,6 +162,7 @@ from .i18n import (
     get_locale as _i18n_get_locale,
     set_locale as _i18n_set_locale,
 )
+from .shell import dm_bases
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
 from .shell.settings_result import apply_settings_result
@@ -988,23 +989,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return True
 
     def _bootstrap_urls(self):
-        """Ordered list of DM bootstrap base URLs (failover).
-
-        Reads the `bootstrap_urls` list when present; otherwise falls back to the
-        legacy single `bootstrap_url` string. Empty entries are dropped.
-        """
-        result = []
-        urls = self._get_config_from_file("bootstrap_urls", None)
-        if isinstance(urls, (list, tuple)):
-            for item in urls:
-                value = str(item or "").strip()
-                if value and value not in result:
-                    result.append(value)
-        if not result:
-            legacy = str(self._get_config_from_file("bootstrap_url", "") or "").strip()
-            if legacy:
-                result.append(legacy)
-        return result
+        """Ordered list of DM bootstrap base URLs (failover)."""
+        return dm_bases.baked_list(self._get_config_from_file("bootstrap_urls", None),
+                                   self._get_config_from_file("bootstrap_url", ""))
 
     def _failover_ordered_urls(self):
         """Bootstrap URLs with the DM that last answered tried first.
@@ -1034,50 +1021,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """The DM base URL that last answered (failover winner), else the last-good
         persisted one, else the first configured. Telemetry / enroll / update must
         target the same DM that served the config, so they read this rather than the
-        raw key — otherwise a fresh MainJob (or a config read from cache) would fall
-        back to `urls[0]`, which may be an internal-only DM unreachable from here.
+        raw key.
         """
-        resolved = str(self._resolved_bootstrap_url or "").strip()
-        if resolved:
-            return resolved
-        persisted = str(self._get_config_from_file("last_bootstrap_url", "") or "").strip()
-        urls = self._bootstrap_urls()
-        if persisted and persisted.rstrip("/") in {url.rstrip("/") for url in urls}:
-            return persisted
-        return urls[0] if urls else ""
+        return dm_bases.active_base(self._resolved_bootstrap_url,
+                                    self._get_config_from_file("last_bootstrap_url", ""),
+                                    self._bootstrap_urls())
 
     def _is_insecure_bootstrap_url(self, url):
-        """True when `url`'s host is declared in `bootstrap_insecure_urls`.
-
-        This is the per-URL `-k` allowlist: an internal cluster route (e.g. an
-        OCP bootstrap behind a private CA) can skip cert verification while the
-        public DMs stay verified. Matching is by hostname so it holds whether we
-        pass a bare base URL or a full request URL (base + config_path).
-        """
-        patterns = self._get_config_from_file("bootstrap_insecure_urls", None)
-        if not isinstance(patterns, (list, tuple)):
-            return False
-        try:
-            target_host = (urllib.parse.urlsplit(str(url or "").strip()).hostname or "").lower()
-        except Exception:
-            target_host = ""
-        if not target_host:
-            return False
-        for item in patterns:
-            value = str(item or "").strip()
-            if not value:
-                continue
-            host = ""
-            try:
-                host = urllib.parse.urlsplit(value).hostname or ""
-            except Exception:
-                host = ""
-            if not host:
-                # Tolerate bare host entries written without a scheme.
-                host = value.split("/")[0]
-            if host and host.lower() == target_host:
-                return True
-        return False
+        """True when `url`'s host is declared in `bootstrap_insecure_urls`."""
+        return dm_bases.is_insecure_url(
+            url, self._get_config_from_file("bootstrap_insecure_urls", None))
 
     def _fetch_config(self, force=False):
         if not force and not self._device_management_enabled():
