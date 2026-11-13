@@ -2331,8 +2331,21 @@ def test_footer_shows_the_dm_links_it_knows_and_only_those(palette_module):
     names = set(palette_module._fake_dialog.model.names)
     assert "link_search_portal" in names
     assert "link_beta_feedback" not in names
-    assert palette._models["link_search_portal"].Label == "Portail (en bêta) ↗"
-    palette._layout(width=900)   # la ligne de lien se place sans erreur
+    assert palette._models["link_search_portal"].Label == "Portail ↗"
+    assert palette._models["link_search_portal_hint"].Label == "en bêta"
+    palette._layout(width=900)   # les lignes de lien se placent sans erreur
+
+
+def test_a_hint_with_a_target_opens_it_from_its_own_row(palette_module):
+    """Le complément du lien a sa propre ligne : son clic ouvre sa cible, pas celle du lien."""
+    links = {"search-portal": {"id": "search-portal", "label": "Portail", "url": "https://p.fake-domain.name/",
+                               "hint": "s'inscrire", "hintUrl": "https://c.fake-domain.name/invite"}}
+    palette = build_palette(palette_module, links=links)
+    hint = palette_module._fake_dialog.getControl("link_search_portal_hint")
+    assert palette._models["link_search_portal_hint"].Label == "s'inscrire ↗"
+    next(h for h in hint.listeners if hasattr(h, "mousePressed")).mousePressed(None)
+    palette.shell.open_link.assert_called_once_with("https://c.fake-domain.name/invite")
+    palette.shell.telemetry.assert_called_with("LinkClick", {"link": "search-portal.hint"})
 
 
 def test_footer_has_no_link_line_when_the_dm_serves_none(palette_module):

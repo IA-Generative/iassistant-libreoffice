@@ -1658,18 +1658,33 @@ class AssistantPalette:
         return y
 
     def _add_dm_links(self, dialog, model, font):
-        """Une ligne par lien DM connu ; le libellé vient du serveur."""
+        """Une ligne par lien DM connu, son hint dessous ; les libellés viennent du serveur."""
         for link_id in LINK_IDS:
             link = self.shell.get_link(link_id)
             if not link:
                 continue
             name = "link_" + link_id.replace("-", "_")
-            label = link["label"] + (f" ({link['hint']})" if link.get("hint") else "") + " ↗"
             _, link_model = dsfr.add_link(
-                dialog, model, name, label, 0, 0, 120, 16, font,
+                dialog, model, name, link["label"] + " ↗", 0, 0, 120, 16, font,
                 lambda u=target_url(link), i=link_id: self._on_link(i, u))
             self._models[name] = link_model
             self._link_names.append(name)
+            if link.get("hint"):
+                self._add_link_hint(dialog, model, font, name + "_hint", link_id, link)
+
+    def _add_link_hint(self, dialog, model, font, name, link_id, link):
+        """Le hint est un lien quand le DM lui donne une cible, du texte sinon."""
+        if link.get("hintUrl"):
+            _, hint_model = dsfr.add_link(
+                dialog, model, name, link["hint"] + " ↗", 0, 0, 120, 16, font,
+                lambda u=link["hintUrl"], i=link_id + ".hint": self._on_link(i, u))
+        else:
+            _, hint_model = dsfr.add_control(
+                dialog, model, name, "FixedText", 0, 0, 120, 16, {
+                    "Label": link["hint"], "TextColor": dsfr.TOKENS["text_mention"],
+                    "FontName": font, "FontHeight": 8})
+        self._models[name] = hint_model
+        self._link_names.append(name)
 
     def _on_link(self, link_id, url):
         self.shell.telemetry("LinkClick", {"link": link_id})
