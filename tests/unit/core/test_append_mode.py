@@ -50,7 +50,8 @@ def test_every_writer_preset_accepts_the_choice():
 
 
 def test_defaults_match_historic_behaviour():
-    """Sans choix transmis, chaque preset garde son comportement d'origine."""
+    """Sans choix transmis, Résumer et Simplifier ajoutent à la suite ; les
+    autres actions remplacent le texte."""
     import inspect
 
     from src.mirai.core import presets
