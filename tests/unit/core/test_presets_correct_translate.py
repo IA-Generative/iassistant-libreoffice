@@ -380,17 +380,23 @@ def test_translate_reads_a_typed_phrase_as_the_target_language():
     assert "en en " not in prompt
 
 
+def _translation_system():
+    doc = FakeBodyDoc(["Avant."], selection="The deadline is set.")
+    shell = _reply("Le délai est fixé.")
+    presets.run_translate(_ctx(doc, shell), shell, "", None)
+    return shell.requests[0]["messages"][0]["content"]
+
+
 def test_translate_never_asks_the_model_to_keep_the_language():
     """La règle des autres actions, « réponds dans la même langue », ferait
     rendre le texte tel quel."""
-    doc = FakeBodyDoc(["Avant."], selection="The deadline is set.")
-    shell = _reply("Le délai est fixé.")
+    assert prompts.SAME_LANGUAGE_RULE not in _translation_system()
 
-    presets.run_translate(_ctx(doc, shell), shell, "", None)
 
-    system = shell.requests[0]["messages"][0]["content"]
-    assert prompts.SAME_LANGUAGE_RULE not in system
-    assert prompts.DOCUMENT_DATA_RULE in system
+def test_translate_treats_the_text_as_data_not_as_instructions():
+    """Un document reçu d'un tiers peut contenir des consignes : seule la
+    demande de l'utilisateur dit quoi faire."""
+    assert prompts.DOCUMENT_DATA_RULE in _translation_system()
 
 
 @pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
