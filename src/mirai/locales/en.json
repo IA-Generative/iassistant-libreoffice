@@ -162,6 +162,8 @@
   "preset.done_translate_document": "Translation of the document inserted after the last paragraph.",
   "preset.done_translate_document_replaced": "Document translated.",
   "preset.already_in_language": "The text is already in the requested language: nothing was written. Type the language you want in the input field, then click Translate again.",
+  "preset.objects_kept": "The passage contains a note, comment, field or image that rewriting would damage: nothing was written to the document. The result stays shown above, ready to copy.",
+  "preset.paragraphs_kept": "{count} paragraph(s) left as is, because of a note, comment, field or image that rewriting would damage.",
   "preset.target_changed": "The target text changed during generation: nothing was written to the document. The result stays shown above, ready to copy.",
   "preset.question_asked": "The model asked a question instead of answering. Try again.",
   "preset.done_transform": "{count} row(s) transformed into column {col}.",

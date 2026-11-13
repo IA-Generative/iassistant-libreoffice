@@ -44,16 +44,23 @@ def test_correct_replaces_only_the_wrong_word_of_the_selection():
     assert message == _t("preset.done_correct_replaced")
 
 
-def test_correct_writes_the_whole_text_when_a_field_shifts_the_positions():
-    """Un numéro de page qui affiche « 12 » ne compte que pour une position."""
-    doc = FakeBodyDoc(["Avant."], selection=[("Voir page ", None), Anchored("TextField", "12"),
-                                             (", le délai est fixer.", None)])
-    shell = _reply("Voir page 12, le délai est fixé.")
+@pytest.mark.parametrize("anchored", [Anchored("TextField", "12"), Anchored("Annotation")],
+                         ids=["field", "comment"])
+def test_correct_writes_nothing_when_an_object_shifts_the_positions(anchored):
+    """Un champ qui affiche « 12 », un commentaire qui ne se lit pas : chacun
+    n'occupe qu'une position. Les corrections tomberaient à côté, et récrire
+    le passage d'un coup effacerait l'objet."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Objet", None), anchored,
+                                             (" : Madame je vous informe.", None)])
+    original = doc.selection.getString()
+    shell = _reply(original.replace("Madame", "Madame,"))
 
-    presets.run_correct(_ctx(doc, shell), shell, "", None)
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
 
-    assert doc.selection.getString() == "Voir page 12, le délai est fixé."
-    assert doc.writes_outside_undo == 0
+    assert doc.selection.getString() == original
+    assert doc.selection.anchored() == [anchored.kind]
+    assert doc.writes == 0
+    assert message == _t("preset.objects_kept")
 
 
 def test_correct_reaches_a_mistake_beyond_what_one_cursor_move_covers():
@@ -157,6 +164,30 @@ def test_correct_without_selection_writes_nothing_when_the_reply_has_another_lin
     assert doc.paragraphs == ["Raport", "Le délai est fixer.", "Fin."]
     assert doc.writes == 0
     assert message == _t("run.err_paragraphs")
+
+
+def test_correct_without_selection_leaves_a_paragraph_with_a_comment_as_is_and_says_so():
+    doc = FakeBodyDoc([[("Objet", None), Anchored("Annotation"), (" : le délai est fixer.", None)],
+                       "Les pièces sont jointe."])
+    shell = _reply("Objet : le délai est fixé.\nLes pièces sont jointes.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.items[0].getString() == "Objet : le délai est fixer."
+    assert doc.items[0].anchored() == ["Annotation"]
+    assert doc.items[1].getString() == "Les pièces sont jointes."
+    assert message == (_t("preset.done_correct_document_replaced") + " "
+                       + _t("preset.paragraphs_kept", count=1))
+
+
+def test_correct_without_selection_writes_nothing_when_each_fix_would_damage_an_object():
+    doc = FakeBodyDoc([[("Objet", None), Anchored("Annotation"), (" : le délai est fixer.", None)]])
+    shell = _reply("Objet : le délai est fixé.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.writes == 0
+    assert message == _t("preset.paragraphs_kept", count=1)
 
 
 def test_correct_without_selection_leaves_tables_aside_and_says_so():

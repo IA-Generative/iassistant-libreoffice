@@ -201,6 +201,9 @@ class FakeInlineCursor:
     def collapseToStart(self):
         self.mark = self.point = self.start
 
+    def collapseToEnd(self):
+        self.mark = self.point = self.end
+
     def getString(self):
         return self.paragraph.read(self.paragraph.text[self.start:self.end])
 
@@ -209,7 +212,9 @@ class FakeInlineCursor:
         covered = self.paragraph.text[self.start:self.end]
         if not covered:
             return _enumeration([])
-        portions = [SimpleNamespace(TextPortionType=self.paragraph.kind(c)) for c in covered]
+        portions = [SimpleNamespace(TextPortionType=self.paragraph.kind(c),
+                                    getString=lambda c=c: self.paragraph.read(c))
+                    for c in covered]
         return _enumeration([SimpleNamespace(
             supportsService=lambda name: name == "com.sun.star.text.Paragraph",
             createEnumeration=lambda: _enumeration(portions))])
@@ -242,6 +247,11 @@ class FakeBodyText:
         if hasattr(position, "offset"):
             return FakeInlineCursor(self._doc, position.paragraph, position.offset)
         return FakeBodyCursor(self._doc, position)
+
+    def compareRegionEnds(self, first, second):
+        """1 si `first` finit avant `second`, 0 au même endroit, -1 après."""
+        ends = [r.end if isinstance(r, FakeInlineCursor) else len(r.text) for r in (first, second)]
+        return (ends[0] < ends[1]) - (ends[0] > ends[1])
 
     def removeTextContent(self, paragraph):
         # Comme Writer : quand les modifications sont enregistrées, rien

@@ -114,8 +114,10 @@ class WriterTargetSink(_FilteredWriterSink):
 
     Avec `edit_by` ("word" ou "line"), un remplacement ne réécrit que les mots
     ou les lignes qui changent : le reste garde sa mise en forme, et chaque
-    paragraphe sa place. Avec `skip_unchanged`, une réponse identique au texte
-    lu n'est pas écrite (`unchanged`).
+    paragraphe sa place. Rien n'est écrit si la cible contient un objet que
+    ces remplacements abîmeraient (`objects_kept`, voir `word_edits.apply`).
+    Avec `skip_unchanged`, une réponse identique au texte lu n'est pas écrite
+    (`unchanged`).
     """
 
     def __init__(self, ctx, target, append, header_marker, footer_marker,
@@ -134,6 +136,7 @@ class WriterTargetSink(_FilteredWriterSink):
         self.edit_by = edit_by
         self.skip_unchanged = skip_unchanged
         self.unchanged = False
+        self.objects_kept = False
         self.target_changed = False
         self.stopped = False
 
@@ -186,10 +189,13 @@ class WriterTargetSink(_FilteredWriterSink):
 
     def _replace_target(self, final, edits):
         written = self.target
-        if edits is not None:
-            written = word_edits.apply(self.target, self.original, final, edits)
-        else:
+        if edits is None:
             self.target.setString(final)
+        else:
+            written = word_edits.apply(self.target, self.original, final, edits)
+            if written is None:
+                self.objects_kept = True
+                return
         try:
             self.ctx.controller.select(written)
         except Exception:

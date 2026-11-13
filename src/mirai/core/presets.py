@@ -439,6 +439,8 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
     sink.finish(step.text, step.streamed)
     if sink.unchanged:
         return _t(action.unchanged_key)
+    if sink.objects_kept:
+        return _t("preset.objects_kept")
     return _outcome(sink, _t(action.done_keys[0 if append_mode else 1]))
 
 
@@ -455,23 +457,35 @@ def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode,
     changed = whole_document.changed(snapshot, result.drafts)
     if not (result.error or result.question or changed):
         return _t(action.unchanged_key)
-    apply = _paragraphs_writer(ctx, snapshot, result.drafts, changed, action, append_mode)
-    return _write_document(ctx, snapshot, result, apply, _t(action.undo_key), cancel_event,
-                           _t(action.done_keys[2 if append_mode else 3]))
+    kept = []
+    apply = _paragraphs_writer(ctx, snapshot, result.drafts, changed, action, append_mode, kept)
+    message = _write_document(ctx, snapshot, result, apply, _t(action.undo_key), cancel_event,
+                              _t(action.done_keys[2 if append_mode else 3]))
+    return _with_kept(message, sum(kept), len(changed))
 
 
-def _paragraphs_writer(ctx, snapshot, drafts, changed, action, append_mode):
+def _paragraphs_writer(ctx, snapshot, drafts, changed, action, append_mode, kept):
     """L'écriture, à faire sur le thread principal : les paragraphes changés à
     leur place, par mots ou par lignes selon l'action, ou tout le texte rendu
     après le document, chaque ligne dans le style de son paragraphe. Le plan
-    des remplacements se calcule ici, dans le worker."""
+    des remplacements se calcule ici, dans le worker. `kept` reçoit le nombre
+    de paragraphes laissés tels quels (voir `whole_document.apply_edits`)."""
     if append_mode:
         lines = [(draft.paragraphs[0], snapshot.styles[draft.indexes[0]]) for draft in drafts]
         return lambda: whole_document.append_block(ctx, snapshot, lines, *action.markers)
     edits = {draft.indexes[0]: (draft.paragraphs[0], word_edits.plan(
         snapshot.texts[draft.indexes[0]], draft.paragraphs[0], by_word=action.edit_by == "word"))
         for draft in changed}
-    return lambda: whole_document.apply_edits(snapshot, edits)
+    return lambda: kept.append(whole_document.apply_edits(snapshot, edits))
+
+
+def _with_kept(message, kept, changed):
+    """Le bilan, suivi du nombre de paragraphes laissés tels quels ; quand ils
+    le sont tous, rien n'a été écrit."""
+    if not kept:
+        return message
+    note = _t("preset.paragraphs_kept", count=kept)
+    return note if kept == changed else Written(message + " " + note)
 
 
 # Sans sélection, les actions Writer portent sur tout le document : le modèle

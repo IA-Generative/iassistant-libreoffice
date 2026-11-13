@@ -81,8 +81,15 @@ class _FakeInlineCursor:
     def collapseToStart(self):
         self.mark = self.point = self.start
 
+    def collapseToEnd(self):
+        self.mark = self.point = self.end
+
     def getString(self):
         return self._range._text[self.start:self.end]
+
+    def createEnumeration(self):
+        """Du texte seul : aucun objet ancré à rendre."""
+        return _FakeParagraphEnum([])
 
     def setString(self, value):
         text, start = self._range._text, self.start
@@ -98,6 +105,12 @@ class FakeWriterText:
         if isinstance(rng, SimpleNamespace) and hasattr(rng, "inline"):
             return _FakeInlineCursor(rng.inline)
         return FakeCursor(self._doc)
+
+    def compareRegionEnds(self, first, second):
+        """1 si `first` finit avant `second`, 0 au même endroit, -1 après."""
+        ends = [r.end if isinstance(r, _FakeInlineCursor) else len(r._text)
+                for r in (first, second)]
+        return (ends[0] < ends[1]) - (ends[0] > ends[1])
 
     def createTextCursor(self):
         return FakeCursor(self._doc)

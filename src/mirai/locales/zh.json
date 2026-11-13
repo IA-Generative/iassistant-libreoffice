@@ -162,6 +162,8 @@
   "preset.done_translate_document": "文档的译文已插入到最后一段之后。",
   "preset.done_translate_document_replaced": "文档已翻译。",
   "preset.already_in_language": "文本已是所要求的语言：未写入任何内容。请在输入框中输入目标语言，然后再次点击“翻译”。",
+  "preset.objects_kept": "该段落包含改写会损坏的脚注、批注、字段或图片：未向文档写入任何内容。结果仍显示在上方，可直接复制。",
+  "preset.paragraphs_kept": "已保留 {count} 个段落原样：其中包含改写会损坏的脚注、批注、字段或图片。",
   "preset.target_changed": "生成期间目标文本已被修改：未向文档写入任何内容。结果仍显示在上方，可直接复制。",
   "preset.question_asked": "模型提出了问题而没有作答。请重试。",
   "preset.done_transform": "已将 {count} 行转换为 {col} 列。",

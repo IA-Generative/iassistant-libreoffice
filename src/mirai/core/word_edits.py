@@ -14,6 +14,11 @@ import re
 # pour qu'une virgule ajoutée ne remplace pas le mot qui la précède.
 _TOKEN = re.compile(r"\w+|\s+|[^\w\s]")
 
+# Portions qui occupent une seule position du texte mais se lisent autrement
+# qu'un caractère : une note (son numéro), un commentaire (rien), un champ (sa
+# valeur), une image ancrée comme caractère (rien).
+_OBJECTS = {"Footnote", "Annotation", "AnnotationEnd", "TextField", "Frame"}
+
 # XTextCursor.goRight et goLeft prennent un short.
 _MAX_STEP = 2 ** 15 - 1
 
@@ -59,6 +64,24 @@ def _segment(old, new, offset):
             for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
 
 
+def _objects(cursor):
+    """Ce que donne à lire chaque objet ancré que couvre `cursor`. Un tableau
+    compte pour un objet qui ne se lit pas."""
+    reads = []
+    paragraphs = cursor.createEnumeration()
+    while paragraphs.hasMoreElements():
+        paragraph = paragraphs.nextElement()
+        if not paragraph.supportsService("com.sun.star.text.Paragraph"):
+            reads.append("")
+            continue
+        portions = paragraph.createEnumeration()
+        while portions.hasMoreElements():
+            portion = portions.nextElement()
+            if portion.TextPortionType in _OBJECTS:
+                reads.append(portion.getString())
+    return reads
+
+
 def _go_right(cursor, count, expand):
     _go(cursor.goRight, count, expand)
 
@@ -79,23 +102,24 @@ def apply(rng, old, new, edits):
     `edits` de `plan`, et rend la plage écrite, à sélectionner : `rng` ne
     couvre plus un texte remplacé à l'un de ses bords.
 
-    Avant chaque remplacement, le curseur doit couvrir le texte attendu. Sinon
-    (un champ, une note ou un saut de paragraphe ne compte pas comme dans le
-    texte lu), tout le texte est écrit d'un coup, comme les autres actions.
+    Rend None sans rien écrire si la plage ne se lit pas position par position
+    comme `old` : un champ, un commentaire ou une image y occupe une position
+    mais se lit autrement, et les remplacements tomberaient à côté.
     Un seul curseur remonte la plage depuis sa fin, d'un remplacement au
     précédent : le thread principal ne la parcourt qu'une fois.
     Thread principal exclusivement."""
-    text = rng.getText()
     old = _plain(old)
+    text = rng.getText()
     cursor = text.createTextCursorByRange(rng.getStart())
-    _go_right(cursor, len(old), False)
+    _go_right(cursor, len(old), True)
+    if (_plain(cursor.getString()) != old or text.compareRegionEnds(cursor, rng)
+            or any(len(read) != 1 for read in _objects(cursor))):
+        return None
+    cursor.collapseToEnd()
     position = len(old)
     for start, end, replacement in edits:
         _go_left(cursor, position - end, False)
         _go_left(cursor, end - start, True)
-        if _plain(cursor.getString()) != old[start:end]:
-            rng.setString(new)
-            return rng
         cursor.setString(replacement)
         cursor.collapseToStart()
         position = start

@@ -162,6 +162,8 @@
   "preset.done_translate_document": "Traducción del documento insertada tras el último párrafo.",
   "preset.done_translate_document_replaced": "Documento traducido.",
   "preset.already_in_language": "El texto ya está en el idioma solicitado: no se escribió nada. Escriba el idioma deseado en el campo de entrada y vuelva a hacer clic en Traducir.",
+  "preset.objects_kept": "El pasaje contiene una nota, un comentario, un campo o una imagen que la reescritura dañaría: no se escribió nada en el documento. El resultado sigue mostrado arriba, listo para copiar.",
+  "preset.paragraphs_kept": "{count} párrafo(s) dejado(s) tal cual, por una nota, un comentario, un campo o una imagen que la reescritura dañaría.",
   "preset.target_changed": "El texto de destino cambió durante la generación: no se escribió nada en el documento. El resultado sigue mostrado arriba, listo para copiar.",
   "preset.question_asked": "El modelo hizo una pregunta en lugar de responder. Inténtelo de nuevo.",
   "preset.done_transform": "{count} fila(s) transformada(s) en la columna {col}.",

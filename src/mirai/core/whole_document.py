@@ -344,9 +344,14 @@ def replace(ctx, snapshot, drafts):
 def apply_edits(snapshot, edits):
     """Écrit chaque paragraphe récrit par morceaux : `edits` donne, par index
     de paragraphe, le texte rendu et les remplacements de `word_edits.plan`.
-    Thread principal exclusivement."""
+    Rend le nombre de paragraphes laissés tels quels, parce qu'un objet qu'ils
+    contiennent serait abîmé (voir `word_edits.apply`). Thread principal
+    exclusivement."""
+    kept = 0
     for index, (new, plan) in edits.items():
-        word_edits.apply(snapshot.paragraphs[index], snapshot.texts[index], new, plan)
+        if word_edits.apply(snapshot.paragraphs[index], snapshot.texts[index], new, plan) is None:
+            kept += 1
+    return kept
 
 
 def headings_kept(snapshot, drafts):
