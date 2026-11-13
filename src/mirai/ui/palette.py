@@ -709,7 +709,9 @@ class AssistantPalette:
             self._handlers.append(handler)
 
         # Réglages / À propos / Documentation vivent UNIQUEMENT dans le menu
-        # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler.
+        # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler. Seuls les
+        # liens distribués par le DM s'y ajoutent : le menu, statique
+        # (Addons.xcu), ne peut pas les porter.
         dsfr.add_link(dialog, model, "link_clear", _t("palette.new_conversation"),
                       0, 0, 120, 16, font, self._on_clear)
         _, hint_model = dsfr.add_control(
