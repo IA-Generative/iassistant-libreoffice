@@ -333,8 +333,10 @@ def test_the_table_of_contents_is_never_rewritten():
 
 
 @pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
-                                    presets.run_shorten, presets.run_lengthen],
-                         ids=["summarize", "simplify", "shorten", "lengthen"])
+                                    presets.run_shorten, presets.run_lengthen,
+                                    presets.run_correct, presets.run_translate],
+                         ids=["summarize", "simplify", "shorten", "lengthen",
+                              "correct", "translate"])
 def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
     """Des cellules de tableau sélectionnées : Writer rend un curseur de
     tableau, pas une plage de texte. Rien n'est envoyé ni écrit."""
@@ -350,8 +352,10 @@ def test_a_selection_that_is_not_text_leaves_the_document_alone(runner):
 
 
 @pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
-                                    presets.run_shorten, presets.run_lengthen],
-                         ids=["summarize", "simplify", "shorten", "lengthen"])
+                                    presets.run_shorten, presets.run_lengthen,
+                                    presets.run_correct, presets.run_translate],
+                         ids=["summarize", "simplify", "shorten", "lengthen",
+                              "correct", "translate"])
 def test_several_selected_passages_are_refused_without_calling_the_model(runner):
     """Une sélection multiple (Ctrl) : l'action ne traiterait que le premier
     passage. Elle le dit, sans rien envoyer ni écrire."""
@@ -368,7 +372,8 @@ def test_several_selected_passages_are_refused_without_calling_the_model(runner)
 
 
 @pytest.mark.parametrize("runner", [presets.run_summarize, presets.run_simplify,
-                                    presets.run_shorten, presets.run_lengthen])
+                                    presets.run_shorten, presets.run_lengthen,
+                                    presets.run_correct, presets.run_translate])
 @pytest.mark.parametrize("whole_document", [False, True], ids=["selection", "document"])
 def test_the_gauge_follows_the_reply_of_a_writer_action(runner, whole_document):
     """Pendant la génération, la jauge quitte « Connexion… » et compte les

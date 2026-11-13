@@ -9,8 +9,10 @@ delta, puis finish). Les sinks Writer et Calc reportent chaque accès UNO sur
 le thread principal via ctx.on_main.
 """
 
+from . import word_edits
 from .text_filters import (
     contains_pattern,
+    same_text,
     stop_phrase_position,
     strip_markdown,
 )
@@ -109,11 +111,17 @@ class WriterTargetSink(_FilteredWriterSink):
     question du modèle, après un arrêt (`stopped`), ni si la cible ne contient
     plus le texte lu avant le run (`target_changed`) : le résultat reste alors
     dans la palette.
+
+    Avec `edit_by` ("word" ou "line"), un remplacement ne réécrit que les mots
+    ou les lignes qui changent : le reste garde sa mise en forme, et chaque
+    paragraphe sa place. Avec `skip_unchanged`, une réponse identique au texte
+    lu n'est pas écrite (`unchanged`).
     """
 
     def __init__(self, ctx, target, append, header_marker, footer_marker,
                  original="", undo_label="", cancel_event=None,
-                 question_patterns=None, stop_phrases=None, tee=None):
+                 question_patterns=None, stop_phrases=None, tee=None,
+                 edit_by=None, skip_unchanged=False):
         super().__init__(ctx, question_patterns=question_patterns,
                          stop_phrases=stop_phrases, tee=tee)
         self.target = target
@@ -123,6 +131,9 @@ class WriterTargetSink(_FilteredWriterSink):
         self.original = original
         self.undo_label = undo_label
         self.cancel_event = cancel_event
+        self.edit_by = edit_by
+        self.skip_unchanged = skip_unchanged
+        self.unchanged = False
         self.target_changed = False
         self.stopped = False
 
@@ -134,10 +145,15 @@ class WriterTargetSink(_FilteredWriterSink):
         self._replay(text)
         if self.question_detected or not self.accumulated.strip():
             return
+        if self.skip_unchanged and same_text(self.accumulated, self.original):
+            self.unchanged = True
+            return
         final = self.accumulated if self.append else self.accumulated.strip()
-        self.ctx.on_main(lambda: self._write_on_main(final))
+        edits = (word_edits.plan(self.original, final, by_word=self.edit_by == "word")
+                 if self.edit_by and not self.append else None)
+        self.ctx.on_main(lambda: self._write_on_main(final, edits))
 
-    def _write_on_main(self, final):
+    def _write_on_main(self, final, edits=None):
         """Thread principal exclusivement, celui du bouton Arrêter : un arrêt
         demandé avant cette écriture est donc toujours vu. Rien n'est écrit
         après un arrêt, ni si la cible a été modifiée pendant le run."""
@@ -153,7 +169,7 @@ class WriterTargetSink(_FilteredWriterSink):
             if self.append:
                 self._insert_after_target(final)
             else:
-                self._replace_target(final)
+                self._replace_target(final, edits)
         finally:
             undo.leaveUndoContext()
 
@@ -168,8 +184,11 @@ class WriterTargetSink(_FilteredWriterSink):
         except Exception:
             pass
 
-    def _replace_target(self, final):
-        self.target.setString(final)
+    def _replace_target(self, final, edits):
+        if edits is not None:
+            word_edits.apply(self.target, self.original, final, edits)
+        else:
+            self.target.setString(final)
         try:
             self.ctx.controller.select(self.target)
         except Exception:

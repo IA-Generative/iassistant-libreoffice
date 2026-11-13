@@ -5,6 +5,10 @@ Il sert aux actions qui portent sur tout le document : ce qu'elles écrivent,
 où, avec quel style, et si l'écriture a eu lieu dans une action d'annulation,
 se lit directement sur `paragraphs`, `styles` et `undo`. `TABLE` à la place
 d'un texte met un tableau dans le corps ; `tables` dit combien il en reste.
+
+Un paragraphe, comme la sélection, peut aussi être donné en passages
+`[(texte, mise en forme), …]` : chaque caractère garde la mise en forme de son
+passage, et `runs()` dit ce qu'il en reste après l'action.
 """
 
 from types import SimpleNamespace
@@ -25,7 +29,12 @@ class FakeTable:
 class FakeParagraph:
     def __init__(self, doc, text, style):
         self._doc = doc
-        self.text = text
+        if isinstance(text, list):
+            self.text = "".join(part for part, _ in text)
+            self.formats = [fmt for part, fmt in text for _ in part]
+        else:
+            self.text = text
+            self.formats = [None] * len(text)
         self.style = style
         self.index = None        # index (table des matières…) qui contient le paragraphe
 
@@ -36,8 +45,29 @@ class FakeParagraph:
         return self.text
 
     def setString(self, text):
+        # Comme Writer : le nouveau texte prend la mise en forme du premier
+        # caractère remplacé.
         self._doc.record_write()
+        first = self.formats[0] if self.formats else None
         self.text = text
+        self.formats = [first] * len(text)
+
+    def runs(self):
+        """[(texte, mise en forme)] : les caractères consécutifs de même mise
+        en forme, regroupés."""
+        result = []
+        for char, fmt in zip(self.text, self.formats, strict=True):
+            if result and result[-1][1] == fmt:
+                result[-1] = (result[-1][0] + char, fmt)
+            else:
+                result.append((char, fmt))
+        return result
+
+    def getText(self):
+        return self._doc.Text
+
+    def getStart(self):
+        return UnoStruct(paragraph=self, offset=0)
 
     def getPropertyValue(self, name):
         if name == "ParaStyleName":
@@ -87,6 +117,44 @@ class FakeBodyCursor:
         self.anchor.style = value
 
 
+class FakeInlineCursor:
+    """Curseur posé dans le texte d'un paragraphe : il avance caractère par
+    caractère, sans jamais dépasser la fin du paragraphe, et remplace ce qu'il
+    couvre."""
+
+    def __init__(self, doc, paragraph, offset):
+        self._doc = doc
+        self.paragraph = paragraph
+        self.start = self.end = offset
+
+    def goRight(self, count, expand):
+        if not -2 ** 15 <= count < 2 ** 15:
+            raise OverflowError("goRight prend un short")
+        whole = self.end + count <= len(self.paragraph.text)
+        self.end = min(self.end + count, len(self.paragraph.text))
+        if not expand:
+            self.start = self.end
+        return whole
+
+    def getString(self):
+        return self.paragraph.text[self.start:self.end]
+
+    def setString(self, text):
+        # Comme Writer : le texte remplaçant prend la mise en forme du premier
+        # caractère remplacé ; inséré, celle du caractère qui le précède.
+        self._doc.record_write()
+        p = self.paragraph
+        if self.end > self.start:
+            fmt = p.formats[self.start]
+        elif self.start:
+            fmt = p.formats[self.start - 1]
+        else:
+            fmt = p.formats[0] if p.formats else None
+        p.text = p.text[:self.start] + text + p.text[self.end:]
+        p.formats = p.formats[:self.start] + [fmt] * len(text) + p.formats[self.end:]
+        self.end = self.start + len(text)
+
+
 class FakeBodyText:
     def __init__(self, doc):
         self._doc = doc
@@ -97,6 +165,8 @@ class FakeBodyText:
                                nextElement=lambda: items.pop(0))
 
     def createTextCursorByRange(self, position):
+        if hasattr(position, "offset"):
+            return FakeInlineCursor(self._doc, position.paragraph, position.offset)
         return FakeBodyCursor(self._doc, position)
 
     def removeTextContent(self, paragraph):
@@ -116,6 +186,7 @@ class FakeBodyText:
     def insertString(self, cursor, text, _absorb):
         self._doc.record_write()
         cursor.anchor.text += text
+        cursor.anchor.formats += [None] * len(text)
 
 
 class FakeUndo:
@@ -139,7 +210,7 @@ class FakeBodyDoc:
     d'annulation. Les écritures faites hors d'une action d'annulation sont
     comptées dans `writes_outside_undo`."""
 
-    def __init__(self, paragraphs, styles=None, selection_text=""):
+    def __init__(self, paragraphs, styles=None, selection=""):
         styles = list(styles or ["Standard"] * len(paragraphs))
         self.items = [FakeTable() if text is TABLE else FakeParagraph(self, text, style)
                       for text, style in zip(paragraphs, styles, strict=True)]
@@ -148,10 +219,12 @@ class FakeBodyDoc:
         self.undo = FakeUndo()
         self.writes = 0
         self.writes_outside_undo = 0
-        selection = SimpleNamespace(getString=lambda: selection_text)
+        # La sélection, hors du corps : un passage du document qu'une action
+        # peut lire et réécrire.
+        self.selection = FakeParagraph(self, selection, "Standard")
         self.controller = SimpleNamespace(
             getSelection=lambda: SimpleNamespace(getCount=lambda: 1,
-                                                 getByIndex=lambda _i: selection),
+                                                 getByIndex=lambda _i: self.selection),
             getViewCursor=lambda: SimpleNamespace(gotoRange=lambda *_a: None),
             select=lambda _target: None)
         self.CurrentController = self.controller
