@@ -40,7 +40,7 @@ def test_candidates_follow_the_announced_list_then_the_baked_one_then_the_last_w
                                     "https://c") == ["https://b", "https://a", "https://c"]
 
 
-def test_the_last_winner_no_longer_orders_the_list():
+def test_the_last_winner_does_not_order_the_candidates():
     assert dm_bases.candidate_order(None, ["https://a", "https://b"], "https://b") == [
         "https://a", "https://b"]
 
