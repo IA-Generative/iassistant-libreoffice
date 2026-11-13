@@ -136,6 +136,19 @@ def test_correct_keeps_the_non_breaking_spaces_the_reply_turns_into_spaces():
     assert doc.selection.getString() == "Le délai est fixé\u00a0: demain, soit 10\u202f000 euros."
 
 
+def test_correct_rewrites_only_the_wrong_characters_of_a_chinese_sentence():
+    """Le chinois s'écrit sans espaces : un mot en gras entre deux fautes
+    garde son gras."""
+    doc = FakeBodyDoc(["Avant."], selection=[("我们已经收刀了", None), ("您的", BOLD),
+                                             ("申清，期限是明天。", None)])
+    shell = _reply("我们已经收到了您的申请，期限是明天。")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.runs() == [("我们已经收到了", None), ("您的", BOLD),
+                                    ("申请，期限是明天。", None)]
+
+
 def test_correct_writes_nothing_when_the_reply_is_cut_short():
     """Une réponse arrêtée par le plafond de jetons : la fin manquante
     supprimerait la fin de la sélection."""

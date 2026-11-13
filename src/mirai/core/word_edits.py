@@ -12,8 +12,10 @@ import os
 import re
 
 # Un mot, une suite d'espaces ou un signe : la comparaison se fait à ce grain,
-# pour qu'une virgule ajoutée ne remplace pas le mot qui la précède.
-_TOKEN = re.compile(r"\w+|\s+|[^\w\s]")
+# pour qu'une virgule ajoutée ne remplace pas le mot qui la précède. Le
+# chinois et le japonais s'écrivent sans espaces : chaque idéogramme ou kana y
+# compte pour un mot.
+_TOKEN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]|\w+|\s+|[^\w\s]")
 
 # Portions qui occupent une seule position du texte mais se lisent autrement
 # qu'un caractère : une note (son numéro), un commentaire (rien), un champ (sa
