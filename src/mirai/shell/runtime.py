@@ -15,6 +15,11 @@ class ShellRuntime:
         self.enrollment_dismissed = False
         self.enrollment_wizard_active = False
         self.enrollment_wizard_lock = threading.Lock()
+        # Bases DM (normalisées) qui n'ont répondu à aucune récupération de config
+        # dans ce processus : essayées en dernier et ignorées par la passation,
+        # sinon chaque récupération paierait leur délai ; une base redevient saine
+        # dès qu'elle répond.
+        self.unreachable_dm_bases = set()
 
         self.update_in_progress = False
         self.update_lock = threading.Lock()

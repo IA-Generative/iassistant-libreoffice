@@ -1,53 +1,226 @@
 """Récupération de la config DM : ordre des bases, cache et délai."""
 import os
 import time
+import urllib.error
 from unittest.mock import MagicMock
 
 from src.mirai import local_config
-from tests.stubs.helpers import http_response
-from tests.stubs.uno_stubs import install, make_job
+from src.mirai.shell import runtime as shell_runtime
+from tests.stubs.helpers import http_response, make_update_directive
+from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
 
 install()
+
+A = "https://dm-a.example"
+B = "https://dm-b.example"
+C = "https://dm-c.example"
+
+
+class FakeDms:
+    """Un DM par base : chacun annonce sa liste, ne reconnaît que les paires qu'il
+    a émises, et mint un llmToken à une requête authentifiée seulement."""
+
+    def __init__(self):
+        self.announce = {A: [A], B: [B], C: [C]}
+        self.known = {A: set(), B: set(), C: set()}
+        self.down = set()
+        self.requests = []   # (base, valeur de X-Relay-Client ou None)
+
+    def __call__(self, request, **_kwargs):
+        base = next(b for b in self.announce if request.full_url.startswith(b + "/"))
+        client = request.get_header("X-relay-client")
+        self.requests.append((base, client))
+        if base in self.down:
+            raise urllib.error.URLError("down")
+        inner = {"enabled": True, "llm_base_urls": base + "/llm/v1"}
+        if self.announce[base] is not None:
+            inner["bootstrapUrls"] = self.announce[base]
+        if client in self.known[base]:
+            inner["llmToken"] = "token-from-" + base
+            inner["telemetryKey"] = "telemetry-" + base
+        else:
+            inner["llmToken"] = ""
+            inner["_auth_notice"] = "Authentification requise. Effectuez un enrollment."
+        return http_response({"config": inner})
+
+    def bases(self):
+        return [base for base, _ in self.requests]
+
+
+def _wired(job, dms):
+    """Branche un MainJob sur les faux DM ; la récupération relais et l'assistant
+    de démarrage sont neutralisés (ils lancent des threads) sauf quand un test
+    les veut."""
+    job._urlopen = dms
+    job._schedule_relay_recovery = MagicMock(return_value=True)
+    job._schedule_enrollment_check = MagicMock()
+    return job
+
+
+def _device(tmp_path, dms):
+    """Un poste dont l'OXT embarque A, face aux faux DM."""
+    seed_user_config(str(tmp_path), {"enabled": True, "bootstrap_urls": [A]})
+    return _wired(make_job(config_dir=str(tmp_path)), dms)
+
+
+def _restarted(tmp_path, dms):
+    """Le même poste dans un nouveau processus : réglages gardés, mémoire perdue."""
+    shell_runtime.reset_for_tests()
+    return _wired(make_job(config_dir=str(tmp_path)), dms)
 
 
 def _cfg(job, values):
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: values.get(k, d))
 
 
-# ── _failover_ordered_urls (essaie le DM gagnant en premier) ──
+# ── ordre des bases ──────────────────────────────────────────
 
-def test_failover_prefers_in_memory_resolved_url():
-    job = make_job()
-    _cfg(job, {"bootstrap_urls": ["https://a", "https://b", "https://c"]})
-    job._resolved_bootstrap_url = "https://b"
-    assert job._failover_ordered_urls() == ["https://b", "https://a", "https://c"]
-
-
-def test_failover_prefers_persisted_last_url():
-    job = make_job()
-    _cfg(job, {"bootstrap_urls": ["https://a", "https://b"], "last_bootstrap_url": "https://b"})
-    job._resolved_bootstrap_url = ""
-    assert job._failover_ordered_urls() == ["https://b", "https://a"]
+def test_the_announced_list_is_tried_before_the_baked_one(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job.set_config("dm_bootstrap_urls", [B, A])
+    job._fetch_config(force=True)
+    assert dms.bases() == [B]
+    assert job._active_bootstrap_url() == B
 
 
-def test_failover_unchanged_without_hint():
-    job = make_job()
-    _cfg(job, {"bootstrap_urls": ["https://a", "https://b"]})
-    job._resolved_bootstrap_url = ""
-    assert job._failover_ordered_urls() == ["https://a", "https://b"]
+def test_the_dm_that_answers_hands_over_within_the_fetch_to_the_one_it_names_ahead(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [B, A]
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == B
+    assert read_user_config(str(tmp_path))["dm_bootstrap_urls"] == [B]   # la liste de B, la gagnante
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [B]
 
 
-def test_failover_trailing_slash_tolerant():
-    job = make_job()
-    _cfg(job, {"bootstrap_urls": ["https://a/", "https://b"]})
-    job._resolved_bootstrap_url = "https://a"   # sans slash final
-    assert job._failover_ordered_urls() == ["https://a/", "https://b"]
+def test_a_dm_naming_itself_first_causes_no_extra_request(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [A, B]
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A]
+    assert read_user_config(str(tmp_path))["dm_bootstrap_urls"] == [A, B]
 
 
-def test_failover_single_url_unchanged():
-    job = make_job()
-    _cfg(job, {"bootstrap_urls": ["https://only"], "last_bootstrap_url": "https://only"})
-    assert job._failover_ordered_urls() == ["https://only"]
+def test_a_dm_naming_others_without_itself_hands_over_to_the_first_that_answers(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [C, B]
+    dms.down.add(C)
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, C, B]
+    assert job._active_bootstrap_url() == B
+
+
+def test_when_no_dm_named_ahead_answers_the_former_base_stays(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [B, A]
+    dms.down.add(B)
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == A
+    assert read_user_config(str(tmp_path))["dm_bootstrap_urls"] == [B, A]
+
+
+def test_one_hop_only_the_list_the_hop_brings_waits_for_the_next_fetch(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [B, A]
+    dms.announce[B] = [A, B]                 # deux DM qui se nomment l'un l'autre en tête
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == B
+    dms.requests.clear()
+    job._fetch_config(force=True)            # [A, B] enregistrée : A répond et saute vers B
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == B
+
+
+def test_a_response_without_a_usable_list_keeps_the_stored_one(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job.set_config("dm_bootstrap_urls", [B, A])
+    for announced in (None, [], ["", "/"]):
+        dms.announce[B] = announced
+        job._fetch_config(force=True)        # B répond
+        assert read_user_config(str(tmp_path))["dm_bootstrap_urls"] == [B, A]
+
+
+def test_a_base_that_failed_goes_last_for_the_rest_of_the_process(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = dms.announce[B] = [B, A]
+    job = _device(tmp_path, dms)
+    job.set_config("dm_bootstrap_urls", [B, A])
+    dms.down.add(B)
+    job._fetch_config(force=True)
+    assert dms.bases() == [B, A]
+    dms.down.clear()
+    dms.requests.clear()
+    job._fetch_config(force=True)            # B répond de nouveau, mais n'est plus essayée en premier
+    assert dms.bases() == [A]
+    dms.requests.clear()
+    _restarted(tmp_path, dms)._fetch_config(force=True)
+    assert dms.bases() == [B]
+
+
+def test_a_demoted_base_is_sound_again_as_soon_as_it_answers(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = dms.announce[B] = [B, A]
+    job = _device(tmp_path, dms)
+    job.set_config("dm_bootstrap_urls", [B, A])
+    dms.down.add(B)
+    job._fetch_config(force=True)            # B en queue
+    dms.down.clear()
+    dms.down.add(A)
+    dms.requests.clear()
+    job._fetch_config(force=True)            # A tombe : B, dernier recours, répond
+    assert dms.bases() == [A, B]
+    dms.down.clear()
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [B]                # B réhabilitée, A en queue
+
+
+def test_the_hop_skips_a_base_that_failed_earlier_in_the_process(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [B, A]
+    dms.down.add(B)
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [A]
+
+
+def test_the_announced_list_survives_an_upgrade_and_not_a_transport_change(tmp_path):
+    job = _device(tmp_path, FakeDms())
+    job.set_config("dm_bootstrap_urls", [B, A])
+    job._apply_install_changes({"version", "package"})
+    assert read_user_config(str(tmp_path))["dm_bootstrap_urls"] == [B, A]
+    job._apply_install_changes({"transport"})
+    assert "dm_bootstrap_urls" not in read_user_config(str(tmp_path))
+
+
+def test_a_relative_artifact_is_downloaded_in_the_announced_order(tmp_path):
+    job = _device(tmp_path, FakeDms())
+    job.set_config("dm_bootstrap_urls", [B])
+    tried = []
+
+    def down(request, **_kwargs):
+        tried.append(request.full_url)
+        raise urllib.error.URLError("down")
+
+    job._urlopen = down
+    job._perform_update(make_update_directive(urgency="deferred"))
+    downloads = [url for url in tried if "/binaries/" in url]
+    assert downloads[0].startswith(B + "/")
+    assert downloads[1].startswith(A + "/")
 
 
 # ── persist + hydrate du cache config ────────────────────────

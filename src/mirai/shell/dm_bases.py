@@ -1,11 +1,14 @@
 """Règles de la coquille sur les bases DM, en fonctions pures.
 
-La liste embarquée par l'OXT, le DM actif et l'allowlist des hôtes sans
-vérification TLS se calculent ici, à partir de valeurs reçues explicitement,
-pour être testés sans `MainJob`.
+La liste embarquée par l'OXT, la liste annoncée par le DM, l'ordre des
+candidats, les bases à essayer dans la même récupération, le DM actif et
+l'allowlist des hôtes sans vérification TLS se calculent ici, à partir de
+valeurs reçues explicitement, pour être testés sans `MainJob`.
 """
 
 import urllib.parse
+
+from .. import local_config
 
 
 def baked_list(urls, legacy):
@@ -23,16 +26,68 @@ def baked_list(urls, legacy):
     return result
 
 
-def active_base(resolved, persisted, urls):
-    """Le DM de référence : gagnant de la session, sinon gagnant persisté encore listé,
-    sinon la première base, sinon une chaîne vide."""
-    resolved = str(resolved or "").strip()
-    if resolved:
-        return resolved
-    persisted = str(persisted or "").strip()
-    if persisted and persisted.rstrip("/") in {url.rstrip("/") for url in urls}:
-        return persisted
-    return urls[0] if urls else ""
+def same_base(a, b):
+    """Vrai quand les deux URL désignent le même DM (schéma et hôte en minuscules,
+    port conservé, barre finale ignorée)."""
+    return local_config._dm_base_url(a) == local_config._dm_base_url(b)
+
+
+def _dedupe(urls):
+    result = []
+    for url in urls:
+        value = str(url or "").strip()
+        if value and not any(same_base(value, kept) for kept in result):
+            result.append(value)
+    return result
+
+
+def announced_list(config_data):
+    """Les bases que le DM annonce (`bootstrapUrls` des réglages), nettoyées et
+    dédoublonnées ; None quand la réponse n'en porte aucune exploitable."""
+    settings = local_config.select_settings(config_data)
+    urls = settings.get("bootstrapUrls") if isinstance(settings, dict) else None
+    if not isinstance(urls, (list, tuple)):
+        return None
+    result = _dedupe(item.strip().rstrip("/") for item in urls if isinstance(item, str))
+    return result or None
+
+
+def candidate_order(announced, baked, last_winner, unreachable=()):
+    """Les bases à essayer, dans l'ordre : annoncées, puis celles de l'OXT, puis le
+    dernier gagnant en repli ; celles que le processus a vues échouer en queue."""
+    candidates = _dedupe([*(announced or []), *baked, last_winner])
+    demoted = [url for url in candidates if local_config._dm_base_url(url) in unreachable]
+    return [url for url in candidates if url not in demoted] + demoted
+
+
+def ahead_of(announced, winner, unreachable=()):
+    """Les bases que la liste annoncée nomme avant `winner` (toutes si elle ne le
+    nomme pas), sans celles que le processus a vues échouer."""
+    result = []
+    for url in announced or []:
+        if same_base(url, winner):
+            break
+        if local_config._dm_base_url(url) not in unreachable:
+            result.append(url)
+    return result
+
+
+def mark_reachability(unreachable, base, answered):
+    """Met à jour l'ensemble des bases injoignables du processus ; vrai quand il change."""
+    key = local_config._dm_base_url(base)
+    before = key in unreachable
+    if answered:
+        unreachable.discard(key)
+    else:
+        unreachable.add(key)
+    return before == answered
+
+
+def active_base(resolved, persisted, candidates):
+    """Le DM de référence : gagnant de la session, sinon gagnant persisté, sinon le
+    premier candidat, sinon une chaîne vide."""
+    return (str(resolved or "").strip() or str(persisted or "").strip()
+            or (candidates[0] if candidates else ""))
 
 
 def is_insecure_url(url, patterns):

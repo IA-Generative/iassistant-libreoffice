@@ -559,7 +559,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # Émis par un DM précis : sans valeur pour un autre environnement.
     _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
                                "relay_key_expires_at", "refresh_token",
-                               "access_token", "access_token_expires_at")
+                               "access_token", "access_token_expires_at",
+                               "dm_bootstrap_urls")
 
     def __init__(self, ctx):
         log_to_file("=== MainJob.__init__ called ===")
@@ -994,38 +995,22 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                                    self._get_config_from_file("bootstrap_url", ""))
 
     def _failover_ordered_urls(self):
-        """Bootstrap URLs with the DM that last answered tried first.
-
-        Perf: avoids re-hitting a dead earlier URL (e.g. an unreachable DGX from
-        an OCP-only host) and paying its full timeout on every config fetch. The
-        winner is remembered in-memory (_resolved_bootstrap_url) and persisted
-        (last_bootstrap_url) so it survives the per-action re-instantiation of
-        MainJob.
-        """
-        urls = self._bootstrap_urls()
-        if len(urls) < 2:
-            return urls
-        preferred = str(
-            self._resolved_bootstrap_url
-            or self._get_config_from_file("last_bootstrap_url", "")
-            or ""
-        ).strip().rstrip("/")
-        if not preferred:
-            return urls
-        front = [u for u in urls if u.rstrip("/") == preferred]
-        if not front:
-            return urls
-        return front + [u for u in urls if u.rstrip("/") != preferred]
+        """Candidats DM : liste annoncée par le DM, puis celle de l'OXT, puis le dernier
+        gagnant en simple repli ; les bases que le processus a vues échouer en queue."""
+        return dm_bases.candidate_order(
+            self._get_config_from_file("dm_bootstrap_urls", None), self._bootstrap_urls(),
+            self._resolved_bootstrap_url or self._get_config_from_file("last_bootstrap_url", ""),
+            self.runtime.unreachable_dm_bases)
 
     def _active_bootstrap_url(self):
         """The DM base URL that last answered (failover winner), else the last-good
-        persisted one, else the first configured. Telemetry / enroll / update must
+        persisted one, else the first candidate. Telemetry / enroll / update must
         target the same DM that served the config, so they read this rather than the
         raw key.
         """
         return dm_bases.active_base(self._resolved_bootstrap_url,
                                     self._get_config_from_file("last_bootstrap_url", ""),
-                                    self._bootstrap_urls())
+                                    self._failover_ordered_urls())
 
     def _is_insecure_bootstrap_url(self, url):
         """True when `url`'s host is declared in `bootstrap_insecure_urls`."""
@@ -1065,7 +1050,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             fetch_timeout = 4
         if fetch_timeout <= 0:
             fetch_timeout = 4
-        log_to_file(f"DM bootstrap URLs (failover order): {base_urls}")
+        log_to_file(f"DM bootstrap URLs (candidate order): {base_urls}")
 
         self._fetching_config = True
         try:
@@ -1077,97 +1062,125 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 log_to_file("DM config fetch: proxy disabled, skipping proxy retry")
 
             last_error = "unknown"
-            combos = [
-                (base, mode, use_proxy)
-                for base in base_urls
-                for (mode, use_proxy) in attempts
-            ]
-            for base_url, mode, use_proxy in combos:
-                url = base_url.rstrip("/") + "/" + config_path.lstrip("/")
-                try:
-                    log_to_file(f"DM config fetch attempt: mode={mode} url={url}")
-                    headers = {"Accept": "application/json"}
-                    headers.update(self._relay_headers())
-                    # Enrich headers for schema_version=2 support
-                    plugin_version = self._get_extension_version()
-                    headers["X-Plugin-Version"] = plugin_version or "unknown"
-                    headers["X-Platform-Type"] = "libreoffice"
-                    lo_version = self._get_lo_version()
-                    if lo_version:
-                        headers["X-Platform-Version"] = lo_version
-                    client_uuid = str(self._ensure_plugin_uuid() or "")
-                    if client_uuid:
-                        headers["X-Client-UUID"] = client_uuid
-                    request = urllib.request.Request(url, headers=_with_user_agent(headers))
-                    _relay_present = "X-Relay-Client" in headers
-                    log_to_file(f"DM config fetch headers: relay={'yes' if _relay_present else 'no'} keys={list(headers.keys())}")
-                    with self._urlopen(request, context=self.get_ssl_context(base_url), timeout=fetch_timeout, use_proxy=use_proxy) as response:
-                        payload = response.read().decode("utf-8")
-                    log_to_file(f"DM bootstrap response ({mode}): {len(payload)} octets")
-                    config_data = json.loads(payload)
-                    if isinstance(config_data, dict):
-                        # Handle EnrichedConfigResponse (schema_version=2)
-                        meta = config_data.get("meta") if isinstance(config_data.get("meta"), dict) else {}
-                        if meta.get("schema_version") == 2:
-                            features = config_data.get("features")
-                            if isinstance(features, dict):
-                                self._features_cache = features
-                                log_to_file(f"Feature flags updated: {list(features.keys())}")
-                            update_directive = config_data.get("update")
-                            # Feed natif : avant toute décision (y compris « déjà
-                            # à la cible » et les reports), l'adresse doit refléter
-                            # la cible de CE poste, sinon LibreOffice verrait la
-                            # version générale au prochain « Vérifier ».
-                            self._rewrite_feed_for_directive(update_directive)
-                            if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
-                                target_ver = str(update_directive.get("target_version", "")).strip()
-                                current_ver = str(self._get_extension_version() or "").strip()
-                                if target_ver and current_ver and target_ver == current_ver:
-                                    log_to_file(f"Update skipped: already at target version {target_ver}")
-                                else:
-                                    self._schedule_update(update_directive)
-                            else:
-                                log_to_file("No update directive in EnrichedConfigResponse")
-                        self.config_cache = config_data
-                        self.config_loaded_at = now
-                        self._config_last_failure_at = 0
-                        self._resolved_bootstrap_url = base_url
-                        try:
-                            if self._get_config_from_file("last_bootstrap_url", "") != base_url:
-                                self.set_config("last_bootstrap_url", base_url)
-                        except Exception:
-                            pass
-                        self._persist_bootstrap_config(config_data)
-                        self._persist_config_cache(config_data)
-                        # Le DM signale ici une auth relais manquante/refusée.
-                        # Réagir tout de suite évite de découvrir le problème
-                        # seulement au premier 401 sur /llm/v1.
-                        try:
-                            self._check_relay_auth_notice(config_data)
-                        except Exception as exc:
-                            log_to_file(f"[ENROLL] auth notice check failed: {str(exc)}")
-                        return config_data
-                    last_error = f"Invalid JSON root type: {type(config_data).__name__}"
-                    log_to_file(f"Failed to fetch device management config ({mode}): {last_error}")
-                except urllib.error.HTTPError as e:
-                    try:
-                        body = e.read().decode("utf-8")
-                    except Exception:
-                        body = ""
-                    last_error = f"HTTP {e.code} {e.reason}"
-                    log_to_file(
-                        f"Failed to fetch device management config ({mode}): "
-                        f"HTTP {e.code} {e.reason} body_len={len(body)}"
-                    )
-                except urllib.error.URLError as e:
-                    last_error = f"URL error {e.reason}"
-                    log_to_file(f"Failed to fetch device management config ({mode}): URL error {e.reason}")
-                except Exception as e:
-                    last_error = str(e)
-                    log_to_file(f"Failed to fetch device management config ({mode}): {str(e)}")
 
-            self._config_last_failure_at = now
-            log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")
+            def attempt(base_url):
+                """Une base, en direct puis par proxy : (config_data, relay_present), ou
+                None quand aucune réponse exploitable n'est venue."""
+                nonlocal last_error
+                url = base_url.rstrip("/") + "/" + config_path.lstrip("/")
+                for mode, use_proxy in attempts:
+                    try:
+                        log_to_file(f"DM config fetch attempt: mode={mode} url={url}")
+                        headers = {"Accept": "application/json"}
+                        headers.update(self._relay_headers())
+                        plugin_version = self._get_extension_version()
+                        headers["X-Plugin-Version"] = plugin_version or "unknown"
+                        headers["X-Platform-Type"] = "libreoffice"
+                        lo_version = self._get_lo_version()
+                        if lo_version:
+                            headers["X-Platform-Version"] = lo_version
+                        client_uuid = str(self._ensure_plugin_uuid() or "")
+                        if client_uuid:
+                            headers["X-Client-UUID"] = client_uuid
+                        request = urllib.request.Request(url, headers=_with_user_agent(headers))
+                        relay_present = "X-Relay-Client" in headers
+                        log_to_file(f"DM config fetch headers: relay={'yes' if relay_present else 'no'} keys={list(headers.keys())}")
+                        with self._urlopen(request, context=self.get_ssl_context(base_url), timeout=fetch_timeout, use_proxy=use_proxy) as response:
+                            payload = response.read().decode("utf-8")
+                        log_to_file(f"DM bootstrap response ({mode}): {len(payload)} octets")
+                        config_data = json.loads(payload)
+                        if isinstance(config_data, dict):
+                            return config_data, relay_present
+                        last_error = f"Invalid JSON root type: {type(config_data).__name__}"
+                        log_to_file(f"Failed to fetch device management config ({mode}): {last_error}")
+                    except urllib.error.HTTPError as e:
+                        try:
+                            body = e.read().decode("utf-8")
+                        except Exception:
+                            body = ""
+                        last_error = f"HTTP {e.code} {e.reason}"
+                        log_to_file(
+                            f"Failed to fetch device management config ({mode}): "
+                            f"HTTP {e.code} {e.reason} body_len={len(body)}"
+                        )
+                    except urllib.error.URLError as e:
+                        last_error = f"URL error {e.reason}"
+                        log_to_file(f"Failed to fetch device management config ({mode}): URL error {e.reason}")
+                    except Exception as e:
+                        last_error = str(e)
+                        log_to_file(f"Failed to fetch device management config ({mode}): {str(e)}")
+                return None
+
+            # Les bases que la gagnante nomme avant elle sont essayées dans la même
+            # récupération, en un seul saut : la liste rapportée par le saut attend
+            # la récupération suivante.
+            winner, queue, hopped = None, list(base_urls), False
+            while queue:
+                base_url = queue.pop(0)
+                got = attempt(base_url)
+                if dm_bases.mark_reachability(self.runtime.unreachable_dm_bases, base_url, got is not None):
+                    log_to_file(f"DM base {base_url}: " + ("reachable again" if got
+                                else "unreachable, tried last for the rest of the session"))
+                if got is None:
+                    continue
+                winner = (base_url, got)
+                if hopped:
+                    break
+                hopped = True
+                queue = dm_bases.ahead_of(dm_bases.announced_list(got[0]), base_url,
+                                          self.runtime.unreachable_dm_bases)
+                if queue:
+                    log_to_file(f"DM {base_url} names {queue} ahead of itself: trying them now")
+
+            if winner is None:
+                self._config_last_failure_at = now
+                log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")
+            else:
+                base_url, (config_data, _relay_present) = winner
+                # Handle EnrichedConfigResponse (schema_version=2)
+                meta = config_data.get("meta") if isinstance(config_data.get("meta"), dict) else {}
+                if meta.get("schema_version") == 2:
+                    features = config_data.get("features")
+                    if isinstance(features, dict):
+                        self._features_cache = features
+                        log_to_file(f"Feature flags updated: {list(features.keys())}")
+                    update_directive = config_data.get("update")
+                    # Feed natif : avant toute décision (y compris « déjà
+                    # à la cible » et les reports), l'adresse doit refléter
+                    # la cible de CE poste, sinon LibreOffice verrait la
+                    # version générale au prochain « Vérifier ».
+                    self._rewrite_feed_for_directive(update_directive)
+                    if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
+                        target_ver = str(update_directive.get("target_version", "")).strip()
+                        current_ver = str(self._get_extension_version() or "").strip()
+                        if target_ver and current_ver and target_ver == current_ver:
+                            log_to_file(f"Update skipped: already at target version {target_ver}")
+                        else:
+                            self._schedule_update(update_directive)
+                    else:
+                        log_to_file("No update directive in EnrichedConfigResponse")
+                self.config_cache = config_data
+                self.config_loaded_at = now
+                self._config_last_failure_at = 0
+                self._resolved_bootstrap_url = base_url
+                try:
+                    if self._get_config_from_file("last_bootstrap_url", "") != base_url:
+                        self.set_config("last_bootstrap_url", base_url)
+                except Exception:
+                    pass
+                self._persist_bootstrap_config(config_data)
+                self._persist_config_cache(config_data)
+                announced = dm_bases.announced_list(config_data)
+                if announced is not None and announced != self._get_config_from_file("dm_bootstrap_urls", None):
+                    self.set_config("dm_bootstrap_urls", announced)
+                # Le DM signale ici une auth relais manquante/refusée.
+                # Réagir tout de suite évite de découvrir le problème
+                # seulement au premier 401 sur /llm/v1.
+                try:
+                    self._check_relay_auth_notice(config_data)
+                except Exception as exc:
+                    log_to_file(f"[ENROLL] auth notice check failed: {str(exc)}")
+                return config_data
         finally:
             self._fetching_config = False
         if self.config_cache:
@@ -1360,7 +1373,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return
 
         # Resolve a RELATIVE artifact_url against every bootstrap base in failover
-        # order (last-good first). Otherwise the download is pinned to a single base
+        # order (announced order, then the OXT's). Otherwise the download is pinned to a single base
         # — often urls[0], an internal-only DGX — and a host that can't reach it
         # (e.g. off-network) fails the whole update instead of falling over to a DM
         # that does answer. An absolute artifact_url is used as-is.

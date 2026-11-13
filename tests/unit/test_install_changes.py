@@ -105,8 +105,10 @@ def test_first_run_changes_nothing(tmp_path):
     assert read_user_config(str(tmp_path))["llm_tool_mode_detected"] == "json"
 
 
-def test_stale_last_bootstrap_url_is_ignored(tmp_path):
+def test_a_persisted_winner_outside_the_baked_list_stays_the_active_dm(tmp_path):
+    """Après une passation, le DM qui a enrôlé le poste n'est pas dans l'OXT : il
+    reste le DM actif tant qu'un autre n'a pas répondu."""
     seed_user_config(str(tmp_path), {"bootstrap_urls": ["https://new"],
                                      "last_bootstrap_url": "https://old"})
     job = make_job(config_dir=str(tmp_path))
-    assert job._active_bootstrap_url() == "https://new"
+    assert job._active_bootstrap_url() == "https://old"
