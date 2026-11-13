@@ -196,7 +196,7 @@ Corrige l'orthographe, la grammaire, la conjugaison et la ponctuation, sans refo
 >
 > Cochez **Ajouter à la suite** pour obtenir le texte corrigé après le vôtre, entre `---début-du-texte-corrigé---` et `---fin-du-texte-corrigé---`, sans toucher à l'original.
 
-> 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les mots qui changent sont réécrits. Quand un champ, une note ou un saut de paragraphe décale les positions, le passage est réécrit d'un seul tenant et perd sa mise en forme interne. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne ; si le modèle rend un autre nombre de lignes, rien n'est écrit.
+> 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les caractères qui changent sont réécrits. Le modèle rend une ligne par ligne envoyée ; s'il en rend un autre nombre, rien n'est écrit. Une note, un commentaire, un champ ou une image ancrée comme caractère ne sont jamais effacés : un passage qu'une correction abîmerait n'est pas modifié, l'assistant le dit et le résultat reste affiché dans la palette. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne, et un paragraphe dans ce cas reste tel quel ; le bilan en donne le nombre.
 
 ### 3.6 🌐 Traduire
 
@@ -211,7 +211,7 @@ Traduit le passage sélectionné, ou tout le document.
 >
 > La traduction remplace le texte d'origine ; cochez **Ajouter à la suite** pour l'obtenir après lui, entre `---début-de-la-traduction---` et `---fin-de-la-traduction---`.
 
-> 🔵 **Expert** — Sans langue tapée, la langue cible est celle de l'interface de l'extension : celle de LibreOffice quand l'extension la propose (français, anglais, espagnol, portugais, chinois), l'anglais sinon. Sans sélection, titres et paragraphes sont traduits chacun à sa place et gardent leur style ; un paragraphe déjà dans la langue cible reste tel quel. La traduction s'écrit ligne à ligne : chaque paragraphe sélectionné garde sa place et son style, une ligne inchangée garde sa mise en forme, et une ligne traduite prend celle de son premier caractère, si bien que le gras ou l'italique d'un mot isolé est perdu.
+> 🔵 **Expert** — Sans langue tapée, la langue cible est celle de l'interface de l'extension : celle de LibreOffice quand l'extension la propose (français, anglais, espagnol, portugais, chinois), l'anglais sinon. Sans sélection, titres et paragraphes sont traduits chacun à sa place et gardent leur style ; un paragraphe déjà dans la langue cible reste tel quel. La traduction s'écrit ligne à ligne : chaque paragraphe sélectionné garde sa place et son style, une ligne inchangée garde sa mise en forme, et une ligne traduite prend celle de son premier caractère, si bien que le gras ou l'italique d'un mot isolé est perdu. Comme pour Corriger, un passage dont la traduction effacerait une note, un commentaire, un champ ou une image n'est pas modifié.
 
 ---
 

@@ -281,7 +281,9 @@ comme « la demande porte sur le document entier ».
   Corriger ne remplace que les mots corrigés, Traduire que les lignes
   traduites ; le reste garde sa mise en forme, et chaque paragraphe d'une
   sélection sa place, là où Writer fondrait la plage récrite d'un coup en
-  un seul paragraphe.
+  un seul paragraphe. Une plage où une note, un champ, un commentaire ou
+  une image décale les positions, ou qu'un remplacement couvrirait, n'est
+  pas écrite (`word_edits.apply`) : Writer les effacerait.
   Les presets Calc lisent la partie utile de la sélection en un seul `on_main`
   avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
   zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis
