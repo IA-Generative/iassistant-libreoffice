@@ -190,7 +190,8 @@ def rewrite_paragraphs(model, snapshot, instruction, limit, tee=None):
             return Outcome(error="paragraphs_mismatch", step=model.last_step)
         answers = iter(returned)
         for index, lines in zip(indexes, parts, strict=True):
-            text = "\n".join(next(answers) if line.strip() else line for line in lines)
+            text = "\n".join(word_edits.keep_edges(line, next(answers)) if line.strip()
+                             else line for line in lines)
             drafts.append(Draft((index,), [text]))
     return Outcome(drafts=drafts)
 

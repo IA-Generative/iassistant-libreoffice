@@ -202,6 +202,16 @@ def test_correct_without_selection_writes_nothing_when_the_reply_has_another_lin
     assert message == _t("run.err_paragraphs")
 
 
+def test_correct_without_selection_keeps_the_indentation_of_each_line():
+    """Un bloc d'adresse aligné par tabulations reste aligné."""
+    doc = FakeBodyDoc(["\t\t\tMonsieur Dupont\n\t\t\t75000 Pari", "Fin."])
+    shell = _reply("Monsieur Dupont\n75000 Paris\nFin.")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["\t\t\tMonsieur Dupont\n\t\t\t75000 Paris", "Fin."]
+
+
 def test_correct_without_selection_leaves_a_paragraph_with_a_comment_as_is_and_says_so():
     doc = FakeBodyDoc([[("Objet", None), Anchored("Annotation"), (" : le délai est fixer.", None)],
                        "Les pièces sont jointe."])
