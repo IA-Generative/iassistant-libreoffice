@@ -431,6 +431,23 @@ def test_correct_keeps_the_paragraphs_of_a_selection_read_with_windows_breaks():
     assert doc.selection.anchored() == ["ParagraphBreak"]
 
 
+@pytest.mark.parametrize("selection", [[("Le délai est fixer.", None), BREAK],
+                                       [("\tLe délai est fixer. ", None)]],
+                         ids=["paragraph-break", "tab-and-space"])
+def test_correct_keeps_the_blanks_at_the_edges_of_the_selection(selection):
+    """Sélectionner un paragraphe jusqu'au début du suivant prend son saut de
+    paragraphe ; le modèle rend un texte sans blancs de bord."""
+    doc = FakeBodyDoc(["Avant."], selection=selection)
+    original = doc.selection.getString()
+    shell = _reply("Le délai est fixé.")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == original.replace("fixer", "fixé")
+    assert doc.selection.anchored() == [part.kind for part in selection
+                                        if isinstance(part, Anchored)]
+
+
 def test_correct_ignores_a_blank_line_added_by_the_reply():
     doc = FakeBodyDoc(["Avant."], selection=[("Titre", None), BREAK, ("Le ", None),
                                              ("délai", BOLD), (" est fixer.", None)])

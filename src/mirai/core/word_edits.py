@@ -55,15 +55,24 @@ def plan(old, new, by_word=True):
 
 def fit_lines(original, reply):
     """`reply` posée ligne à ligne sur `original` : chaque ligne non vide
-    rendue prend la place d'une ligne non vide lue, et les lignes vides lues
-    restent où elles sont. None si `reply` n'a pas autant de lignes non vides
-    qu'`original` : elles ne sauraient plus où aller."""
+    rendue prend la place d'une ligne non vide lue, entre ses blancs de bord,
+    et les lignes vides lues restent où elles sont. None si `reply` n'a pas
+    autant de lignes non vides qu'`original` : elles ne sauraient plus où
+    aller."""
     lines = _plain(original).split("\n")
-    answers = [line.strip() for line in _plain(reply).split("\n") if line.strip()]
+    answers = [line for line in _plain(reply).split("\n") if line.strip()]
     if len(answers) != sum(1 for line in lines if line.strip()):
         return None
     answers = iter(answers)
-    return "\n".join(next(answers) if line.strip() else line for line in lines)
+    return "\n".join(keep_edges(line, next(answers)) if line.strip() else line
+                     for line in lines)
+
+
+def keep_edges(sent, answer):
+    """`answer` entre les blancs de bord de `sent` : un retrait, une tabulation
+    ou une espace finale que le modèle a retirés n'avaient pas à changer."""
+    head = sent[:len(sent) - len(sent.lstrip())]
+    return head + answer.strip() + sent[len(sent.rstrip()):]
 
 
 def _trim(old, edit):
