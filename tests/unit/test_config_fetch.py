@@ -555,6 +555,25 @@ def test_a_successful_switch_re_enrollment_binds_the_pair_to_the_new_dm(tmp_path
     assert job._get_config_from_file("enrolled", False) is True
 
 
+def test_a_status_report_never_carries_the_pair_of_another_dm(tmp_path):
+    """Après une mise à jour de l'OXT, le DM actif est la tête de la liste annoncée
+    alors que la paire vient d'un autre DM : elle ne lui est pas présentée."""
+    seed_user_config(str(tmp_path), {"enabled": True, "bootstrap_urls": [A],
+                                     "dm_bootstrap_urls": [B, A],
+                                     "relay_client_id": "relay-" + A,
+                                     "relay_client_key": "key-" + A, "relay_dm_base": A})
+    job = make_job(config_dir=str(tmp_path))
+    sent = []
+
+    def record(request, **_kwargs):
+        sent.append((request.full_url, request.get_header("X-relay-client")))
+        return http_response({})
+
+    job._urlopen = record
+    job._report_update_status(1, "installed", "1.0.0", "2.0.0")
+    assert sent == [(B + "/update/status", None)]
+
+
 # ── persist + hydrate du cache config ────────────────────────
 
 def test_config_cache_persist_and_hydrate_roundtrip(tmp_path):

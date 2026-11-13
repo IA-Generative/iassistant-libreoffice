@@ -4340,15 +4340,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             prefix = prefix + " "
         return name, prefix
 
-    def _relay_headers(self, base=""):
-        """En-têtes de la paire relais ; aucun pour un DM `base` qui ne l'a pas émise."""
+    def _relay_headers(self, base=None):
+        """En-têtes de la paire relais ; aucun pour un DM qui ne l'a pas émise (`base`,
+        le DM actif par défaut)."""
         relay_client_id = str(self._get_config_from_file("relay_client_id", "") or "").strip()
         relay_client_key = str(self._get_config_from_file("relay_client_key", "") or "").strip()
         if not relay_client_id or not relay_client_key:
             log_to_file(f"[RELAY] no relay creds: id={'yes' if relay_client_id else 'no'} key={'yes' if relay_client_key else 'no'}")
             return {}
         issuer = str(self._get_config_from_file("relay_dm_base", "") or "").strip()
-        if issuer and base and not dm_bases.same_base(issuer, base):
+        target = str((self._active_bootstrap_url() if base is None else base) or "").strip()
+        if issuer and target and not dm_bases.same_base(issuer, target):
             log_to_file("[RELAY] relay creds issued by another DM: not sent")
             return {}
         if self._token_expired_at(self._get_config_from_file("relay_key_expires_at", 0)):
