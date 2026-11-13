@@ -41,9 +41,10 @@ class FakeControl:
         # Ce que l'écran affiche : écrire `model.Text` ne repeint pas un
         # contrôle doté d'un peer, seul `setText()` le fait.
         self.shown_text = ""
+        self.pos_size = None        # (x, y, w, h, flags) du dernier placement
 
-    def setPosSize(self, *_args):
-        pass
+    def setPosSize(self, *args):
+        self.pos_size = args
 
     def getPosSize(self):
         return FakePosSize()

@@ -1651,9 +1651,11 @@ class AssistantPalette:
         self._render_conversation()
 
     def _place_link_rows(self, y, margin, width, line_h, scale):
-        """Une ligne pleine largeur par lien DM, au-dessus du hint ; rend le y suivant."""
+        """Une ligne par lien DM, large comme son texte, au-dessus du hint ; rend le y suivant."""
         for name in self._link_names:
-            self._place(name, margin, y, width - 2 * margin, line_h)
+            pref = self._preferred(name)
+            w = min(width - 2 * margin, int((pref.Width if pref else width) + 6 * scale))
+            self._place(name, margin, y, w, line_h)
             y += line_h + int(4 * scale)
         return y
 
@@ -1667,6 +1669,7 @@ class AssistantPalette:
             _, link_model = dsfr.add_link(
                 dialog, model, name, link["label"] + " ↗", 0, 0, 120, 16, font,
                 lambda u=target_url(link), i=link_id: self._on_link(i, u))
+            link_model.HelpText = link["label"]
             self._models[name] = link_model
             self._link_names.append(name)
             if link.get("hint"):
@@ -1683,6 +1686,7 @@ class AssistantPalette:
                 dialog, model, name, "FixedText", 0, 0, 120, 16, {
                     "Label": link["hint"], "TextColor": dsfr.TOKENS["text_mention"],
                     "FontName": font, "FontHeight": 8})
+        hint_model.HelpText = link["hint"]
         self._models[name] = hint_model
         self._link_names.append(name)
 

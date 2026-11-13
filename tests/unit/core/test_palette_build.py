@@ -2336,6 +2336,17 @@ def test_footer_shows_the_dm_links_it_knows_and_only_those(palette_module):
     palette._layout(width=900)   # les lignes de lien se placent sans erreur
 
 
+def test_a_link_row_is_as_wide_as_its_text_not_the_window(palette_module):
+    """La zone cliquable s'arrête au texte ; l'infobulle porte le libellé complet."""
+    from tests.stubs.fake_palette_dialog import FakeSize
+    links = {"search-portal": {"id": "search-portal", "label": "Portail", "url": "https://p.fake-domain.name/"}}
+    palette = build_palette(palette_module, links=links)
+    palette._layout(width=900)
+    row = palette_module._fake_dialog.getControl("link_search_portal")
+    assert row.pos_size[2] == int(FakeSize().Width + 6 * palette._scale)
+    assert palette._models["link_search_portal"].HelpText == "Portail"
+
+
 def test_a_hint_with_a_target_opens_it_from_its_own_row(palette_module):
     """Le complément du lien a sa propre ligne : son clic ouvre sa cible, pas celle du lien."""
     links = {"search-portal": {"id": "search-portal", "label": "Portail", "url": "https://p.fake-domain.name/",
