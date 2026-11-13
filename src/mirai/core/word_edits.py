@@ -14,7 +14,7 @@ import re
 # pour qu'une virgule ajoutée ne remplace pas le mot qui la précède.
 _TOKEN = re.compile(r"\w+|\s+|[^\w\s]")
 
-# XTextCursor.goRight prend un short.
+# XTextCursor.goRight et goLeft prennent un short.
 _MAX_STEP = 2 ** 15 - 1
 
 
@@ -60,9 +60,17 @@ def _segment(old, new, offset):
 
 
 def _go_right(cursor, count, expand):
+    _go(cursor.goRight, count, expand)
+
+
+def _go_left(cursor, count, expand):
+    _go(cursor.goLeft, count, expand)
+
+
+def _go(move, count, expand):
     while count > 0:
         step = min(count, _MAX_STEP)
-        cursor.goRight(step, expand)
+        move(step, expand)
         count -= step
 
 
@@ -73,14 +81,20 @@ def apply(rng, old, new, edits):
     Avant chaque remplacement, le curseur doit couvrir le texte attendu. Sinon
     (un champ, une note ou un saut de paragraphe ne compte pas comme dans le
     texte lu), tout le texte est écrit d'un coup, comme les autres actions.
+    Un seul curseur remonte la plage depuis sa fin, d'un remplacement au
+    précédent : le thread principal ne la parcourt qu'une fois.
     Thread principal exclusivement."""
     text = rng.getText()
     old = _plain(old)
+    cursor = text.createTextCursorByRange(rng.getStart())
+    _go_right(cursor, len(old), False)
+    position = len(old)
     for start, end, replacement in edits:
-        cursor = text.createTextCursorByRange(rng.getStart())
-        _go_right(cursor, start, False)
-        _go_right(cursor, end - start, True)
+        _go_left(cursor, position - end, False)
+        _go_left(cursor, end - start, True)
         if _plain(cursor.getString()) != old[start:end]:
             rng.setString(new)
             return
         cursor.setString(replacement)
+        cursor.collapseToStart()
+        position = start

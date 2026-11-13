@@ -50,26 +50,44 @@ class FakeCursor:
 
 
 class _FakeInlineCursor:
-    """Curseur posé dans le texte de la sélection : il avance caractère par
-    caractère et remplace ce qu'il couvre."""
+    """Curseur posé dans le texte de la sélection : il se déplace caractère
+    par caractère et remplace ce qu'il couvre. `point` bouge, `mark` reste,
+    sauf sans `expand`."""
 
     def __init__(self, rng):
         self._range = rng
-        self.start = self.end = 0
+        self.mark = self.point = 0
+
+    @property
+    def start(self):
+        return min(self.mark, self.point)
+
+    @property
+    def end(self):
+        return max(self.mark, self.point)
 
     def goRight(self, count, expand):
-        self.end = min(self.end + count, len(self._range._text))
+        return self._go(count, expand)
+
+    def goLeft(self, count, expand):
+        return self._go(-count, expand)
+
+    def _go(self, count, expand):
+        self.point = min(max(self.point + count, 0), len(self._range._text))
         if not expand:
-            self.start = self.end
+            self.mark = self.point
         return True
+
+    def collapseToStart(self):
+        self.mark = self.point = self.start
 
     def getString(self):
         return self._range._text[self.start:self.end]
 
     def setString(self, value):
-        text = self._range._text
-        self._range.setString(text[:self.start] + value + text[self.end:])
-        self.end = self.start + len(value)
+        text, start = self._range._text, self.start
+        self._range.setString(text[:start] + value + text[self.end:])
+        self.mark, self.point = start, start + len(value)
 
 
 class FakeWriterText:

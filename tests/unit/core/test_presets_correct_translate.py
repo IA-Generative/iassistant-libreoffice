@@ -68,6 +68,19 @@ def test_correct_reaches_a_mistake_beyond_what_one_cursor_move_covers():
     assert doc.writes == 1
 
 
+def test_correct_does_not_walk_the_selection_again_for_each_fixed_word():
+    """L'écriture se fait sur le thread principal, qui fige LibreOffice : elle
+    ne repart pas du début de la sélection pour chaque mot corrigé."""
+    text = "\n".join(f"Ligne {number} fixer." for number in range(300))
+    doc = FakeBodyDoc(["Avant."], selection=text)
+    shell = _reply(text.replace("fixer", "fixée"))
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == text.replace("fixer", "fixée")
+    assert doc.moved <= 4 * len(text)
+
+
 @pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
 def test_correct_writes_nothing_when_the_selection_has_no_mistake(append_mode):
     """Une réponse identique au texte, aux espaces près, ne laisse rien à

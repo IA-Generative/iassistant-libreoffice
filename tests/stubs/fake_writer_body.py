@@ -191,7 +191,9 @@ class FakeInlineCursor:
         if not -2 ** 15 <= count < 2 ** 15:
             raise OverflowError("goRight et goLeft prennent un short")
         target = self.point + count
+        before = self.point
         self.point = min(max(target, 0), len(self.paragraph.text))
+        self._doc.moved += abs(self.point - before)
         if not expand:
             self.mark = self.point
         return self.point == target
@@ -291,6 +293,7 @@ class FakeBodyDoc:
         self.undo = FakeUndo()
         self.writes = 0
         self.writes_outside_undo = 0
+        self.moved = 0                   # positions parcourues par les curseurs
         # La sélection, hors du corps : un passage du document qu'une action
         # peut lire et réécrire.
         self.selection = FakeParagraph(self, selection, "Standard")
