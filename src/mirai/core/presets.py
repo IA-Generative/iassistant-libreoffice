@@ -55,11 +55,6 @@ class Preset:
         return _t(self.input_hint_key)
 
 
-# Le nom court des autres actions vient de la coquille (`_ACTION_NAMES`), qui
-# ne grandit plus.
-_PLUGIN_ACTIONS = {"CorrectSelection": "correct", "TranslateSelection": "translate"}
-
-
 def _legacy_telemetry(ctx, span, attrs=None):
     payload = {"via": "palette"}
     if span in _PLUGIN_ACTIONS:
@@ -340,6 +335,7 @@ class _Rewrite:
     à sa place, ou chaque paragraphe du document à la sienne. Une réponse
     identique au texte n'est pas écrite."""
     span: str
+    plugin_action: str         # `plugin.action` de sa télémétrie
     action: str
     system: str
     sent_label: str            # titres, dans la consigne, du texte envoyé
@@ -363,7 +359,7 @@ class _Rewrite:
 
 
 _CORRECT = _Rewrite(
-    span="CorrectSelection", action="correct_selection",
+    span="CorrectSelection", plugin_action="correct", action="correct_selection",
     system=_system(
         "Tu es un correcteur professionnel. Tu corriges l'orthographe, la grammaire, "
         "la conjugaison et la ponctuation, sans jamais reformuler : chaque mot juste "
@@ -384,7 +380,8 @@ _CORRECT_RULES = (
 
 # Sans motifs de question : traduire « Pouvez-vous préciser… » en donne un.
 _TRANSLATE = _Rewrite(
-    span="TranslateSelection", action="translate_selection", system=TRANSLATION_SYSTEM,
+    span="TranslateSelection", plugin_action="translate", action="translate_selection",
+    system=TRANSLATION_SYSTEM,
     sent_label="TEXTE À TRADUIRE", answer_label="TRADUCTION",
     begin_marker="---début-de-la-traduction---", end_marker="---fin-de-la-traduction---",
     undo_key="preset.undo_translate",
@@ -392,6 +389,10 @@ _TRANSLATE = _Rewrite(
     done_document_key="preset.done_translate_document",
     done_document_replaced_key="preset.done_translate_document_replaced",
     unchanged_key="preset.already_in_language")
+
+# Le nom court des autres actions vient de la coquille (`_ACTION_NAMES`), qui
+# ne grandit plus.
+_PLUGIN_ACTIONS = {rewrite.span: rewrite.plugin_action for rewrite in (_CORRECT, _TRANSLATE)}
 
 # Langue cible par défaut : celle de l'interface, nommée dans la langue des
 # consignes.
