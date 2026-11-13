@@ -1,5 +1,5 @@
 {
-    "_note": "Copiez ce fichier en config.default.production.json et renseignez les URLs réelles. bootstrap_urls accepte plusieurs DM (failover, dans l'ordre). Transport seul : ne PAS baker de keycloak/SSO ici, ils sont servis par le DM. bootstrap_insecure_urls (optionnel) = liste d'hosts dont le cert TLS n'est PAS vérifié (équivalent curl -k), pour un DM interne derrière une CA privée ; à n'utiliser QUE pour ces hosts, les autres restent vérifiés.",
+    "_note": "Copiez ce fichier en config.default.production.json et renseignez les URLs réelles. bootstrap_urls accepte plusieurs DM (failover, dans l'ordre ; le DM peut réordonner cette liste à distance par les bootstrapUrls qu'il sert). Transport seul : ne PAS baker de keycloak/SSO ici, ils sont servis par le DM. bootstrap_insecure_urls (optionnel) = liste d'hosts dont le cert TLS n'est PAS vérifié (équivalent curl -k), pour un DM interne derrière une CA privée ; à n'utiliser QUE pour ces hosts, les autres restent vérifiés.",
     "configVersion": 1,
     "enabled": true,
     "bootstrap_urls": [

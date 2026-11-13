@@ -240,7 +240,11 @@ cp config/profiles/config.default.production.example.json config/profiles/config
    `bootstrap_url` — ajouter ou retirer une URL de repli compte) ou le `?profile=` de
    `config_path` revient à planifier une vague de ré-enrôlement : au démarrage suivant, les
    identifiants de l'ancien environnement sont effacés sur chaque poste mis à jour. L'ordre
-   des URL, `enabled` et `bootstrap_insecure_urls` n'entrent pas en compte.
+   des URL, `enabled` et `bootstrap_insecure_urls` n'entrent pas en compte. Pour changer de
+   DM **sans** nouvel OXT, l'ancien DM place le nouveau en tête des `bootstrapUrls` qu'il sert
+   (`DM_BOOTSTRAP_URLS`, surcharge à chaud par `/admin/api/config`) : chaque poste suit cet
+   ordre dès la récupération qui lui apporte la liste et se ré-enrôle auprès du nouveau DM
+   (voir README, § Passation entre DM).
 2. **Ne jamais poser `enrolled: true` à la main** dans
    `~/Library/Application Support/LibreOffice/4/user/config/mirai/settings.json`. Le drapeau franchit
    le gate mais aucune paire relais n'existe : 401 « Missing credentials » sur 100 % des
