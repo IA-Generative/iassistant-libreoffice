@@ -1858,6 +1858,26 @@ def test_an_action_button_ends_on_its_bilan_in_bold(palette_module, reply, label
     assert tooltip and tooltip in palette._current_exchange[-1]
 
 
+def test_an_action_with_nothing_to_change_ends_on_done(palette_module):
+    """« Aucune faute trouvée » n'est pas un résultat perdu : la ligne d'état
+    dit « Terminé », sans avertissement."""
+    from src.mirai.core import presets
+    from src.mirai.core.context import ToolContext
+    from tests.stubs.fake_docs import FakeWriterDoc
+    from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+
+    palette = build_palette(palette_module)
+    palette.shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Le délai est fixé."))])
+    palette._progress = palette_module.RunProgress()
+    doc = FakeWriterDoc(selection_text="Le délai est fixé.")
+    ctx = ToolContext(doc, doc.controller, "writer", palette.shell)
+    correct = next(p for p in presets.PRESETS if p.id == "correct")
+
+    palette._run_in_worker(correct, "", ctx, "shown")
+
+    assert _status(palette)[:3] == _bold(palette_module, "palette.done", "success")
+
+
 @pytest.mark.parametrize("result, label, tone", [
     (dict(ok=True, text="Voici la réponse."), "palette.done", "success"),
     (dict(ok=True, changed=True, text="Formule posée."), "palette.status_written", "success"),

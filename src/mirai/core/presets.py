@@ -132,6 +132,10 @@ class Written(str):
     """Bilan d'un runner qui a écrit son résultat dans le document."""
 
 
+class Unchanged(str):
+    """Bilan d'un runner qui n'avait rien à changer : ce n'est pas un échec."""
+
+
 class Failed(str):
     """Bilan d'un runner dont l'appel au modèle a échoué ; `code` nomme l'erreur."""
 
@@ -443,7 +447,7 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
         return Failed("truncated")
     sink.finish(step.text, step.streamed)
     if sink.unchanged:
-        return _t(action.unchanged_key)
+        return Unchanged(_t(action.unchanged_key))
     if sink.lines_mismatch:
         return Failed("paragraphs_mismatch")
     if sink.objects_kept:
@@ -463,7 +467,7 @@ def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode,
     result = whole_document.rewrite_paragraphs(model, snapshot, rules, limit, tee)
     changed = whole_document.changed(snapshot, result.drafts)
     if not (result.error or result.question or changed):
-        return _t(action.unchanged_key)
+        return Unchanged(_t(action.unchanged_key))
     kept = []
     apply = _paragraphs_writer(ctx, snapshot, result.drafts, changed, action, append_mode, kept)
     message = _write_document(ctx, snapshot, result, apply, _t(action.undo_key), cancel_event,
