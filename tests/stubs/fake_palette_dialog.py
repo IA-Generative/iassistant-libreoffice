@@ -153,12 +153,13 @@ class FakeDialogModel:
         control.model = model
 
 
-def build_palette(palette_module, app="writer"):
+def build_palette(palette_module, app="writer", links=None):
+    """`links` : les liens DM par rôle que le faux shell sert ; aucun par défaut."""
     shell = MagicMock()
     shell.toolkit.return_value = MagicMock()
     shell.data_dir.return_value = "/tmp/mirai-test-palette"
     shell.get_config.side_effect = lambda key, default=None: default
-    shell.get_link.return_value = None
+    shell.get_link.side_effect = lambda link_id: (links or {}).get(link_id)
     shell.log = lambda _m: None
 
     uno_ctx = MagicMock()
