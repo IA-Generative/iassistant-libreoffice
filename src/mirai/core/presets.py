@@ -400,8 +400,9 @@ def _translate_rules(user_text):
 
 def _rewrite_budget(chars):
     """Jetons accordés à une réponse qui récrit `chars` caractères : un jeton
-    couvre au moins un caractère, et la marge absorbe une réponse plus longue
-    que le texte."""
+    couvre en général au moins un caractère (pas en chinois), et la marge
+    absorbe une réponse plus longue que le texte. Une réponse coupée par ce
+    plafond n'est pas écrite."""
     return chars + 1000
 
 
@@ -464,7 +465,7 @@ def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode,
         return _empty_message(snapshot)
     limit = whole_document.max_chars(shell)
     model = whole_document.Model(
-        _text_client(shell, _rewrite_budget(limit)), action.system,
+        _text_client(shell, _rewrite_budget(min(limit, len(snapshot.text)))), action.system,
         cancel_event=cancel_event, progress=progress,
         question_patterns=patterns_absent_from(snapshot.text, action.question_patterns))
     result = whole_document.rewrite_paragraphs(model, snapshot, rules, limit, tee)

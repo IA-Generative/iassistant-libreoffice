@@ -228,6 +228,18 @@ def test_correct_without_selection_writes_nothing_when_the_reply_has_another_lin
     assert message == _t("run.err_paragraphs")
 
 
+def test_correct_without_selection_asks_a_budget_sized_to_the_document():
+    """Un document d'une page ne demande pas le plafond d'un morceau de
+    20 000 caractères : un relais refuse une demande qui dépasse le contexte
+    du modèle."""
+    doc = FakeBodyDoc(["Le délai est fixer."])
+    shell = _reply("Le délai est fixé.")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert shell.requests[0]["max_tokens"] == len("Le délai est fixer.") + 1000
+
+
 def test_correct_without_selection_keeps_the_indentation_of_each_line():
     """Un bloc d'adresse aligné par tabulations reste aligné."""
     doc = FakeBodyDoc(["\t\t\tMonsieur Dupont\n\t\t\t75000 Pari", "Fin."])
