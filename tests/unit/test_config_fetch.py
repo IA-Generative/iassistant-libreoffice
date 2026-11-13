@@ -479,6 +479,7 @@ def test_an_enrollment_that_waited_for_the_lock_does_nothing_once_another_succee
     t2.join(5)
     assert len(_enroll_posts(first)) == 1
     assert _enroll_posts(second) == []
+    second._ensure_access_token.assert_not_called()          # ni second refresh_token
     assert shell_runtime.get().enrollment_generation == 1
     assert second._get_config_from_file("relay_client_id", "") == "id-" + B
 

@@ -3928,64 +3928,64 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not config_data:
             return
 
-        access_token = self._ensure_access_token(config_data, interactive=False)
-        keycloak = self._keycloak_config(config_data)
-        userinfo_endpoint = self._keycloak_endpoint(
-            keycloak,
-            "userinfo_endpoint",
-            "userinfoEndpoint",
-            "user_info_endpoint",
-            "userInfoEndpoint",
-            "userinfo"
-        )
-        email = self._token_email(access_token, userinfo_endpoint) if access_token else None
-        if not email:
-            log_to_file("Device management token email verification failed")
-            return
-
-        bootstrap_url = str(self._active_bootstrap_url() or "").strip().rstrip("/")
-        settings = local_config.select_settings(config_data) if isinstance(config_data, dict) else {}
-
-        enroll_endpoint = ""
-        sources = []
-        if isinstance(settings, dict):
-            sources.append(settings)
-        if isinstance(config_data, dict):
-            sources.append(config_data)
-
-        for source in sources:
-            endpoints = source.get("endpoints", {})
-            if isinstance(endpoints, dict):
-                enroll_endpoint = str(
-                    endpoints.get("enroll")
-                    or endpoints.get("enroll_endpoint")
-                    or endpoints.get("enrollEndpoint")
-                    or ""
-                ).strip()
-            if enroll_endpoint:
-                break
-            enroll_endpoint = str(
-                source.get("enroll")
-                or source.get("enroll_endpoint")
-                or source.get("enrollEndpoint")
-                or ""
-            ).strip()
-            if enroll_endpoint:
-                break
-
-        if enroll_endpoint.startswith("/") and bootstrap_url:
-            enroll_endpoint = bootstrap_url + enroll_endpoint
-        if not enroll_endpoint and bootstrap_url:
-            enroll_endpoint = bootstrap_url + "/enroll"
-            log_to_file(f"Device management enroll endpoint fallback applied: {enroll_endpoint}")
-
-        if not enroll_endpoint:
-            return
-
         with self.runtime.enrollment_lock:
             if self.runtime.enrollment_generation != generation_seen and self._relay_credentials_valid():
                 log_to_file("[ENROLL] an enrollment succeeded meanwhile: nothing to do")
                 return
+            access_token = self._ensure_access_token(config_data, interactive=False)
+            keycloak = self._keycloak_config(config_data)
+            userinfo_endpoint = self._keycloak_endpoint(
+                keycloak,
+                "userinfo_endpoint",
+                "userinfoEndpoint",
+                "user_info_endpoint",
+                "userInfoEndpoint",
+                "userinfo"
+            )
+            email = self._token_email(access_token, userinfo_endpoint) if access_token else None
+            if not email:
+                log_to_file("Device management token email verification failed")
+                return
+
+            bootstrap_url = str(self._active_bootstrap_url() or "").strip().rstrip("/")
+            settings = local_config.select_settings(config_data) if isinstance(config_data, dict) else {}
+
+            enroll_endpoint = ""
+            sources = []
+            if isinstance(settings, dict):
+                sources.append(settings)
+            if isinstance(config_data, dict):
+                sources.append(config_data)
+
+            for source in sources:
+                endpoints = source.get("endpoints", {})
+                if isinstance(endpoints, dict):
+                    enroll_endpoint = str(
+                        endpoints.get("enroll")
+                        or endpoints.get("enroll_endpoint")
+                        or endpoints.get("enrollEndpoint")
+                        or ""
+                    ).strip()
+                if enroll_endpoint:
+                    break
+                enroll_endpoint = str(
+                    source.get("enroll")
+                    or source.get("enroll_endpoint")
+                    or source.get("enrollEndpoint")
+                    or ""
+                ).strip()
+                if enroll_endpoint:
+                    break
+
+            if enroll_endpoint.startswith("/") and bootstrap_url:
+                enroll_endpoint = bootstrap_url + enroll_endpoint
+            if not enroll_endpoint and bootstrap_url:
+                enroll_endpoint = bootstrap_url + "/enroll"
+                log_to_file(f"Device management enroll endpoint fallback applied: {enroll_endpoint}")
+
+            if not enroll_endpoint:
+                return
+
             # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`, que
             # les versions précédentes posaient sans creds relay : un poste marqué
             # enrôlé mais sans creds relay est dans un état absorbant — le DM
