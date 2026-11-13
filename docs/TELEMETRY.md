@@ -78,6 +78,15 @@ Envoyé par le bouton Corriger de la palette, avant l'appel au modèle.
 - `text_length`: Longueur du texte sélectionné, ou du document sans sélection
 - `tables`: Nombre de tableaux laissés de côté, sans sélection seulement
 
+### TranslateSelection
+Envoyé par le bouton Traduire de la palette, avant l'appel au modèle. La langue cible n'est pas envoyée.
+
+**Attributs :**
+- `plugin.action`: "translate"
+- `action`: "translate_selection"
+- `text_length`: Longueur du texte sélectionné, ou du document sans sélection
+- `tables`: Nombre de tableaux laissés de côté, sans sélection seulement
+
 ### OpenSettings
 Envoyé lors de l'ouverture du dialogue des paramètres.
 

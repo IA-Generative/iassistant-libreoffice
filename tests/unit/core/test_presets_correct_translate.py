@@ -1,10 +1,11 @@
-"""Corriger, rejoué par le moteur (vrai LLMClient, SSE scripté, faux
-document) : ce qui est écrit, où, avec quelle mise en forme, et ce que la
-palette en dit."""
+"""Corriger et Traduire, rejoués par le moteur (vrai LLMClient, SSE scripté,
+faux document) : ce qui est écrit, où, avec quelle mise en forme, et ce que
+la palette en dit."""
 
 import pytest
 
-from src.mirai.core import presets
+from src.mirai import i18n
+from src.mirai.core import presets, prompts
 from src.mirai.core.context import ToolContext
 from src.mirai.i18n import t as _t
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
@@ -174,7 +175,135 @@ def test_correct_is_counted_under_its_own_action_in_telemetry(selection):
         "CorrectSelection", "correct", "correct_selection")
 
 
-@pytest.mark.parametrize("runner", [presets.run_correct], ids=["correct"])
+# Traduire : vers la langue tapée dans le champ, sinon vers celle de
+# l'interface ; un texte déjà dans cette langue n'est pas écrit.
+
+@pytest.fixture
+def interface_language():
+    previous = i18n.get_locale()
+    yield i18n.set_locale
+    i18n.set_locale(previous)
+
+
+@pytest.mark.parametrize("locale,language", [("fr", "français"), ("en", "anglais"),
+                                             ("zh", "chinois")])
+def test_translate_without_a_typed_language_targets_the_interface_language(
+        interface_language, locale, language):
+    interface_language(locale)
+    doc = FakeBodyDoc(["Avant."], selection="Das ist gut.")
+    shell = _reply("Traduit.")
+
+    presets.run_translate(_ctx(doc, shell), shell, "", None)
+
+    assert f"en {language}" in shell.requests[0]["messages"][-1]["content"]
+
+
+def test_translate_targets_the_language_typed_in_the_prompt():
+    doc = FakeBodyDoc(["Avant."], selection="Le délai est fixé.")
+    shell = _reply("Die Frist ist festgelegt.")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "allemand", None)
+
+    assert "en allemand" in shell.requests[0]["messages"][-1]["content"]
+    assert doc.selection.getString() == "Die Frist ist festgelegt."
+    assert doc.undo.entered == [_t("preset.undo_translate")]
+    assert message == _t("preset.done_translate_replaced")
+
+
+def test_translate_never_asks_the_model_to_keep_the_language():
+    """La règle des autres actions, « réponds dans la même langue », ferait
+    rendre le texte tel quel."""
+    doc = FakeBodyDoc(["Avant."], selection="The deadline is set.")
+    shell = _reply("Le délai est fixé.")
+
+    presets.run_translate(_ctx(doc, shell), shell, "", None)
+
+    system = shell.requests[0]["messages"][0]["content"]
+    assert prompts.SAME_LANGUAGE_RULE not in system
+    assert prompts.DOCUMENT_DATA_RULE in system
+
+
+@pytest.mark.parametrize("append_mode", [True, False], ids=["append", "replace"])
+def test_translate_writes_nothing_and_asks_for_a_language_when_already_translated(append_mode):
+    doc = FakeBodyDoc(["Avant."], selection="Le délai est fixé.")
+    shell = _reply("Le délai est fixé.")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "", None, append_mode=append_mode)
+
+    assert doc.writes == 0
+    assert message == _t("preset.already_in_language")
+
+
+def test_translate_takes_a_question_in_the_text_for_a_translation():
+    """« Could you clarify » traduit « Pouvez-vous préciser » : c'est le texte,
+    pas une question du modèle."""
+    doc = FakeBodyDoc(["Avant."], selection="Pouvez-vous préciser le délai ?")
+    shell = _reply("Could you clarify the deadline?")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
+
+    assert doc.selection.getString() == "Could you clarify the deadline?"
+    assert message == _t("preset.done_translate_replaced")
+
+
+def test_translate_without_selection_translates_headings_and_paragraphs_in_place():
+    doc = FakeBodyDoc(["Report", "", "The deadline is set."], ["Heading 1", "Standard", "Standard"])
+    shell = _reply("Rapport\nLe délai est fixé.")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "", None)
+
+    assert doc.paragraphs == ["Rapport", "", "Le délai est fixé."]
+    assert doc.styles == ["Heading 1", "Standard", "Standard"]
+    assert doc.undo.entered == [_t("preset.undo_translate")]
+    assert message == _t("preset.done_translate_document_replaced")
+
+
+def test_translate_without_selection_keeps_the_paragraphs_already_translated():
+    doc = FakeBodyDoc([[("Rapport", BOLD)], "The deadline is set."], ["Heading 1", "Standard"])
+    shell = _reply("Rapport\nLe délai est fixé.")
+
+    presets.run_translate(_ctx(doc, shell), shell, "", None)
+
+    assert doc.items[0].runs() == [("Rapport", BOLD)]
+    assert doc.paragraphs == ["Rapport", "Le délai est fixé."]
+
+
+def test_translate_without_selection_asks_for_a_language_when_all_is_translated():
+    doc = FakeBodyDoc(["Rapport", "Le délai est fixé."], ["Heading 1", "Standard"])
+    shell = _reply("Rapport\nLe délai est fixé.")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "", None)
+
+    assert doc.writes == 0
+    assert message == _t("preset.already_in_language")
+
+
+def test_translate_without_selection_in_append_mode_adds_the_translation_after_it():
+    doc = FakeBodyDoc(["Report", "The deadline is set."], ["Heading 1", "Standard"])
+    shell = _reply("Rapport\nLe délai est fixé.")
+
+    message = presets.run_translate(_ctx(doc, shell), shell, "", None, append_mode=True)
+
+    assert doc.paragraphs == ["Report", "The deadline is set.", "---début-de-la-traduction---",
+                              "Rapport", "Le délai est fixé.", "---fin-de-la-traduction---"]
+    assert doc.styles[2:] == ["Standard", "Heading 1", "Standard", "Standard"]
+    assert message == _t("preset.done_translate_document")
+
+
+@pytest.mark.parametrize("selection", ["The deadline.", ""], ids=["selection", "document"])
+def test_translate_is_counted_under_its_own_action_in_telemetry(selection):
+    doc = FakeBodyDoc(["The deadline."], selection=selection)
+    shell = _reply("Le délai.")
+
+    presets.run_translate(_ctx(doc, shell), shell, "", None)
+
+    [(span, attrs)] = shell.telemetry_events
+    assert (span, attrs["plugin.action"], attrs["action"]) == (
+        "TranslateSelection", "translate", "translate_selection")
+
+
+@pytest.mark.parametrize("runner", [presets.run_correct, presets.run_translate],
+                         ids=["correct", "translate"])
 def test_a_document_of_tables_only_is_reported_without_calling_the_model(runner):
     doc = FakeBodyDoc(["", TABLE, ""])
     shell = FakeShell()
@@ -186,9 +315,11 @@ def test_a_document_of_tables_only_is_reported_without_calling_the_model(runner)
 
 
 # Un saut de ligne manuel (Maj+Entrée) apparaît comme « \n » dans le texte
-# d'un paragraphe.
+# d'un paragraphe, et une sélection sur plusieurs paragraphes les sépare
+# aussi par « \n ».
 
-@pytest.mark.parametrize("runner", [presets.run_correct], ids=["correct"])
+@pytest.mark.parametrize("runner", [presets.run_correct, presets.run_translate],
+                         ids=["correct", "translate"])
 def test_a_paragraph_with_line_breaks_keeps_them_without_selection(runner):
     """Chaque ligne part à part, les lignes vides restent à leur place."""
     doc = FakeBodyDoc(["Adresse :\n\n75000 Pari", "Fin."])
@@ -198,6 +329,17 @@ def test_a_paragraph_with_line_breaks_keeps_them_without_selection(runner):
 
     assert "[P2] 75000 Pari\n" in shell.requests[0]["messages"][-1]["content"]
     assert doc.paragraphs == ["Adresse :\n\n75000 Paris", "Fin."]
+
+
+def test_translate_writes_a_selection_of_several_paragraphs_line_by_line():
+    """Writer fond en un seul paragraphe une plage récrite d'un coup : écrite
+    ligne à ligne, chaque paragraphe garde sa place et sa mise en forme."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Premier.\n", None), ("Titre", BOLD)])
+    shell = _reply("First.\nTitle")
+
+    presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
+
+    assert doc.selection.runs() == [("First.\n", None), ("Title", BOLD)]
 
 
 def test_correct_still_writes_word_by_word_when_the_model_joins_two_lines():

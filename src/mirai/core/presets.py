@@ -15,12 +15,13 @@ import os
 import re
 from functools import partial
 
+from ..i18n import get_locale
 from ..i18n import t as _t
 from . import doc_rewrite, whole_document, word_edits
 from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
-from .prompts import PIPELINE_TEXT_SYSTEM
+from .prompts import PIPELINE_TEXT_SYSTEM, TRANSLATION_SYSTEM
 from .sinks import CalcCellSink, WriterTargetSink
 from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
@@ -56,7 +57,7 @@ class Preset:
 
 # Le nom court des autres actions vient de la coquille (`_ACTION_NAMES`), qui
 # ne grandit plus.
-_PLUGIN_ACTIONS = {"CorrectSelection": "correct"}
+_PLUGIN_ACTIONS = {"CorrectSelection": "correct", "TranslateSelection": "translate"}
 
 
 def _legacy_telemetry(ctx, span, attrs=None):
@@ -365,6 +366,31 @@ _CORRECT_RULES = (
     "ponctuation. Ne reformule pas, ne change ni l'ordre des mots ni le style, "
     "n'ajoute et ne retire rien. S'il n'y a aucune faute, rends le texte tel quel.")
 
+# Sans motifs de question : traduire « Pouvez-vous préciser… » en donne un.
+_TRANSLATE = _Rewrite(
+    span="TranslateSelection", action="translate_selection", system=TRANSLATION_SYSTEM,
+    labels=("TEXTE À TRADUIRE", "TRADUCTION"),
+    markers=("---début-de-la-traduction---", "---fin-de-la-traduction---"),
+    undo_key="preset.undo_translate",
+    done_keys=("preset.done_translate", "preset.done_translate_replaced",
+               "preset.done_translate_document", "preset.done_translate_document_replaced"),
+    unchanged_key="preset.already_in_language")
+
+# Langue cible par défaut : celle de l'interface, nommée dans la langue des
+# consignes.
+_LANGUAGE_NAMES = {"fr": "français", "en": "anglais", "es": "espagnol",
+                   "pt": "portugais", "zh": "chinois"}
+
+
+def _translate_rules(user_text):
+    """Consigne de traduction vers la langue tapée dans le champ, sinon vers
+    celle de l'interface. Un texte déjà dans cette langue revient tel quel :
+    c'est ce qui permet de demander une autre langue à l'utilisateur."""
+    language = user_text.strip() or _LANGUAGE_NAMES[get_locale()]
+    return (f"Traduis le texte en {language}. Un passage déjà en {language} est "
+            "rendu tel quel. Conserve le sens, le ton et les noms propres.")
+
+
 def _rewrite_budget(chars):
     """Jetons accordés à une réponse qui récrit `chars` caractères : un jeton
     couvre au moins un caractère, et la marge absorbe une réponse plus longue
@@ -376,6 +402,12 @@ def run_correct(ctx, shell, user_text, tee, cancel_event=None,
                 dispatcher=None, append_mode=False, progress=None):
     return _run_rewrite(ctx, shell, _CORRECT, _CORRECT_RULES, tee, cancel_event,
                         append_mode, progress)
+
+
+def run_translate(ctx, shell, user_text, tee, cancel_event=None,
+                  dispatcher=None, append_mode=False, progress=None):
+    return _run_rewrite(ctx, shell, _TRANSLATE, _translate_rules(user_text), tee,
+                        cancel_event, append_mode, progress)
 
 
 def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, progress):
@@ -931,6 +963,8 @@ PRESETS = [
            mode="pipeline", runner=run_lengthen),
     Preset(id="correct", label_key="preset.correct", apps=("writer",),
            mode="pipeline", runner=run_correct),
+    Preset(id="translate", label_key="preset.translate", apps=("writer",),
+           mode="pipeline", runner=run_translate),
     Preset(id="transform", label_key="preset.transform", apps=("calc",),
            mode="pipeline", needs_input=True,
            input_hint_key="preset.transform_hint",

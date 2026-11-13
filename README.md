@@ -295,6 +295,7 @@ python3 -m pytest tests/unit/ -v
 | `SummarizeSelection` | `summarize` | Résumer |
 | `SimplifySelection` | `simplify` | Reformuler |
 | `CorrectSelection` | `correct` | Corriger |
+| `TranslateSelection` | `translate` | Traduire |
 | `TransformToColumn` | `transform` | Transformer (Calc) |
 | `GenerateFormula` | `formula` | Générer formule (Calc) |
 | `AnalyzeRange` | `analyze` | Analyser plage (Calc) |

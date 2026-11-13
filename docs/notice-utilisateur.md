@@ -25,7 +25,7 @@ Extension LibreOffice intégrant un assistant IA directement dans **Writer** et 
 
 MIrAI est un assistant d'écriture intégré à LibreOffice. Il vous aide à rédiger, reformuler, résumer et corriger vos documents sans quitter votre traitement de texte. Vous sélectionnez du texte, vous choisissez une action dans le menu MIrAI (ou via un raccourci clavier), et l'IA vous propose un résultat en quelques secondes.
 
-Dans **Writer**, vous pouvez par exemple : reformuler un paragraphe en langage simple, résumer un long rapport, ajuster la longueur d'un passage ou corriger ses fautes. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
+Dans **Writer**, vous pouvez par exemple : reformuler un paragraphe en langage simple, résumer un long rapport, ajuster la longueur d'un passage, corriger ses fautes ou le traduire. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
 
 Toutes les modifications sont annulables d'un simple Ctrl+Z.
 
@@ -198,6 +198,21 @@ Corrige l'orthographe, la grammaire, la conjugaison et la ponctuation, sans refo
 
 > 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les mots qui changent sont réécrits. Quand un champ, une note ou un saut de paragraphe décale les positions, le passage est réécrit d'un seul tenant et perd sa mise en forme interne. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne ; si le modèle rend un autre nombre de lignes, rien n'est écrit.
 
+### 3.6 🌐 Traduire
+
+Traduit le passage sélectionné, ou tout le document.
+
+> 🟢 **Novice** — Mode d'emploi :
+>
+> 1. Sélectionnez le passage à traduire, ou ne sélectionnez rien pour traduire tout le document
+> 2. Ouvrez l'assistant puis cliquez sur **Traduire** : le texte est traduit dans la langue de LibreOffice
+> 3. Pour une autre langue, tapez-la d'abord dans le champ de saisie (« anglais », « allemand »…), puis cliquez sur **Traduire**
+> 4. Si le texte est déjà dans la langue demandée, l'assistant le dit et ne modifie rien : tapez la langue voulue et cliquez à nouveau
+>
+> La traduction remplace le texte d'origine ; cochez **Ajouter à la suite** pour l'obtenir après lui, entre `---début-de-la-traduction---` et `---fin-de-la-traduction---`.
+
+> 🔵 **Expert** — Sans langue tapée, la langue cible est celle de l'interface de l'extension : celle de LibreOffice quand l'extension la propose (français, anglais, espagnol, portugais, chinois), l'anglais sinon. Sans sélection, titres et paragraphes sont traduits chacun à sa place et gardent leur style ; un paragraphe déjà dans la langue cible reste tel quel. La traduction s'écrit ligne à ligne : chaque paragraphe sélectionné garde sa place et son style, une ligne inchangée garde sa mise en forme, et une ligne traduite prend celle de son premier caractère, si bien que le gras ou l'italique d'un mot isolé est perdu.
+
 ---
 
 ## 4. Fonctionnalités Calc
@@ -326,7 +341,7 @@ Les budgets de tokens sont également configurables :
 | `summarize_selection_max_tokens` | 15 000 |
 | `simplify_selection_max_tokens` | 15 000 |
 
-Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section ; Corriger envoie chaque paragraphe sur sa propre ligne, titres compris. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document fait de tableaux seuls, les actions rapides le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux. Les tableaux restent en place : le texte de part et d'autre d'un tableau est réécrit séparément, et en mode remplacement, la demande libre, sur un document dont un tableau coupe le texte, est appliquée morceau par morceau, ce que la palette signale.
+Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section ; Corriger et Traduire envoient chaque paragraphe sur sa propre ligne, titres compris. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document fait de tableaux seuls, les actions rapides le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux. Les tableaux restent en place : le texte de part et d'autre d'un tableau est réécrit séparément, et en mode remplacement, la demande libre, sur un document dont un tableau coupe le texte, est appliquée morceau par morceau, ce que la palette signale.
 
 ---
 
