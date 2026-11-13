@@ -431,11 +431,27 @@ def test_correct_keeps_the_paragraphs_of_a_selection_read_with_windows_breaks():
     assert doc.selection.anchored() == ["ParagraphBreak"]
 
 
-def test_correct_still_writes_word_by_word_when_the_model_joins_two_lines():
-    doc = FakeBodyDoc(["Avant."], selection=[("Le ", None), ("délai", BOLD),
-                                             ("\nest fixer.", None)])
-    shell = _reply("Le délai est fixé.")
+def test_correct_ignores_a_blank_line_added_by_the_reply():
+    doc = FakeBodyDoc(["Avant."], selection=[("Titre", None), BREAK, ("Le ", None),
+                                             ("délai", BOLD), (" est fixer.", None)])
+    shell = _reply("Titre\n\nLe délai est fixé.")
 
     presets.run_correct(_ctx(doc, shell), shell, "", None)
 
-    assert doc.selection.runs() == [("Le ", None), ("délai", BOLD), (" est fixé.", None)]
+    assert doc.selection.runs() == [("Titre\nLe ", None), ("délai", BOLD), (" est fixé.", None)]
+    assert doc.selection.anchored() == ["ParagraphBreak"]
+
+
+def test_correct_writes_nothing_when_the_reply_joins_two_lines_of_the_selection():
+    """Écrire une espace à la place du saut de paragraphe fondrait les deux
+    paragraphes en un seul."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Le ", None), ("délai", BOLD), BREAK,
+                                             ("est fixer.", None)])
+    shell = _reply("Le délai est fixé.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Le délai\nest fixer."
+    assert doc.selection.anchored() == ["ParagraphBreak"]
+    assert doc.writes == 0
+    assert message == _t("run.err_paragraphs")

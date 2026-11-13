@@ -114,8 +114,10 @@ class WriterTargetSink(_FilteredWriterSink):
 
     Avec `edit_by` ("word" ou "line"), un remplacement ne réécrit que les mots
     ou les lignes qui changent : le reste garde sa mise en forme, et chaque
-    paragraphe sa place. Rien n'est écrit si la cible contient un objet que
-    ces remplacements abîmeraient (`objects_kept`, voir `word_edits.apply`).
+    paragraphe sa place. Rien n'est écrit si la réponse n'a pas autant de
+    lignes non vides que la cible (`lines_mismatch`), ni si la cible contient
+    un objet que ces remplacements abîmeraient (`objects_kept`, voir
+    `word_edits.apply`).
     Avec `skip_unchanged`, une réponse identique au texte lu n'est pas écrite
     (`unchanged`).
     """
@@ -136,6 +138,7 @@ class WriterTargetSink(_FilteredWriterSink):
         self.edit_by = edit_by
         self.skip_unchanged = skip_unchanged
         self.unchanged = False
+        self.lines_mismatch = False
         self.objects_kept = False
         self.target_changed = False
         self.stopped = False
@@ -152,8 +155,13 @@ class WriterTargetSink(_FilteredWriterSink):
             self.unchanged = True
             return
         final = self.accumulated if self.append else self.accumulated.strip()
-        edits = (word_edits.plan(self.original, final, by_word=self.edit_by == "word")
-                 if self.edit_by and not self.append else None)
+        edits = None
+        if self.edit_by and not self.append:
+            final = word_edits.fit_lines(self.original, self.accumulated)
+            if final is None:
+                self.lines_mismatch = True
+                return
+            edits = word_edits.plan(self.original, final, by_word=self.edit_by == "word")
         self.ctx.on_main(lambda: self._write_on_main(final, edits))
 
     def _write_on_main(self, final, edits=None):

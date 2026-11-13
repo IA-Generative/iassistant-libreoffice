@@ -53,6 +53,19 @@ def plan(old, new, by_word=True):
     return [_trim(old, edit) for edit in edits[::-1]]
 
 
+def fit_lines(original, reply):
+    """`reply` posée ligne à ligne sur `original` : chaque ligne non vide
+    rendue prend la place d'une ligne non vide lue, et les lignes vides lues
+    restent où elles sont. None si `reply` n'a pas autant de lignes non vides
+    qu'`original` : elles ne sauraient plus où aller."""
+    lines = _plain(original).split("\n")
+    answers = [line.strip() for line in _plain(reply).split("\n") if line.strip()]
+    if len(answers) != sum(1 for line in lines if line.strip()):
+        return None
+    answers = iter(answers)
+    return "\n".join(next(answers) if line.strip() else line for line in lines)
+
+
 def _trim(old, edit):
     start, end, new = edit
     span = old[start:end]

@@ -427,6 +427,8 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
                      question_patterns=patterns_absent_from(original, action.question_patterns),
                      edit_by=action.edit_by, skip_unchanged=True)
     prompt = (f"{action.labels[0]} :\n{original}\n\n{rules}\n"
+              "Garde les lignes du texte : une ligne rendue par ligne non vide reçue, "
+              "dans le même ordre.\n"
               "Ne pose AUCUNE question.\n"
               "Produis UNIQUEMENT le texte demandé, sans introduction ni commentaire.\n\n"
               f"{action.labels[1]} :\n")
@@ -439,6 +441,8 @@ def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, prog
     sink.finish(step.text, step.streamed)
     if sink.unchanged:
         return _t(action.unchanged_key)
+    if sink.lines_mismatch:
+        return Failed("paragraphs_mismatch")
     if sink.objects_kept:
         return _t("preset.objects_kept")
     return _outcome(sink, _t(action.done_keys[0 if append_mode else 1]))
