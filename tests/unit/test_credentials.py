@@ -66,6 +66,23 @@ def test_the_relay_issuer_is_bound_to_the_environment_like_the_pair():
     assert credentials.get_secret("relay_dm_base", "env-2") == ""
 
 
+def test_dropping_what_a_dm_issued_keeps_the_session_and_the_proxy_password():
+    _fresh_store()
+    for name in ("relay_client_id", "relay_client_key", "relay_key_expires_at",
+                 "relay_dm_base", "refresh_token", "proxy_password"):
+        credentials.set_secret(name, "v-" + name, "env")
+    credentials.remember("relay_client_id", "memory-copy")
+    credentials.remember(credentials.DM_LLM_TOKEN, "tok")
+    credentials.remember(credentials.DM_TELEMETRY_KEY, "tk")
+    credentials.drop_dm_issued()
+    assert [credentials.get_secret(n, "env") for n in credentials.RELAY_KEYS] == ["", "", "", ""]
+    assert credentials.recall("relay_client_id") == ""
+    assert credentials.recall(credentials.DM_LLM_TOKEN) == ""
+    assert credentials.recall(credentials.DM_TELEMETRY_KEY) == ""
+    assert credentials.get_secret("refresh_token", "env") == "v-refresh_token"
+    assert credentials.get_secret("proxy_password", "env") == "v-proxy_password"
+
+
 def test_scoped_secret_is_invisible_in_another_environment():
     # Une lecture avec une autre empreinte (lecture dégradée au démarrage) ne
     # doit pas effacer la paire : seul un changement de transport constaté

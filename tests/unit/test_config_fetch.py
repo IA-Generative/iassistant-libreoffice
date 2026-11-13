@@ -1,13 +1,14 @@
 """Récupération de la config DM : ordre des bases, cache et délai."""
 import os
+import threading
 import time
 import urllib.error
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from src.mirai import credentials, local_config
 from src.mirai.shell import runtime as shell_runtime
 from tests.stubs.helpers import http_response, make_update_directive
-from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
+from tests.stubs.uno_stubs import install, make_job, make_jwt, read_user_config, seed_user_config
 
 install()
 
@@ -297,6 +298,257 @@ def _enroll_posts(job):
 
 def test_enrolling_records_the_active_dm_as_the_issuer_of_the_pair(tmp_path):
     job = _enrolling(make_job(config_dir=str(tmp_path)))
+    job._ensure_device_management_state()
+    assert len(_enroll_posts(job)) == 1
+    assert job._get_config_from_file("relay_dm_base", "") == B
+    assert job._get_config_from_file("enrolled", False) is True
+
+
+# ── bascule de DM ────────────────────────────────────────────
+
+SWITCH_RECOVERY = call(min_interval_seconds=0, prompt_if_unenrolled=True)
+
+
+def _handed_over(tmp_path):
+    """Poste enrôlé sur A, llmToken en main ; A annonce désormais [B, A], pas
+    encore récupéré."""
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    _enrolled_with(job, dms, A)
+    job._fetch_config(force=True)
+    assert credentials.recall(credentials.DM_LLM_TOKEN) == "token-from-" + A
+    dms.announce[A] = [B, A]
+    dms.requests.clear()
+    job._schedule_relay_recovery.reset_mock()
+    return job, dms
+
+
+def _recovered(job):
+    """Attend la fin du worker de récupération relais."""
+    deadline = time.time() + 5
+    while job._relay_recovery_in_progress and time.time() < deadline:
+        time.sleep(0.01)
+
+
+def test_the_hand_over_takes_effect_within_the_fetch_that_announces_it(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == B
+    assert make_job(config_dir=str(tmp_path))._active_bootstrap_url() == B
+
+
+def test_a_switch_drops_what_the_former_dm_issued_and_schedules_one_re_enrollment(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)
+    for key in ("relay_client_id", "relay_client_key", "relay_key_expires_at", "relay_dm_base"):
+        assert job._get_config_from_file(key, "") == ""
+    assert credentials.recall(credentials.DM_LLM_TOKEN) == ""
+    assert credentials.recall(credentials.DM_TELEMETRY_KEY) == ""
+    assert job._get_config_from_file("enrolled", True) is False
+    assert job._schedule_relay_recovery.call_args_list == [SWITCH_RECOVERY]
+
+
+def test_the_first_request_to_the_new_dm_carries_no_pair_of_the_former_one(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)
+    assert dms.requests == [(A, "relay-" + A), (B, None)]
+
+
+def test_the_new_dm_answering_again_is_not_a_switch(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)
+    _enrolled_with(job, dms, B)
+    job._schedule_relay_recovery.reset_mock()
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [B]
+    assert job._get_config_from_file("relay_client_id", "") == "relay-" + B
+    job._schedule_relay_recovery.assert_not_called()
+
+
+def test_landing_on_the_current_base_through_a_hop_is_not_a_switch(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)                            # bascule vers B
+    _enrolled_with(job, dms, B)
+    job.set_config("dm_bootstrap_urls", [A, B])              # comme si B avait annoncé [A, B]
+    job._schedule_relay_recovery.reset_mock()
+    dms.requests.clear()
+    job._fetch_config(force=True)                            # A répond [B, A] et saute vers B
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == B
+    assert job._get_config_from_file("relay_client_id", "") == "relay-" + B
+    job._schedule_relay_recovery.assert_not_called()
+
+
+def test_the_first_dm_ever_to_answer_is_not_a_switch(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert job._active_bootstrap_url() == A
+    assert "enrolled" not in read_user_config(str(tmp_path))
+    job._schedule_relay_recovery.assert_called_once_with()   # l'_auth_notice, avec son backoff
+
+
+def test_when_no_dm_named_ahead_answers_nothing_is_dropped(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    dms.down.add(B)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
+    assert job._active_bootstrap_url() == A
+    assert job._get_config_from_file("relay_client_id", "") == "relay-" + A
+    assert credentials.recall(credentials.DM_LLM_TOKEN) == "token-from-" + A
+    assert job._get_config_from_file("enrolled", False) is True
+    job._schedule_relay_recovery.assert_not_called()
+
+
+def test_a_fallback_is_a_switch_and_the_primary_returns_at_the_next_start(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    dms.announce[B] = [B, A]
+    job._fetch_config(force=True)                            # bascule vers B
+    _enrolled_with(job, dms, B)
+    job._schedule_relay_recovery.reset_mock()
+    dms.down.add(B)
+    dms.requests.clear()
+    job._fetch_config(force=True)                            # repli : bascule vers A
+    assert dms.bases() == [B, A]
+    assert job._active_bootstrap_url() == A
+    assert job._get_config_from_file("relay_client_id", "") == ""
+    assert job._schedule_relay_recovery.call_args_list == [SWITCH_RECOVERY]
+    _enrolled_with(job, dms, A)
+    dms.down.clear()
+    dms.requests.clear()
+    job._schedule_relay_recovery.reset_mock()
+    job._fetch_config(force=True)                            # B revenue reste en queue
+    assert dms.bases() == [A]
+    job._schedule_relay_recovery.assert_not_called()
+    restarted = _restarted(tmp_path, dms)
+    dms.requests.clear()
+    restarted._fetch_config(force=True)                      # nouveau processus : retour sur B
+    assert dms.bases() == [B]
+    assert restarted._active_bootstrap_url() == B
+    assert restarted._schedule_relay_recovery.call_args_list == [SWITCH_RECOVERY]
+
+
+def test_the_switch_re_enrollment_starts_once_the_fetch_has_released_its_guard(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    del job._schedule_relay_recovery                         # la vraie planification et son thread
+    seen = []
+    job._ensure_device_management_state = MagicMock(
+        side_effect=lambda **_kwargs: seen.append(job._fetching_config))
+    job._fetch_config(force=True)
+    _recovered(job)
+    assert seen == [False]
+
+
+def test_a_switch_during_a_running_recovery_starts_no_second_one(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    del job._schedule_relay_recovery
+    job._relay_recovery_in_progress = True
+    job._fetch_config(force=True)
+    assert job._active_bootstrap_url() == B
+    assert job._get_config_from_file("relay_client_id", "") == ""
+
+
+def test_an_enrollment_that_waited_for_the_lock_does_nothing_once_another_succeeded(tmp_path):
+    release, second_fetched = threading.Event(), threading.Event()
+    first = _enrolling(make_job(config_dir=str(tmp_path)))
+    pair = first._urlopen.return_value
+
+    def slow_enroll(_request, **_kwargs):
+        release.wait(5)
+        return pair
+
+    first._urlopen = MagicMock(side_effect=slow_enroll)
+    second = _enrolling(make_job(config_dir=str(tmp_path)))
+    second._fetch_config = MagicMock(
+        side_effect=lambda *_a, **_k: (second_fetched.set(), {"config": {}})[1])
+    t1 = threading.Thread(target=first._ensure_device_management_state,
+                          kwargs={"force_enroll": True})
+    t2 = threading.Thread(target=second._ensure_device_management_state,
+                          kwargs={"force_enroll": True})
+    t1.start()
+    deadline = time.time() + 5
+    while not shell_runtime.get().enrollment_lock.locked() and time.time() < deadline:
+        time.sleep(0.01)
+    t2.start()
+    assert second_fetched.wait(5)
+    release.set()
+    t1.join(5)
+    t2.join(5)
+    assert len(_enroll_posts(first)) == 1
+    assert _enroll_posts(second) == []
+    assert shell_runtime.get().enrollment_generation == 1
+    assert second._get_config_from_file("relay_client_id", "") == "id-" + B
+
+
+def test_the_wizard_gate_stays_closed_while_an_enrollment_is_running(tmp_path):
+    seed_user_config(str(tmp_path), {"enabled": True})
+    job = make_job(config_dir=str(tmp_path))
+    lock = shell_runtime.get().enrollment_lock
+    lock.acquire()
+    try:
+        assert job._needs_first_enrollment() is False
+    finally:
+        lock.release()
+    assert job._needs_first_enrollment() is True
+
+
+def test_a_switch_without_session_leaves_the_device_unenrolled_for_the_wizard(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)
+    _enrolling(job)
+    job._ensure_access_token = MagicMock(return_value=None)   # pas de session Keycloak
+    job._ensure_device_management_state()
+    assert _enroll_posts(job) == []
+    assert job._get_config_from_file("enrolled", True) is False
+    assert job._needs_first_enrollment() is True
+
+
+def test_a_switch_without_session_opens_the_wizard_right_away(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    del job._schedule_relay_recovery
+    job._ensure_device_management_state = MagicMock()        # sans session, la tentative n'enrôle pas
+    job._fetch_config(force=True)
+    _recovered(job)
+    job._schedule_enrollment_check.assert_called_once_with()
+
+
+def test_no_wizard_when_the_switch_re_enrollment_succeeds(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    del job._schedule_relay_recovery
+    job._ensure_device_management_state = MagicMock(
+        side_effect=lambda **_kwargs: _enrolled_with(job, dms, B))
+    job._fetch_config(force=True)
+    _recovered(job)
+    job._schedule_enrollment_check.assert_not_called()
+
+
+def test_no_wizard_while_the_session_is_alive_even_if_the_new_dm_refuses_the_enrollment(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    del job._schedule_relay_recovery
+    job.set_config("access_token", make_jwt({"exp": int(time.time()) + 600, "email": "a@b.c"}))
+    job._ensure_device_management_state = MagicMock()        # /enroll en erreur : rien d'enregistré
+    job._fetch_config(force=True)
+    _recovered(job)
+    job._schedule_enrollment_check.assert_not_called()
+
+
+def test_the_relay_recovery_outside_a_switch_never_opens_the_wizard(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    del job._schedule_relay_recovery
+    job._ensure_device_management_state = MagicMock()
+    job._fetch_config(force=True)            # A répond sans paire : _auth_notice, pas de bascule
+    _recovered(job)
+    job._schedule_enrollment_check.assert_not_called()
+
+
+def test_a_successful_switch_re_enrollment_binds_the_pair_to_the_new_dm(tmp_path):
+    job, dms = _handed_over(tmp_path)
+    job._fetch_config(force=True)
+    _enrolling(job)
     job._ensure_device_management_state()
     assert len(_enroll_posts(job)) == 1
     assert job._get_config_from_file("relay_dm_base", "") == B

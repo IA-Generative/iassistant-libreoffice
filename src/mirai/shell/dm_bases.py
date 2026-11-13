@@ -83,6 +83,12 @@ def mark_reachability(unreachable, base, answered):
     return before == answered
 
 
+def is_switch(previous, answering):
+    """Vrai quand une base répond alors que le gagnant persisté en désigne une autre."""
+    previous = str(previous or "").strip()
+    return bool(previous) and not same_base(previous, answering)
+
+
 def active_base(resolved, persisted, candidates):
     """Le DM de référence : gagnant de la session, sinon gagnant persisté, sinon le
     premier candidat, sinon une chaîne vide."""

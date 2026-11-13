@@ -92,6 +92,12 @@ def test_the_active_base_is_the_resolved_then_the_persisted_winner_then_the_firs
     assert dm_bases.active_base("", "", []) == ""
 
 
+def test_a_switch_needs_a_previous_winner_and_a_different_answering_base():
+    assert dm_bases.is_switch("", "https://a") is False
+    assert dm_bases.is_switch("https://a", "https://A/") is False
+    assert dm_bases.is_switch("https://a", "https://b") is True
+
+
 def test_an_insecure_host_matches_its_base_and_any_url_under_it():
     assert dm_bases.is_insecure_url(OCP, [OCP]) is True
     assert dm_bases.is_insecure_url(OCP + "/config/x?profile=prod", [OCP]) is True

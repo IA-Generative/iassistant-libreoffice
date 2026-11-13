@@ -162,7 +162,7 @@ from .i18n import (
     get_locale as _i18n_get_locale,
     set_locale as _i18n_set_locale,
 )
-from .shell import dm_bases
+from .shell import config_fetch, dm_bases
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
 from .shell.settings_result import apply_settings_result
@@ -1062,54 +1062,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 log_to_file("DM config fetch: proxy disabled, skipping proxy retry")
 
             last_error = "unknown"
-
-            def attempt(base_url):
-                """Une base, en direct puis par proxy : (config_data, relay_present), ou
-                None quand aucune réponse exploitable n'est venue."""
-                nonlocal last_error
-                url = base_url.rstrip("/") + "/" + config_path.lstrip("/")
-                for mode, use_proxy in attempts:
-                    try:
-                        log_to_file(f"DM config fetch attempt: mode={mode} url={url}")
-                        headers = {"Accept": "application/json"}
-                        headers.update(self._relay_headers(base_url))
-                        plugin_version = self._get_extension_version()
-                        headers["X-Plugin-Version"] = plugin_version or "unknown"
-                        headers["X-Platform-Type"] = "libreoffice"
-                        lo_version = self._get_lo_version()
-                        if lo_version:
-                            headers["X-Platform-Version"] = lo_version
-                        client_uuid = str(self._ensure_plugin_uuid() or "")
-                        if client_uuid:
-                            headers["X-Client-UUID"] = client_uuid
-                        request = urllib.request.Request(url, headers=_with_user_agent(headers))
-                        relay_present = "X-Relay-Client" in headers
-                        log_to_file(f"DM config fetch headers: relay={'yes' if relay_present else 'no'} keys={list(headers.keys())}")
-                        with self._urlopen(request, context=self.get_ssl_context(base_url), timeout=fetch_timeout, use_proxy=use_proxy) as response:
-                            payload = response.read().decode("utf-8")
-                        log_to_file(f"DM bootstrap response ({mode}): {len(payload)} octets")
-                        config_data = json.loads(payload)
-                        if isinstance(config_data, dict):
-                            return config_data, relay_present
-                        last_error = f"Invalid JSON root type: {type(config_data).__name__}"
-                        log_to_file(f"Failed to fetch device management config ({mode}): {last_error}")
-                    except urllib.error.HTTPError as e:
-                        try:
-                            body = e.read().decode("utf-8")
-                        except Exception:
-                            body = ""
-                        last_error = f"HTTP {e.code} {e.reason}"
-                        log_to_file(
-                            f"Failed to fetch device management config ({mode}): "
-                            f"HTTP {e.code} {e.reason} body_len={len(body)}"
-                        )
-                    except urllib.error.URLError as e:
-                        last_error = f"URL error {e.reason}"
-                        log_to_file(f"Failed to fetch device management config ({mode}): URL error {e.reason}")
-                    except Exception as e:
-                        last_error = str(e)
-                        log_to_file(f"Failed to fetch device management config ({mode}): {str(e)}")
-                return None
+            headers = {"Accept": "application/json",
+                       "X-Plugin-Version": self._get_extension_version() or "unknown",
+                       "X-Platform-Type": "libreoffice"}
+            lo_version = self._get_lo_version()
+            if lo_version:
+                headers["X-Platform-Version"] = lo_version
+            client_uuid = str(self._ensure_plugin_uuid() or "")
+            if client_uuid:
+                headers["X-Client-UUID"] = client_uuid
+            headers = _with_user_agent(headers)
 
             # Les bases que la gagnante nomme avant elle sont essayées dans la même
             # récupération, en un seul saut : la liste rapportée par le saut attend
@@ -1117,7 +1079,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             winner, queue, hopped = None, list(base_urls), False
             while queue:
                 base_url = queue.pop(0)
-                got = attempt(base_url)
+                got, error = config_fetch.attempt(self, base_url, config_path, attempts,
+                                                  fetch_timeout, headers)
+                if error:
+                    last_error = error
                 if dm_bases.mark_reachability(self.runtime.unreachable_dm_bases, base_url, got is not None):
                     log_to_file(f"DM base {base_url}: " + ("reachable again" if got
                                 else "unreachable, tried last for the rest of the session"))
@@ -1162,6 +1127,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.config_cache = config_data
                 self.config_loaded_at = now
                 self._config_last_failure_at = 0
+                previous = str(self._get_config_from_file("last_bootstrap_url", "") or "").strip()
+                switched = dm_bases.is_switch(previous, base_url)
+                if switched:
+                    # Les DM ne partagent pas leur base relais : ce que l'ancien a
+                    # émis ne vaut rien ici, le poste se ré-enrôle auprès du nouveau.
+                    credentials.drop_dm_issued()
+                    self.set_config("enrolled", False)
+                    log_to_file(f"DM switched: {previous} -> {base_url}; relay pair and llmToken "
+                                "dropped, re-enrollment scheduled")
                 self._resolved_bootstrap_url = base_url
                 try:
                     if self._get_config_from_file("last_bootstrap_url", "") != base_url:
@@ -1176,15 +1150,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 # Une paire antérieure à l'émetteur enregistré : le DM qui l'accepte
                 # (il mint un llmToken) est celui qui l'a émise.
                 minted = str((local_config.select_settings(config_data) or {}).get("llmToken", "") or "").strip()
-                if relay_present and minted and not self._get_config_from_file("relay_dm_base", ""):
+                if (relay_present and minted and not switched
+                        and not self._get_config_from_file("relay_dm_base", "")):
                     self.set_config("relay_dm_base", base_url)
-                # Le DM signale ici une auth relais manquante/refusée.
-                # Réagir tout de suite évite de découvrir le problème
-                # seulement au premier 401 sur /llm/v1.
-                try:
-                    self._check_relay_auth_notice(config_data)
-                except Exception as exc:
-                    log_to_file(f"[ENROLL] auth notice check failed: {str(exc)}")
+                if switched:
+                    self._schedule_relay_recovery(min_interval_seconds=0, prompt_if_unenrolled=True)
+                else:
+                    # Le DM signale ici une auth relais manquante/refusée.
+                    # Réagir tout de suite évite de découvrir le problème
+                    # seulement au premier 401 sur /llm/v1.
+                    try:
+                        self._check_relay_auth_notice(config_data)
+                    except Exception as exc:
+                        log_to_file(f"[ENROLL] auth notice check failed: {str(exc)}")
                 return config_data
         finally:
             self._fetching_config = False
@@ -3945,6 +3923,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """
         if not self._device_management_enabled():
             return
+        generation_seen = self.runtime.enrollment_generation
         config_data = self._fetch_config()
         if not config_data:
             return
@@ -4003,103 +3982,108 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not enroll_endpoint:
             return
 
-        # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`, que
-        # les versions précédentes posaient sans creds relay : un poste marqué
-        # enrôlé mais sans creds relay est dans un état absorbant — le DM
-        # ne minte alors jamais de llmToken et tout /llm/v1 tombe en 401, sans
-        # aucun chemin de sortie. On re-tente donc l'enrôlement (POST /enroll est
-        # idempotent côté DM : il ré-émet une paire).
-        if self._relay_credentials_valid() and not force_enroll:
-            if not self._as_bool(self._get_config_from_file("enrolled", False)):
-                self.set_config("enrolled", True)
-            return
-        if self._as_bool(self._get_config_from_file("enrolled", False)):
-            log_to_file(
-                "[ENROLL] enrolled=True mais creds relay absents/expirés"
-                f"{' (ré-enrôlement forcé)' if force_enroll else ''} — nouvel enrôlement"
+        with self.runtime.enrollment_lock:
+            if self.runtime.enrollment_generation != generation_seen and self._relay_credentials_valid():
+                log_to_file("[ENROLL] an enrollment succeeded meanwhile: nothing to do")
+                return
+            # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`, que
+            # les versions précédentes posaient sans creds relay : un poste marqué
+            # enrôlé mais sans creds relay est dans un état absorbant — le DM
+            # ne minte alors jamais de llmToken et tout /llm/v1 tombe en 401, sans
+            # aucun chemin de sortie. On re-tente donc l'enrôlement (POST /enroll est
+            # idempotent côté DM : il ré-émet une paire).
+            if self._relay_credentials_valid() and not force_enroll:
+                if not self._as_bool(self._get_config_from_file("enrolled", False)):
+                    self.set_config("enrolled", True)
+                return
+            if self._as_bool(self._get_config_from_file("enrolled", False)):
+                log_to_file(
+                    "[ENROLL] enrolled=True mais creds relay absents/expirés"
+                    f"{' (ré-enrôlement forcé)' if force_enroll else ''} — nouvel enrôlement"
+                )
+
+            inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
+            device_name = (
+                config_data.get("device_name")
+                or config_data.get("deviceName")
+                or inner.get("device_name")
+                or inner.get("deviceName")
+                or self._get_config_from_file("device_name", "")
             )
+            plugin_uuid = self._ensure_extension_uuid()
 
-        inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
-        device_name = (
-            config_data.get("device_name")
-            or config_data.get("deviceName")
-            or inner.get("device_name")
-            or inner.get("deviceName")
-            or self._get_config_from_file("device_name", "")
-        )
-        plugin_uuid = self._ensure_extension_uuid()
-
-        enroll_payload = {
-            "device_name": device_name,
-            "plugin_uuid": plugin_uuid,
-            "email": email
-        }
-        log_to_file(f"Device management enroll payload: device_name={device_name} plugin_uuid={plugin_uuid} has_email={bool(email)} has_token={bool(access_token)} endpoint={enroll_endpoint}")
-        try:
-            json_data = json.dumps(enroll_payload).encode("utf-8")
-            headers = {"Content-Type": "application/json"}
-            if access_token:
-                headers["Authorization"] = f"Bearer {access_token}"
-            request = urllib.request.Request(enroll_endpoint, data=json_data, headers=_with_user_agent(headers))
-            with self._urlopen(request, context=self.get_ssl_context(), timeout=10) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
-            relay_client_id = ""
-            relay_client_key = ""
-            relay_expires_at = 0
+            enroll_payload = {
+                "device_name": device_name,
+                "plugin_uuid": plugin_uuid,
+                "email": email
+            }
+            log_to_file(f"Device management enroll payload: device_name={device_name} plugin_uuid={plugin_uuid} has_email={bool(email)} has_token={bool(access_token)} endpoint={enroll_endpoint}")
             try:
-                payload = json.loads(raw) if raw else {}
-                if isinstance(payload, dict):
-                    relay = payload.get("relay") if isinstance(payload.get("relay"), dict) else {}
-                    relay_client_id = str(
-                        payload.get("relayClientId")
-                        or relay.get("client_id")
-                        or ""
-                    ).strip()
-                    relay_client_key = str(
-                        payload.get("relayClientKey")
-                        or relay.get("client_key")
-                        or ""
-                    ).strip()
-                    relay_expires = payload.get("relayKeyExpiresAt") or relay.get("expires_at") or 0
-                    try:
-                        relay_expires_at = int(relay_expires)
-                    except Exception:
-                        relay_expires_at = 0
-            except Exception:
-                pass
-            if relay_client_id and relay_client_key:
-                self.set_config("relay_client_id", relay_client_id)
-                self.set_config("relay_client_key", relay_client_key)
-                self.set_config("relay_dm_base", bootstrap_url)
-                if relay_expires_at > 0:
-                    self.set_config("relay_key_expires_at", relay_expires_at)
-                self.set_config("enrolled", True)
-                log_to_file("Device management enroll succeeded with relay credentials")
-                # Immediately fetch config with new relay creds to sync LLM token
+                json_data = json.dumps(enroll_payload).encode("utf-8")
+                headers = {"Content-Type": "application/json"}
+                if access_token:
+                    headers["Authorization"] = f"Bearer {access_token}"
+                request = urllib.request.Request(enroll_endpoint, data=json_data, headers=_with_user_agent(headers))
+                with self._urlopen(request, context=self.get_ssl_context(), timeout=10) as response:
+                    raw = response.read().decode("utf-8", errors="ignore")
+                relay_client_id = ""
+                relay_client_key = ""
+                relay_expires_at = 0
                 try:
-                    self._fetch_config(force=True)
-                except Exception as _e:
-                    log_to_file(f"Post-enroll config refresh failed: {_e}")
-                token_after = str(self.get_config("llm_api_tokens", "") or "").strip()
-                log_to_file(
-                    f"[ENROLL] post-enroll llmToken={'obtenu' if token_after else 'TOUJOURS ABSENT'}"
-                )
-            else:
-                # Enrôlement à moitié : accepté par le DM mais sans creds relay ;
-                # tracé explicitement, le DM ne mintera aucun llmToken tant qu'il dure.
-                log_to_file(
-                    "Device management enroll succeeded WITHOUT relay credentials — "
-                    "le DM ne pourra minter aucun llmToken (relais désactivé côté "
-                    "serveur ?) ; l'enrôlement sera re-tenté"
-                )
-        except Exception as e:
-            error_body = ""
-            if hasattr(e, "read"):
-                try:
-                    error_body = e.read().decode("utf-8", errors="ignore")
+                    payload = json.loads(raw) if raw else {}
+                    if isinstance(payload, dict):
+                        relay = payload.get("relay") if isinstance(payload.get("relay"), dict) else {}
+                        relay_client_id = str(
+                            payload.get("relayClientId")
+                            or relay.get("client_id")
+                            or ""
+                        ).strip()
+                        relay_client_key = str(
+                            payload.get("relayClientKey")
+                            or relay.get("client_key")
+                            or ""
+                        ).strip()
+                        relay_expires = payload.get("relayKeyExpiresAt") or relay.get("expires_at") or 0
+                        try:
+                            relay_expires_at = int(relay_expires)
+                        except Exception:
+                            relay_expires_at = 0
                 except Exception:
                     pass
-            log_to_file(f"Device management enroll failed: {str(e)} body_len={len(error_body)}")
+                if relay_client_id and relay_client_key:
+                    self.set_config("relay_client_id", relay_client_id)
+                    self.set_config("relay_client_key", relay_client_key)
+                    self.set_config("relay_dm_base", bootstrap_url)
+                    if relay_expires_at > 0:
+                        self.set_config("relay_key_expires_at", relay_expires_at)
+                    self.set_config("enrolled", True)
+                    self.runtime.enrollment_generation += 1
+                    log_to_file("Device management enroll succeeded with relay credentials")
+                    # Immediately fetch config with new relay creds to sync LLM token
+                    try:
+                        self._fetch_config(force=True)
+                    except Exception as _e:
+                        log_to_file(f"Post-enroll config refresh failed: {_e}")
+                    token_after = str(self.get_config("llm_api_tokens", "") or "").strip()
+                    log_to_file(
+                        f"[ENROLL] post-enroll llmToken={'obtenu' if token_after else 'TOUJOURS ABSENT'}"
+                    )
+                else:
+                    # Enrôlement à moitié : accepté par le DM mais sans creds relay ;
+                    # tracé explicitement, le DM ne mintera aucun llmToken tant qu'il dure.
+                    log_to_file(
+                        "Device management enroll succeeded WITHOUT relay credentials — "
+                        "le DM ne pourra minter aucun llmToken (relais désactivé côté "
+                        "serveur ?) ; l'enrôlement sera re-tenté"
+                    )
+            except Exception as e:
+                error_body = ""
+                if hasattr(e, "read"):
+                    try:
+                        error_body = e.read().decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+                log_to_file(f"Device management enroll failed: {str(e)} body_len={len(error_body)}")
 
     def _get_openwebui_access_token(self):
         if not self._device_management_enabled():
@@ -4270,12 +4254,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             )
         return self._schedule_relay_recovery()
 
-    def _schedule_relay_recovery(self, min_interval_seconds=900):
+    def _schedule_relay_recovery(self, min_interval_seconds=900, prompt_if_unenrolled=False):
         """Relance un enrôlement en tâche de fond pour récupérer des creds relay.
 
         Jamais sur le thread appelant (/config tourne déjà dans un worker, et le
         POST /enroll est bloquant). Backoff long : un DM délibérément sans relais
-        renverra toujours le même signal, on ne le matraque pas.
+        renverra toujours le même signal, on ne le matraque pas. Après une bascule
+        de DM (`prompt_if_unenrolled`), une tentative qui laisse le poste sans
+        session ni paire ouvre l'assistant d'enrôlement tout de suite, par le
+        chemin du démarrage.
         """
         now = time.time()
         with self._relay_recovery_lock:
@@ -4289,7 +4276,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
+                # Le /config qui a planifié cette récupération tient encore son
+                # garde-fou : un enrôlement lancé avant sa levée n'aurait pas de config.
+                deadline = time.time() + 15
+                while self._fetching_config and time.time() < deadline:
+                    time.sleep(0.1)
                 self._ensure_device_management_state(force_enroll=True)
+                if prompt_if_unenrolled and self._needs_first_enrollment():
+                    log_to_file("[ENROLL] switch re-enrollment left the device without "
+                                "session nor pair: wizard now")
+                    self._schedule_enrollment_check()
             except Exception as exc:
                 log_to_file(f"[ENROLL] relay recovery échouée: {str(exc)}")
             finally:
@@ -6175,6 +6171,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         try:
             # No enrollment needed if device management is disabled
             if not self._device_management_enabled():
+                return False
+            # Un enrôlement de fond est en cours : pas d'assistant qui clignote
+            # pendant la tentative silencieuse.
+            if self.runtime.enrollment_lock.locked():
                 return False
             enrolled = self._as_bool(self._get_config_from_file("enrolled", False))
             access_token = str(self._get_config_from_file("access_token", "")).strip()

@@ -15,6 +15,12 @@ class ShellRuntime:
         self.enrollment_dismissed = False
         self.enrollment_wizard_active = False
         self.enrollment_wizard_lock = threading.Lock()
+        # Le DM fait tourner la paire relais à chaque POST /enroll : deux enrôlements
+        # concurrents laisseraient le poste avec une paire révoquée. Un seul à la
+        # fois dans le processus ; le compteur dit à celui qui a attendu qu'un
+        # autre a abouti entre-temps.
+        self.enrollment_lock = threading.Lock()
+        self.enrollment_generation = 0
         # Bases DM (normalisées) qui n'ont répondu à aucune récupération de config
         # dans ce processus : essayées en dernier et ignorées par la passation,
         # sinon chaque récupération paierait leur délai ; une base redevient saine
