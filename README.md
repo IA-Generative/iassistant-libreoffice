@@ -294,6 +294,7 @@ python3 -m pytest tests/unit/ -v
 | `ResizeSelection` | `resize` | Ajuster la longueur |
 | `SummarizeSelection` | `summarize` | Résumer |
 | `SimplifySelection` | `simplify` | Reformuler |
+| `CorrectSelection` | `correct` | Corriger |
 | `TransformToColumn` | `transform` | Transformer (Calc) |
 | `GenerateFormula` | `formula` | Générer formule (Calc) |
 | `AnalyzeRange` | `analyze` | Analyser plage (Calc) |

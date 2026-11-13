@@ -11,8 +11,9 @@ import bisect
 import dataclasses
 
 from ..i18n import t as _t
-from . import doc_rewrite
+from . import doc_rewrite, word_edits
 from .sinks import DraftSink
+from .text_filters import same_text
 from .tools.writer_tools import (
     PARAGRAPH_BREAK,
     document_body,
@@ -168,6 +169,39 @@ def rewrite(model, snapshot, instruction_for, limit, tee=None):
     return Outcome(drafts=drafts)
 
 
+def rewrite_paragraphs(model, snapshot, instruction, limit, tee=None):
+    """Fait récrire chaque paragraphe non vide, titres compris, sans changer
+    le découpage du texte : une action qui le garde (corriger, traduire)
+    remet chaque ligne rendue à sa place, et chaque paragraphe garde son
+    style. Les lignes d'un paragraphe coupé de sauts de ligne manuels partent
+    à part ; ses lignes vides restent où elles sont. Un morceau rendu avec un
+    autre nombre de lignes arrête tout, car elles ne sauraient plus où aller.
+    Worker."""
+    filled = [index for index, text in enumerate(snapshot.texts) if text.strip()]
+    drafts = []
+    for indexes in doc_rewrite.chunks(snapshot.texts, filled, limit):
+        parts = [snapshot.texts[index].split("\n") for index in indexes]
+        sent = [part for lines in parts for part in lines if part.strip()]
+        answer = model.ask(doc_rewrite.build_paragraph_prompt(sent, instruction), tee)
+        if isinstance(answer, Outcome):
+            return answer
+        returned = doc_rewrite.parse_lines(answer)
+        if len(returned) != len(sent):
+            return Outcome(error="paragraphs_mismatch", step=model.last_step)
+        answers = iter(returned)
+        for index, lines in zip(indexes, parts, strict=True):
+            text = "\n".join(next(answers) if line.strip() else line for line in lines)
+            drafts.append(Draft((index,), [text]))
+    return Outcome(drafts=drafts)
+
+
+def changed(snapshot, drafts):
+    """Les morceaux dont le texte rendu diffère de celui du document, aux
+    espaces près."""
+    return [draft for draft in drafts
+            if not same_text(draft.paragraphs[0], snapshot.texts[draft.indexes[0]])]
+
+
 def _chunks(snapshot, body, limit):
     """Les morceaux du corps d'une section, jamais à cheval sur un tableau :
     effacer les paragraphes en trop d'un tel morceau supprimerait le tableau
@@ -305,6 +339,14 @@ def replace(ctx, snapshot, drafts):
         write_paragraphs(ctx.model.Text,
                          [snapshot.paragraphs[i] for i in draft.indexes],
                          draft.paragraphs, draft.styles)
+
+
+def apply_edits(snapshot, edits):
+    """Écrit chaque paragraphe récrit par morceaux : `edits` donne, par index
+    de paragraphe, le texte rendu et les remplacements de `word_edits.plan`.
+    Thread principal exclusivement."""
+    for index, (new, plan) in edits.items():
+        word_edits.apply(snapshot.paragraphs[index], snapshot.texts[index], new, plan)
 
 
 def headings_kept(snapshot, drafts):

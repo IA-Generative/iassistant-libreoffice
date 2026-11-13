@@ -49,11 +49,36 @@ class FakeCursor:
         return self._doc.text_obj
 
 
+class _FakeInlineCursor:
+    """Curseur posé dans le texte de la sélection : il avance caractère par
+    caractère et remplace ce qu'il couvre."""
+
+    def __init__(self, rng):
+        self._range = rng
+        self.start = self.end = 0
+
+    def goRight(self, count, expand):
+        self.end = min(self.end + count, len(self._range._text))
+        if not expand:
+            self.start = self.end
+        return True
+
+    def getString(self):
+        return self._range._text[self.start:self.end]
+
+    def setString(self, value):
+        text = self._range._text
+        self._range.setString(text[:self.start] + value + text[self.end:])
+        self.end = self.start + len(value)
+
+
 class FakeWriterText:
     def __init__(self, doc):
         self._doc = doc
 
     def createTextCursorByRange(self, rng):
+        if isinstance(rng, SimpleNamespace) and hasattr(rng, "inline"):
+            return _FakeInlineCursor(rng.inline)
         return FakeCursor(self._doc)
 
     def createTextCursor(self):
@@ -105,6 +130,9 @@ class FakeTextRange:
 
     def getText(self):
         return self._doc.text_obj
+
+    def getStart(self):
+        return SimpleNamespace(inline=self)
 
 
 class FakeWriterDoc:

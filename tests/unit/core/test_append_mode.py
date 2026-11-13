@@ -56,7 +56,7 @@ def test_defaults_match_historic_behaviour():
     from src.mirai.core import presets
 
     expected = {"summarize": True, "simplify": True,
-                "shorten": False, "lengthen": False}
+                "shorten": False, "lengthen": False, "correct": False}
     for preset_id, appends in expected.items():
         runner = next(p for p in presets.PRESETS if p.id == preset_id).runner
         default = inspect.signature(runner).parameters["append_mode"].default

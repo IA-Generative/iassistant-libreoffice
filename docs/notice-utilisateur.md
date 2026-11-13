@@ -25,7 +25,7 @@ Extension LibreOffice intégrant un assistant IA directement dans **Writer** et 
 
 MIrAI est un assistant d'écriture intégré à LibreOffice. Il vous aide à rédiger, reformuler, résumer et corriger vos documents sans quitter votre traitement de texte. Vous sélectionnez du texte, vous choisissez une action dans le menu MIrAI (ou via un raccourci clavier), et l'IA vous propose un résultat en quelques secondes.
 
-Dans **Writer**, vous pouvez par exemple : reformuler un paragraphe en langage simple, résumer un long rapport, ou ajuster la longueur d'un passage. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
+Dans **Writer**, vous pouvez par exemple : reformuler un paragraphe en langage simple, résumer un long rapport, ajuster la longueur d'un passage ou corriger ses fautes. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
 
 Toutes les modifications sont annulables d'un simple Ctrl+Z.
 
@@ -183,6 +183,21 @@ Réécrit le texte sélectionné en langage clair et accessible, en conservant l
 
 > 🔵 **Expert** — Le prompt système demande des phrases courtes, des mots courants, la voix active. La détection de questions conversationnelles est active (patterns : "voulez-vous", "souhaitez-vous", "would you like"…). Si le modèle pose une question, un message d'avertissement remplace le résultat. Le budget de tokens est configurable via `simplify_selection_max_tokens`.
 
+### 3.5 ✏️ Corriger
+
+Corrige l'orthographe, la grammaire, la conjugaison et la ponctuation, sans reformuler.
+
+> 🟢 **Novice** — Mode d'emploi :
+>
+> 1. Sélectionnez le passage à corriger, ou ne sélectionnez rien pour corriger tout le document
+> 2. Ouvrez l'assistant (**Ctrl+Alt+Espace**, macOS **Ctrl+Opt+Espace**) puis cliquez sur **Corriger**
+> 3. Les fautes sont corrigées à leur place ; les autres mots gardent leur mise en forme (gras, italique, liens)
+> 4. Si le texte ne contient aucune faute, l'assistant le dit et ne modifie rien
+>
+> Cochez **Ajouter à la suite** pour obtenir le texte corrigé après le vôtre, entre `---début-du-texte-corrigé---` et `---fin-du-texte-corrigé---`, sans toucher à l'original.
+
+> 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les mots qui changent sont réécrits. Quand un champ, une note ou un saut de paragraphe décale les positions, le passage est réécrit d'un seul tenant et perd sa mise en forme interne. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne ; si le modèle rend un autre nombre de lignes, rien n'est écrit.
+
 ---
 
 ## 4. Fonctionnalités Calc
@@ -311,7 +326,7 @@ Les budgets de tokens sont également configurables :
 | `summarize_selection_max_tokens` | 15 000 |
 | `simplify_selection_max_tokens` | 15 000 |
 
-Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document fait de tableaux seuls, Résumer, Simplifier, Raccourcir et Allonger le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux. Les tableaux restent en place : le texte de part et d'autre d'un tableau est réécrit séparément, et en mode remplacement, la demande libre, sur un document dont un tableau coupe le texte, est appliquée morceau par morceau, ce que la palette signale.
+Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section ; Corriger envoie chaque paragraphe sur sa propre ligne, titres compris. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document fait de tableaux seuls, les actions rapides le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux. Les tableaux restent en place : le texte de part et d'autre d'un tableau est réécrit séparément, et en mode remplacement, la demande libre, sur un document dont un tableau coupe le texte, est appliquée morceau par morceau, ce que la palette signale.
 
 ---
 

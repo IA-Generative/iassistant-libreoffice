@@ -262,7 +262,7 @@ comme « la demande porte sur le document entier ».
 
 - **pipeline** (Python pilote, iso-fonctionnalité stricte avec l'historique,
   marqueurs `---début-du-…---` conservés) : Résumer, Simplifier,
-  Raccourcir/Allonger, Transformer (Calc), Analyser (Calc).
+  Raccourcir/Allonger, Corriger, Transformer (Calc), Analyser (Calc).
   Les presets Writer lisent leur cible (texte et plage) en un seul `on_main`
   avant l'appel au modèle, affichent le texte dans la palette au fil du flux,
   puis l'écrivent en un seul passage sur le thread principal, dans une seule
@@ -274,6 +274,13 @@ comme « la demande porte sur le document entier ».
   par section, ou ajout d'un seul bloc après le dernier paragraphe. Le résumé
   suit toujours le dernier paragraphe ; au-delà de `document_chunk_max_chars`,
   il se fait par étapes (chaque morceau de section, puis l'ensemble).
+  Corriger garde le découpage du texte : chaque paragraphe, titres compris,
+  part sur sa propre ligne et revient à sa place
+  (`whole_document.rewrite_paragraphs`), et une réponse identique au texte
+  n'est pas écrite. Il écrit par morceaux (`core/word_edits.py`) et ne
+  remplace que les mots corrigés : le reste garde sa mise en forme, et
+  chaque paragraphe d'une sélection sa place, là où Writer fondrait la plage
+  récrite d'un coup en un seul paragraphe.
   Les presets Calc lisent la partie utile de la sélection en un seul `on_main`
   avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
   zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis
