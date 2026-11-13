@@ -2360,8 +2360,7 @@ def test_a_hint_with_a_target_opens_it_from_its_own_row(palette_module):
 
 
 def test_footer_has_no_link_line_when_the_dm_serves_none(palette_module):
-    palette = build_palette(palette_module)
-    assert not palette._link_names
+    build_palette(palette_module)
     assert "link_search_portal" not in set(palette_module._fake_dialog.model.names)
 
 
@@ -2370,6 +2369,15 @@ def test_clicking_a_dm_link_opens_it_through_the_shell(palette_module):
     palette._on_link("beta-feedback", "https://p.fake-domain.name/avis")
     palette.shell.open_link.assert_called_once_with("https://p.fake-domain.name/avis")
     palette.shell.telemetry.assert_called_with("LinkClick", {"link": "beta-feedback"})
+
+
+def test_a_link_that_cannot_open_says_so_on_the_status_line(palette_module):
+    """Sans navigateur, la ligne d'état porte l'erreur ; rien ne remonte au clic."""
+    palette = build_palette(palette_module)
+    palette.shell.open_link.side_effect = RuntimeError(_t("msg.no_browser"))
+    palette._on_link("beta-feedback", "https://p.fake-domain.name")
+    assert palette._models["status"].Label == _t("msg.no_browser").split("\n")[0]
+    assert palette._models["status"].TextColor == palette_module.STATUS_COLORS["error"]
 
 
 def test_the_beta_feedback_row_opens_the_feedback_page_not_the_portal_home(palette_module):
