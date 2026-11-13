@@ -75,6 +75,12 @@ Envoyé lors de l'ouverture du dialogue des paramètres.
 **Attributs :**
 - `action`: "open_settings"
 
+### LinkClick
+Envoyé au clic sur un lien distribué par le Device Management (pied de la palette).
+
+**Attributs :**
+- `link`: rôle du lien (`search-portal`, `beta-feedback`, suffixe `.hint` pour son complément), jamais l'URL
+
 ## Format des traces
 
 ### Structure OTLP/JSON
