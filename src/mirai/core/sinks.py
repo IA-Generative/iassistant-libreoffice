@@ -185,12 +185,13 @@ class WriterTargetSink(_FilteredWriterSink):
             pass
 
     def _replace_target(self, final, edits):
+        written = self.target
         if edits is not None:
-            word_edits.apply(self.target, self.original, final, edits)
+            written = word_edits.apply(self.target, self.original, final, edits)
         else:
             self.target.setString(final)
         try:
-            self.ctx.controller.select(self.target)
+            self.ctx.controller.select(written)
         except Exception:
             pass
 

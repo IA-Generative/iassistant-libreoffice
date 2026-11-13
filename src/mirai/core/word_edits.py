@@ -76,7 +76,8 @@ def _go(move, count, expand):
 
 def apply(rng, old, new, edits):
     """Écrit `new` dans `rng`, qui contient `old`, par les remplacements
-    `edits` de `plan`.
+    `edits` de `plan`, et rend la plage écrite, à sélectionner : `rng` ne
+    couvre plus un texte remplacé à l'un de ses bords.
 
     Avant chaque remplacement, le curseur doit couvrir le texte attendu. Sinon
     (un champ, une note ou un saut de paragraphe ne compte pas comme dans le
@@ -94,7 +95,11 @@ def apply(rng, old, new, edits):
         _go_left(cursor, end - start, True)
         if _plain(cursor.getString()) != old[start:end]:
             rng.setString(new)
-            return
+            return rng
         cursor.setString(replacement)
         cursor.collapseToStart()
         position = start
+    # Le texte avant le premier remplacement n'a pas bougé.
+    _go_left(cursor, position, False)
+    _go_right(cursor, len(_plain(new)), True)
+    return cursor
