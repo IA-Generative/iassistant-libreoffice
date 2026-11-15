@@ -1,0 +1,3 @@
+# Signature des paquets publiés (scripts/package_signature.py) : outillage de
+# la CI et du développeur, jamais embarqué dans l'OXT.
+cryptography==50.0.2
