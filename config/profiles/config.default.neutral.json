@@ -1,0 +1,9 @@
+{
+    "_note": "Paquet NEUTRE, celui que la CI publie (02-build-oxt.sh --neutral) : aucune valeur d'organisation. L'adresse en .invalid est un exemple qui ne répond jamais ; chaque Device Management y inscrit sa propre liste à l'import. Pas de ?profile= : le DM applique son profil par défaut. Ne pas modifier : docs/pre-versions.md.",
+    "configVersion": 1,
+    "enabled": true,
+    "bootstrap_urls": [
+        "https://dm.example.invalid"
+    ],
+    "config_path": "/config/mirai-libreoffice/config.json"
+}

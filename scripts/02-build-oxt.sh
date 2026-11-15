@@ -10,6 +10,9 @@ INSTALL_AFTER_BUILD=false
 RESTART_LIBREOFFICE=false
 OUTPUT_PATH="$ROOT_DIR/dist/${EXTENSION_NAME}.oxt"
 CONFIG_PATH=""
+NEUTRAL=false
+PKG_VERSION=""
+NEUTRAL_CONFIG="$ROOT_DIR/config/profiles/config.default.neutral.json"
 
 usage() {
   cat <<USAGE
@@ -19,6 +22,10 @@ Options:
   --install                 Install extension after build (unopkg)
   --restart                 Restart LibreOffice after install
   --config <path>           Config file to embed as config.default.json
+  --neutral                 Neutral package, the one the CI publishes: example DM
+                            address, no organisation value (docs/pre-versions.md)
+  --version <version>       Version carried by the package: X.Y.Z, X.Y.Z-rc.N or
+                            X.Y.Z-dev.N (default: the one of oxt/description.xml)
   --output <path>           Output OXT file path (default: ./dist/mirai.oxt)
   -h, --help                Show this help
 USAGE
@@ -104,6 +111,15 @@ while [ "$#" -gt 0 ]; do
       [ -n "$CONFIG_PATH" ] || { err "Missing value for --config"; exit 1; }
       shift 2
       ;;
+    --neutral)
+      NEUTRAL=true
+      shift
+      ;;
+    --version)
+      PKG_VERSION="${2:-}"
+      [ -n "$PKG_VERSION" ] || { err "Missing value for --version"; exit 1; }
+      shift 2
+      ;;
     --output)
       OUTPUT_PATH="${2:-}"
       [ -n "$OUTPUT_PATH" ] || { err "Missing value for --output"; exit 1; }
@@ -133,7 +149,19 @@ require_cmd zip
 [ -d "$ROOT_DIR/src" ] || { err "Missing directory: src"; exit 1; }
 [ -f "$ROOT_DIR/main.py" ] || { err "Missing file: main.py"; exit 1; }
 
+if [ "$NEUTRAL" = true ]; then
+  [ -z "$CONFIG_PATH" ] || { err "--neutral and --config are mutually exclusive"; exit 1; }
+  CONFIG_PATH="$NEUTRAL_CONFIG"
+fi
 CONFIG_IN_USE="$(resolve_config_path)"
+
+# Une pré-version s'écrit autrement dans description.xml : LibreOffice range
+# mal un suffixe -rc.N (src/mirai/package_version.py).
+NATIVE_VERSION=""
+if [ -n "$PKG_VERSION" ]; then
+  NATIVE_VERSION="$(python3 "$ROOT_DIR/src/mirai/package_version.py" native "$PKG_VERSION")" \
+    || { err "Invalid --version: $PKG_VERSION"; exit 1; }
+fi
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 if [ -f "$OUTPUT_PATH" ]; then
@@ -145,6 +173,19 @@ STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
 cp -R "$ROOT_DIR/oxt/." "$STAGE_DIR/"
+if [ -n "$NATIVE_VERSION" ]; then
+  python3 - "$STAGE_DIR/description.xml" "$NATIVE_VERSION" <<'PY' || { err "description.xml: version not stamped"; exit 1; }
+import re, sys
+path, version = sys.argv[1:]
+with open(path, encoding="utf-8") as fh:
+    text = fh.read()
+text, count = re.subn(r'(<version\s+value=")[^"]*(")', lambda m: m.group(1) + version + m.group(2), text)
+if count != 1:
+    sys.exit(f"description.xml : {count} balise(s) <version value=…>, une seule attendue")
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(text)
+PY
+fi
 cp "$ROOT_DIR/main.py" "$STAGE_DIR/main.py"
 # De src/, seuls partent les modules Python et les données lues à l'exécution.
 (
@@ -218,27 +259,38 @@ fi
 OXT_VERSION=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 OXT_IDENTIFIER=$(sed -n 's/.*<identifier value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml" 2>/dev/null || echo "")
 
-# La licence affiche la version de description.xml, seule source de version.
-if [ -n "$OXT_VERSION" ] && [ -f "$STAGE_DIR/registration/license.txt" ]; then
-  sed -i.bak "s|@VERSION@|${OXT_VERSION}|" "$STAGE_DIR/registration/license.txt"
+# Numéro du Device Management : celui de --version, sinon celui de
+# description.xml (une version générale s'écrit de la même façon des deux côtés).
+DM_VERSION="${PKG_VERSION:-$OXT_VERSION}"
+
+# La licence affiche le numéro que connaît le Device Management.
+if [ -n "$DM_VERSION" ] && [ -f "$STAGE_DIR/registration/license.txt" ]; then
+  sed -i.bak "s|@VERSION@|${DM_VERSION}|" "$STAGE_DIR/registration/license.txt"
   rm -f "$STAGE_DIR/registration/license.txt.bak"
 fi
 
 # dm-manifest.json : métadonnées lues par le DM à l'upload. La copie embarquée
-# prend la version de description.xml et un changelog dérivé de CHANGELOG.md.
+# prend le numéro du Device Management et un changelog dérivé de CHANGELOG.md.
 if [ -f "$ROOT_DIR/dm-manifest.json" ]; then
-  if [ -n "$OXT_VERSION" ]; then
+  if [ -n "$DM_VERSION" ]; then
     python3 "$ROOT_DIR/scripts/dm_manifest.py" "$ROOT_DIR/dm-manifest.json" \
-      "$STAGE_DIR/dm-manifest.json" "$OXT_VERSION" "$OXT_IDENTIFIER" "$ROOT_DIR/CHANGELOG.md" \
+      "$STAGE_DIR/dm-manifest.json" "$DM_VERSION" "$OXT_IDENTIFIER" "$ROOT_DIR/CHANGELOG.md" \
       || { err "dm-manifest.json embarqué impossible à produire"; exit 1; }
   else
     cp "$ROOT_DIR/dm-manifest.json" "$STAGE_DIR/dm-manifest.json"
   fi
 fi
 
-# dm-config.json — config template for DM (default + profiles)
+# dm-config.json — config template for DM (default + profiles). Paquet neutre :
+# toute adresse réelle y devient un repère ${{CLE}} que le DM résout.
 if [ -f "$ROOT_DIR/dm-config.json" ]; then
-  cp "$ROOT_DIR/dm-config.json" "$STAGE_DIR/dm-config.json"
+  if [ "$NEUTRAL" = true ]; then
+    python3 "$ROOT_DIR/scripts/neutral_package.py" dm-config \
+      "$ROOT_DIR/dm-config.json" "$STAGE_DIR/dm-config.json" \
+      || { err "dm-config.json neutre impossible à produire"; exit 1; }
+  else
+    cp "$ROOT_DIR/dm-config.json" "$STAGE_DIR/dm-config.json"
+  fi
 fi
 
 # Mécanisme natif de MAJ LibreOffice (<update-information>)
@@ -249,6 +301,13 @@ fi
 python3 "$ROOT_DIR/scripts/inject_update_feed.py" \
   "$STAGE_DIR/description.xml" "$STAGE_DIR/config.default.json" \
   || { err "injection <update-information> dans description.xml échouée"; exit 1; }
+
+# Un paquet neutre ne nomme aucun DM réel. MIRAI_UPDATE_FEED_URL, qui force
+# l'adresse du flux, est donc refusé ici comme toute autre adresse réelle.
+if [ "$NEUTRAL" = true ]; then
+  python3 "$ROOT_DIR/scripts/neutral_package.py" check "$STAGE_DIR" \
+    || { err "Le paquet n'est pas neutre (voir ci-dessus)"; exit 1; }
+fi
 
 # Documentation — README, notice, licence
 mkdir -p "$STAGE_DIR/docs"
@@ -280,7 +339,14 @@ done
 if [ "$_dm_ok" = true ]; then
   log "DM packaging: all required files present"
 fi
-[ -n "$OXT_VERSION" ] && log "Version: $OXT_VERSION"
+if [ -n "$DM_VERSION" ]; then
+  FINAL_NATIVE=$(sed -n 's/.*<version value="\([^"]*\)".*/\1/p' "$STAGE_DIR/description.xml")
+  if [ "$FINAL_NATIVE" = "$DM_VERSION" ]; then
+    log "Version: $DM_VERSION"
+  else
+    log "Version: $DM_VERSION (description.xml: $FINAL_NATIVE)"
+  fi
+fi
 
 if [ "$INSTALL_AFTER_BUILD" != true ]; then
   exit 0

@@ -67,3 +67,18 @@ def test_without_changelog_the_history_is_kept(tmp_path):
     out = json.loads(target.read_text())
     assert [e["version"] for e in out["changelog"]] == ["0.0.1.0.32"]
     assert "identifier" not in out
+
+
+def test_a_prerelease_gets_its_own_entry_first():
+    derived = dm_manifest.changelog_from_markdown(CHANGELOG)
+    out = dm_manifest.build_manifest({"changelog": []}, "0.5.0-rc.12", "", derived,
+                                     today="2026-11-15")
+    assert out["version"] == "0.5.0-rc.12"
+    assert out["changelog"][0] == {"version": "0.5.0-rc.12", "date": "2026-11-15",
+                                   "changes": ["Version candidate de la 0.5.0, avant sa sortie"]}
+    assert [e["version"] for e in out["changelog"][1:]] == ["0.4.0", "0.3.0"]
+
+
+def test_a_trial_version_is_named_as_such():
+    out = dm_manifest.build_manifest({}, "0.5.0-dev.3", "", [], today="2026-11-15")
+    assert out["changelog"][0]["changes"] == ["Version d'essai de la 0.5.0, avant sa sortie"]
