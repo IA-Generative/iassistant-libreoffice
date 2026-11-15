@@ -43,6 +43,8 @@
   "about.title": "Acerca de IA'ssistant MIrAI",
   "about.window_title": "MIrAI — IA'ssistant LibreOffice",
   "about.version": "Versión {version}",
+  "about.prerelease_rc": "Versión candidata",
+  "about.prerelease_dev": "Versión de prueba",
   "about.desc": "Extensión de LibreOffice que integra un asistente de IA en Writer y Calc. Seleccione texto y use el menú MIrAI para generar, editar, resumir, reformular o ajustar la longitud de sus documentos.",
   "about.program": "Programa MIrAI — Ministerio del Interior",
   "about.changelog_title": "Últimas novedades",

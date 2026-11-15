@@ -165,6 +165,8 @@ from .i18n import (
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
 from .shell.settings_result import apply_settings_result
+from .shell import update_signature
+from .shell.version_label import version_label
 from .shell.ui_locale import extension_locale as _extension_locale
 from .shell.uninstall import UninstallWatch
 
@@ -1416,8 +1418,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         try:
             # Route native d'abord : jamais pour une directive
             # différée (elle ne dérange pas l'utilisateur) ni un rollback (LO ne
-            # propose que des versions plus récentes) ; bornée en tentatives.
-            if action == "update" and urgency != "deferred":
+            # propose que des versions plus récentes) ; bornée en tentatives. Jamais
+            # non plus quand le paquet installé exige une signature : LibreOffice
+            # installerait sans que rien ne soit vérifié.
+            if action == "update" and urgency != "deferred" and not update_signature.required(self):
                 attempts = self._native_attempts_for(target_version)
                 if attempts < _NATIVE_MAX_ATTEMPTS and self._native_feed_offers(target_version):
                     if self._perform_native_update(directive):
@@ -1456,6 +1460,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     self._report_update_status(campaign_id, "checksum_error", version_before, "", "checksum mismatch")
                     return
                 log_to_file("_perform_update: checksum OK")
+            if update_signature.refuses(self, directive, binary, _EXTENSION_IDENTIFIER, version_before):
+                return
 
             # Write to temp file
             with tempfile.NamedTemporaryFile(suffix=".oxt", delete=False) as tmp:
@@ -5047,7 +5053,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         version = self._get_extension_version() or "0.1.0"
         add("about_version", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 16,
-            {"Label": _t("about.version", version=version),
+            {"Label": version_label(version),
              "FontHeight": _UI["font_label"],
              "TextColor": _UI["text_secondary"], "Align": 1})
         y += 22

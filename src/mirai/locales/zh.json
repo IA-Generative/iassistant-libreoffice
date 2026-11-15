@@ -43,6 +43,8 @@
   "about.title": "关于 IA'ssistant MIrAI",
   "about.window_title": "MIrAI — LibreOffice 智能助手",
   "about.version": "版本 {version}",
+  "about.prerelease_rc": "候选版本",
+  "about.prerelease_dev": "试用版本",
   "about.desc": "在 Writer 和 Calc 中集成 AI 助手的 LibreOffice 扩展。选中文本并使用 MIrAI 菜单来生成、编辑、摘要、改写或调整文档长度。",
   "about.program": "MIrAI 计划 — 内政部",
   "about.changelog_title": "最新功能",

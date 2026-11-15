@@ -128,7 +128,9 @@ LibreOffice aussi (`tests/unit/test_package_version.py` le vérifie avec une
 transcription de sa comparaison). La correspondance s'inverse : le plugin relit
 dans le registre de LibreOffice l'écriture numérique et **annonce au DM le
 numéro que le DM connaît** (`X-Plugin-Version`, statuts de mise à jour,
-télémétrie). Le Gestionnaire des extensions, lui, affiche l'écriture numérique.
+télémétrie). Le Gestionnaire des extensions, lui, affiche l'écriture numérique ;
+le dialogue « À propos » du plugin affiche le numéro du DM, suivi de « Version
+candidate » ou « Version d'essai ».
 
 Deux contraintes en découlent : aucun élément d'un numéro n'atteint 99999, et
 une version à cinq éléments dont le quatrième vaut 1 ou 2 est toujours lue

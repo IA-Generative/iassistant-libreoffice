@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -186,6 +187,16 @@ def dm_urls(urls, legacy_url=""):
         return out
 
     return kept(urls if isinstance(urls, (list, tuple)) else ()) or kept([legacy_url])
+
+
+_CONFIG_SLUG_RE = re.compile(r"^/?config/([^/?#]+)/config\.json(?:[?#]|$)")
+
+
+def dm_slug(config_path):
+    """Nom sous lequel le plugin interroge le DM, lu dans le chemin de
+    configuration (`/config/<slug>/config.json`) ; `""` s'il n'y figure pas."""
+    match = _CONFIG_SLUG_RE.match(str(config_path or "").strip())
+    return match.group(1) if match else ""
 
 
 def legacy_home_dir():
