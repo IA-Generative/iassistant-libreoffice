@@ -166,6 +166,7 @@ from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
 from .shell.settings_result import apply_settings_result
 from .shell import update_signature
+from .shell.version_label import version_label
 from .shell.ui_locale import extension_locale as _extension_locale
 from .shell.uninstall import UninstallWatch
 
@@ -5052,7 +5053,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         version = self._get_extension_version() or "0.1.0"
         add("about_version", "FixedText",
             HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, 16,
-            {"Label": _t("about.version", version=version),
+            {"Label": version_label(version),
              "FontHeight": _UI["font_label"],
              "TextColor": _UI["text_secondary"], "Align": 1})
         y += 22
