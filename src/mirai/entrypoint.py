@@ -988,23 +988,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return True
 
     def _bootstrap_urls(self):
-        """Ordered list of DM bootstrap base URLs (failover).
-
-        Reads the `bootstrap_urls` list when present; otherwise falls back to the
-        legacy single `bootstrap_url` string. Empty entries are dropped.
-        """
-        result = []
-        urls = self._get_config_from_file("bootstrap_urls", None)
-        if isinstance(urls, (list, tuple)):
-            for item in urls:
-                value = str(item or "").strip()
-                if value and value not in result:
-                    result.append(value)
-        if not result:
-            legacy = str(self._get_config_from_file("bootstrap_url", "") or "").strip()
-            if legacy:
-                result.append(legacy)
-        return result
+        """Ordered list of DM bootstrap base URLs (failover): `bootstrap_urls`,
+        else the legacy `bootstrap_url`; see local_config.dm_urls."""
+        return local_config.dm_urls(self._get_config_from_file("bootstrap_urls", None),
+                                    self._get_config_from_file("bootstrap_url", ""))
 
     def _failover_ordered_urls(self):
         """Bootstrap URLs with the DM that last answered tried first.

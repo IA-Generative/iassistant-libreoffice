@@ -156,6 +156,38 @@ def _dm_base_url(url):
     return f"{parts.scheme.lower()}://{netloc}{parts.path.rstrip('/')}"
 
 
+# Adresse inscrite dans un paquet neutre (scripts/02-build-oxt.sh --neutral) : le
+# paquet publié ne nomme aucune organisation, chaque DM y inscrit sa liste à
+# l'import. `.invalid` est un domaine réservé (RFC 2606) qui ne répond jamais.
+EXAMPLE_DM_URL = "https://dm.example.invalid"
+
+
+def is_example_dm_url(url):
+    """Vrai pour une adresse qui ne peut pas être un DM : hôte sous `.invalid`."""
+    try:
+        host = urllib.parse.urlsplit(str(url or "").strip()).hostname or ""
+    except ValueError:
+        return False
+    host = host.rstrip(".").lower()
+    return host == "invalid" or host.endswith(".invalid")
+
+
+def dm_urls(urls, legacy_url=""):
+    """DM à interroger, dans l'ordre : la liste `bootstrap_urls`, à défaut
+    l'ancienne clé `bootstrap_url`. Entrées vides et doublons écartés, ainsi que
+    l'adresse d'exemple d'un paquet neutre : l'essayer ne coûterait qu'un délai
+    d'attente."""
+    def kept(items):
+        out = []
+        for item in items:
+            value = str(item or "").strip()
+            if value and value not in out and not is_example_dm_url(value):
+                out.append(value)
+        return out
+
+    return kept(urls if isinstance(urls, (list, tuple)) else ()) or kept([legacy_url])
+
+
 def legacy_home_dir():
     """Dossier personnel où les anciennes versions écrivaient log.txt."""
     return os.path.expanduser("~")

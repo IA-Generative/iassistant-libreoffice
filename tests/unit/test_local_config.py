@@ -177,3 +177,32 @@ def test_without_user_config_dir_nothing_is_written(tmp_path):
     cfg.save_dm_snapshot({"config": {"b": 2}})
     assert cfg.get("a", "none") == "none"
     assert os.listdir(tmp_path) == []
+
+
+@pytest.mark.parametrize("url", [
+    "https://dm.example.invalid", "https://dm.example.invalid/", "HTTPS://DM.Example.INVALID:8443/x",
+    "http://invalid", "https://user@a.b.invalid./config", " https://dm.example.invalid ",
+])
+def test_an_address_under_invalid_is_never_a_dm(url):
+    assert local_config.is_example_dm_url(url)
+
+
+@pytest.mark.parametrize("url", [
+    "https://dm.example.com", "https://invalid.example.com", "https://dm.example.com/x.invalid",
+    "https://dm.example.com/?next=https://dm.example.invalid", "https://notinvalid", "", None,
+    "https://[bad",
+])
+def test_other_addresses_are_kept(url):
+    assert not local_config.is_example_dm_url(url)
+
+
+def test_dm_urls_keeps_order_and_drops_blanks_duplicates_and_the_example():
+    urls = ["https://a", " ", "https://dm.example.invalid", "https://b", "https://a", None]
+    assert local_config.dm_urls(urls, "https://legacy") == ["https://a", "https://b"]
+
+
+def test_dm_urls_falls_back_to_the_legacy_single_address():
+    assert local_config.dm_urls(None, " https://legacy ") == ["https://legacy"]
+    assert local_config.dm_urls([], "https://legacy") == ["https://legacy"]
+    assert local_config.dm_urls([local_config.EXAMPLE_DM_URL], "") == []
+    assert local_config.dm_urls("https://not-a-list", "") == []
