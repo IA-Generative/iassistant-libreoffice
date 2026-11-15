@@ -1,0 +1,150 @@
+# Workflow réutilisable, appelé par release.yml (version générale) et
+# prerelease.yml (X.Y.Z-rc.N, X.Y.Z-dev.N). Il construit le paquet NEUTRE (ni
+# valeur d'organisation, ni secret : chaque Device Management adapte le paquet
+# à l'import), le signe et le publie. Voir docs/pre-versions.md.
+name: Build, sign and publish the package
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version carried by the package (X.Y.Z, X.Y.Z-rc.N or X.Y.Z-dev.N)
+        required: true
+        type: string
+      tag:
+        description: Tag of the GitHub release that receives the package
+        required: true
+        type: string
+      prerelease:
+        description: "true: create the tag and a pre-release on the built commit; false: attach to the existing release"
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  PKG_VERSION: ${{ inputs.version }}
+  # Une version générale est construite depuis son tag ; une pré-version depuis
+  # le commit du run, que son tag viendra désigner.
+  BUILD_REF: ${{ inputs.prerelease && github.sha || inputs.tag }}
+
+jobs:
+  build:
+    name: Build the neutral package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      slug: ${{ steps.name.outputs.slug }}
+      file: ${{ steps.name.outputs.file }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.BUILD_REF }}
+          persist-credentials: false
+
+      # Une version générale est construite depuis les fichiers que la PR de
+      # release a mis à jour ; le numéro d'une pré-version n'existe que dans le
+      # paquet (inscrit au build, sans commit).
+      - name: Check the version set by the release PR
+        if: ${{ !inputs.prerelease }}
+        run: |
+          grep -q "<version value=\"$PKG_VERSION\"/>" oxt/description.xml \
+            || { echo "::error::oxt/description.xml ne porte pas la version $PKG_VERSION"; exit 1; }
+
+      # Le fichier s'appelle <slug>-<version>.oxt. Le slug est le nom du plugin
+      # au catalogue du Device Management : il n'est défini qu'à un endroit, le
+      # champ « slug » de dm-manifest.json.
+      - name: Name the package
+        id: name
+        run: |
+          SLUG="$(python3 -c 'import json; print(json.load(open("dm-manifest.json", encoding="utf-8"))["slug"])')"
+          printf '%s' "$SLUG" | grep -Eq '^[a-z0-9][a-z0-9-]*$' \
+            || { echo "::error::slug de dm-manifest.json inattendu : $SLUG"; exit 1; }
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "file=$SLUG-$PKG_VERSION.oxt" >> "$GITHUB_OUTPUT"
+
+      - name: Build the OXT
+        env:
+          FILE: ${{ steps.name.outputs.file }}
+        run: ./scripts/02-build-oxt.sh --neutral --version "$PKG_VERSION" --output "dist/$FILE"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package
+          path: dist/*.oxt
+          if-no-files-found: error
+
+  publish:
+    name: Sign and publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # La clé de signature est un secret de cet environnement, pas du dépôt : ses
+    # règles de protection décident des branches qui peuvent signer. Ce job ne
+    # construit rien : le script de signature et gh, c'est tout.
+    environment: package-signing
+    permissions:
+      contents: write
+    env:
+      SLUG: ${{ needs.build.outputs.slug }}
+      FILE: ${{ needs.build.outputs.file }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.BUILD_REF }}
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+          path: dist
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # ADR-0006 du Device Management : <fichier>.sig.json, déclaration de type
+      # « build ». Sans le secret, le paquet est publié sans enveloppe, avec un
+      # avertissement : la chaîne ne doit pas bloquer avant que la clé existe.
+      - name: Sign the package
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          if [ -z "${PACKAGE_SIGNING_KEY:-}" ]; then
+            echo "::warning title=Paquet non signé::Le secret PACKAGE_SIGNING_KEY de l'environnement package-signing est absent : $FILE est publié sans enveloppe de signature."
+            exit 0
+          fi
+          python3 -m pip install --quiet -r scripts/requirements-signing.txt
+          python3 scripts/package_signature.py sign "dist/$FILE" --slug "$SLUG" --version "$PKG_VERSION"
+
+      - name: Create the pre-release
+        if: ${{ inputs.prerelease }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Un même numéro ne désigne jamais deux fichiers : relancer un run qui
+          # a déjà publié est refusé (lancer un nouveau run, donc un nouveau N).
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::La release $TAG existe déjà : lancez un nouveau run (nouveau numéro) plutôt que de relancer celui-ci."
+            exit 1
+          fi
+          {
+            echo "Pré-version \`$PKG_VERSION\` construite depuis \`$GITHUB_REF_NAME\` (\`$GITHUB_SHA\`)."
+            echo
+            echo "Paquet neutre : à importer dans un Device Management, qui l'adapte. Installé tel quel, il ne joint aucun DM."
+          } > notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "$TAG" --notes-file notes.md \
+            dist/*
+
+      - name: Attach to the release
+        if: ${{ !inputs.prerelease }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" dist/*

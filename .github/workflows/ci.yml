@@ -1,12 +1,13 @@
 # CI : lint, tests unitaires + intégration + build smoke (.oxt) à chaque push/PR.
-# Le plugin n'a AUCUNE dépendance pip (stdlib + stubs UNO) : seuls pytest et
-# ruff sont installés. Le build smoke (test_build_oxt_smoke.py) exécute
+# Le plugin n'a AUCUNE dépendance pip (stdlib + stubs UNO) : seuls pytest, ruff
+# et la bibliothèque de l'outillage de signature (scripts/, jamais embarquée)
+# sont installés. Le build smoke (test_build_oxt_smoke.py) exécute
 # réellement scripts/02-build-oxt.sh (zip/unzip/git sont présents sur ubuntu-latest).
 name: CI
 
 on:
   push:
-    branches: [master, develop, "fix/**", "feat/**", "chore/**", "refactor/**", "exp-jetable/**"]
+    branches: [master, develop, "fix/**", "feat/**", "chore/**", "refactor/**", "exp/**", "exp-jetable/**"]
   pull_request:
 
 concurrency:
@@ -21,9 +22,9 @@ jobs:
       # Erreurs ruff tolérées sur src et tests : ce plafond ne fait que baisser.
       RUFF_BUDGET: "11"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
@@ -52,14 +53,14 @@ jobs:
         # 3.11 : le Python embarqué par LibreOffice 25.8 sous Windows et macOS.
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install test runner
-        run: pip install pytest
+        run: pip install pytest -r scripts/requirements-signing.txt
 
       - name: Tests unitaires + intégration + build smoke
         run: python -m pytest tests/unit tests/integration -q
