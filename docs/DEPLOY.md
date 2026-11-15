@@ -19,8 +19,11 @@ Les versions sont publiees par release-please (`.github/workflows/release.yml`) 
    « chore(master): release X.Y.Z », qui porte la version dans
    `oxt/description.xml` et le `CHANGELOG.md`, deduits des messages de commit
    (Conventional Commits ; seuls `feat`, `fix`, `perf` et `revert` y figurent).
-2. Fusionner cette PR : le tag `vX.Y.Z` et la release GitHub sont crees, et
-   l'OXT de production `mirai-X.Y.Z.oxt` y est attache.
+2. Fusionner cette PR : le tag `vX.Y.Z` et la release GitHub sont crees, et le
+   paquet neutre `mirai-libreoffice-X.Y.Z.oxt` y est attache avec son enveloppe
+   de signature `.sig.json` (voir [pre-versions.md](pre-versions.md)). Ce paquet
+   ne porte aucune valeur d'organisation : il s'importe dans un Device
+   Management, qui l'adapte.
 3. Fusionner `master` dans `develop`, pour y ramener la version et le
    `CHANGELOG.md`.
 
@@ -28,9 +31,15 @@ Le changelog affiche par le Device Management est derive de `CHANGELOG.md` au
 build (`scripts/dm_manifest.py`). Les entrees d'avant release-please restent
 dans `dm-manifest.json` et suivent les entrees derivees.
 
-Prerequis du depot : le secret `MIRAI_PROD_CONFIG_JSON` (configuration de
-production, transport seul) et l'option « Allow GitHub Actions to create and
-approve pull requests ».
+Chaque push sur `develop` publie de meme une version candidate
+`X.Y.Z-rc.N`, et une branche `exp/**` une version d'essai `X.Y.Z-dev.N` sur
+lancement manuel : voir [pre-versions.md](pre-versions.md).
+
+Prerequis du depot : l'option « Allow GitHub Actions to create and approve pull
+requests », et, pour signer les paquets, le secret `PACKAGE_SIGNING_KEY` de
+l'environnement `package-signing` (sans lui, les paquets sont publies sans
+enveloppe, avec un avertissement). La CI ne lit plus de configuration de
+production : le secret `MIRAI_PROD_CONFIG_JSON` n'est plus utilise.
 
 ### 2. Deployer
 

@@ -84,7 +84,10 @@ indifférent (`text/xml` recommandé). Namespace **obligatoire**
 - `identifier` : doit être strictement `fr.gouv.interieur.mirai` (sinon LO ignore le feed).
 - `version` : la dernière version publiée du tier. LibreOffice compare segment
   par segment (numérique) — le schéma à 5 segments `0.0.1.0.NN` est géré.
-  LO propose la MAJ ssi `version(feed) > version(installée)`.
+  LO propose la MAJ ssi `version(feed) > version(installée)`. Une pré-version
+  (`X.Y.Z-rc.N`, `X.Y.Z-dev.N`) y est annoncée dans l'écriture numérique de son
+  `description.xml`, jamais avec son suffixe, que LibreOffice range après la
+  version finale : voir [pre-versions.md](pre-versions.md).
 - `update-download/src` : URL de l'OXT, téléchargée par LibreOffice lui-même
   (anonymement). Plusieurs `<src>` possibles (miroirs, essayés dans l'ordre).
 - Optionnel : `<release-notes><src xlink:href="…" lang="fr"/></release-notes>`.

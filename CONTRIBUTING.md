@@ -4,6 +4,9 @@
 
 - Les PR visent `develop`. `master` ne reçoit que `develop`, au moment d'une
   release (voir [docs/DEPLOY.md](docs/DEPLOY.md)).
+- Chaque push sur `develop` publie une version candidate `X.Y.Z-rc.N` ; une
+  branche `exp/<sujet>` publie une version d'essai `X.Y.Z-dev.N` sur lancement
+  manuel (voir [docs/pre-versions.md](docs/pre-versions.md)).
 - Une PR fait un déplacement ou une correction, jamais les deux.
 - Les PR sont fusionnées par un merge commit.
 - `master` étant la branche par défaut, un « Closes #N » dans une PR vers
