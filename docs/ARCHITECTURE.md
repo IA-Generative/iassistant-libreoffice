@@ -330,6 +330,9 @@ et suit le document actif (activation de la fenêtre ou début de run).
 - `package_version.py` : les deux écritures d'un numéro de version, celle du Device Management
   (`X.Y.Z-rc.N`) et celle que LibreOffice sait ranger dans `description.xml`. Voir
   `docs/pre-versions.md`.
+- `package_signature.py` : vérification de la signature d'un paquet servi par le Device Management
+  (ES256 en Python pur, enveloppe, délégation, ancre `dm-trust.json`). Voir
+  `docs/update-natif-libreoffice.md`, « Signature du paquet servi ».
 - `credentials.py` : jetons courts en mémoire, secrets durables dans le coffre de l'OS
   (Gestionnaire d'identification Windows, trousseau macOS, mémoire ailleurs). Partagé avec
   l'add-in `=PROMPT()` sous le même nom de module.

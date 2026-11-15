@@ -1,0 +1,2213 @@
+{
+ "_readme": "Vecteurs de test produits par generate_package_signature_vectors.py (cryptography 50.0.2). CLES DE TEST tirees au hasard, cles privees jamais ecrites. Ne pas modifier a la main : relancer le script.",
+ "generated_at": "2026-11-15T13:54:18Z",
+ "vectors": [
+  {
+   "name": "valid_root_direct",
+   "about": "enveloppe signée directement par la racine, sans délégation",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_delegated",
+   "about": "enveloppe signée par la clé du DM, délégation valide de la racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_simple_mode",
+   "about": "mode simple : l'ancre est la clé du DM lui-même",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "EObLL508EYqiinzzB7FNdPxgDUGQo2MukgCNRDlVLDOjA+8G2bsFADeXWMLW4JRCiPWquy4vXYhfXYtUQ7oCLA=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtUcdCOhgH1aN2jf4avUA8C+QhSuoE66WLWStTN3bO4wP41YD1VPbRCyjcDMj5asKoqRYwk+HnD20jfv8lvq97w=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_second_root",
+   "about": "ancre à deux racines, signature par la seconde",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "4cad409aac4af402",
+      "alg": "ES256",
+      "sig": "CcpdJNwCA4rX70gBDqmb32vlamzye3Emjr9c3QWLRX/ZHrxAKnjqXQoksV8lez5BjfO2R95UolDV8KyXjNDfAQ=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     },
+     {
+      "keyid": "4cad409aac4af402",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEL5oZoRgtdhUxpDNHJyR26m2I2zNjIMhH6nAbIPox1Sfr56r2Wd1pWykqEn45oxZt04lre7KojH4nQY34z6KENw=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_root_direct_despite_expired_delegation",
+   "about": "délégation expirée jointe, mais l'enveloppe est signée par la racine elle-même",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "Z27gF2x795DO3lhEo5/Yj7dS9s55YavfG+j4x6N1f8OsDVEkrHhfkk9IXnXaeiwFdU7ptSWVylm8mq+2/TqTVA=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNS0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNC0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "aqNBmylgSjqeC5WYA2B5pOLoG51IZQh6dE89dO8pvnZQvC56qkqKmvdmjfEciu+Z8q7Lyjuf5oc1EaCvW4SJNA=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_envelope_as_text",
+   "about": "l'enveloppe et l'ancre arrivent en texte JSON",
+   "envelope": "{\"schema\": \"dm-package-signature/1\", \"payload\": \"eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=\", \"signatures\": [{\"keyid\": \"5a17888d8237e944\", \"alg\": \"ES256\", \"sig\": \"RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A==\"}], \"delegation\": {\"payload\": \"eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=\", \"signatures\": [{\"keyid\": \"bb8e289ed261c5de\", \"alg\": \"ES256\", \"sig\": \"0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ==\"}]}}",
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": "{\"schema\": \"dm-trust/1\", \"roots\": [{\"keyid\": \"bb8e289ed261c5de\", \"alg\": \"ES256\", \"public_key\": \"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g==\"}]}",
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_low_s",
+   "about": "signature dont s est dans la moitié basse de l'ordre",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "OPQYC1fQHa5KB79pJWm9nk+Y47sXr3kvTFeUbUM//Mx08FDoQkJHQbAxWoxZAstsTzzvt6hDhKuk+FIx9RESpQ=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "valid_high_s",
+   "about": "signature dont s est dans la moitié haute : ECDSA l'accepte aussi",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "qGS9TtKRuDmjLzJq7hKJCEMGbNxW4/xMEZJWocLh8ZDaWcZenLr6FuDxcJ43fzudJKTuB6DHobjGlAzJnkClpg=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "payload_altered",
+   "about": "déclaration réécrite après signature",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjkuOS45In0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "9.9.9",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_altered",
+   "about": "un bit de la signature inversé",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4Q/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_der_encoded",
+   "about": "signature au format DER au lieu de r||s brut",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "MEYCIQDesNW284oirTlgZzI3GT05tfKEJNj01IC1qe2NRSIHgQIhAOSiqK8LPrhcTXIQWDlOFRILfz9ZYWcSopBFNAwPv9E9"
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_truncated",
+   "about": "signature de 63 octets",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtP"
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "unknown_key",
+   "about": "enveloppe signée par une clé absente de l'ancre, sans délégation",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "9a44fded4760f82a",
+      "alg": "ES256",
+      "sig": "1I8srtGH1lftyOGIUn7B+Pi2L2cdgcmzDPW2tSTDUeIBF84eQMpLBwcld7XFPyI+zKWaUPv1ROGC7jDQDM440A=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "unknown_key"
+   }
+  },
+  {
+   "name": "keyid_borrowed",
+   "about": "clé inconnue qui se présente sous le keyid de la racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "kQL4w6Gpx7JdTP9stqHuwKN8TLFIPE4BYMIzkIdqL338LDfbTgtXEMLPD5NTa7Pa10Uu/khTTf+jIJQHsPVf0w=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "wrong_alg",
+   "about": "signature annoncée sous un autre algorithme : ignorée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "EdDSA",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "unknown_key"
+   }
+  },
+  {
+   "name": "signature_r_zero",
+   "about": "signature hors bornes : r = 0",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADg1tkNEsDpesZ2a/EgXTOswPbbj5+8Xn7ykIHXynOy8g=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_s_zero",
+   "about": "signature hors bornes : s = 0",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "EuNHNkCfPNaH5syc7cimaWC0ZqilxgILKB3r6t8IQcIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_r_equals_order",
+   "about": "signature hors bornes : r = n (congru à 0)",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "/////wAAAAD//////////7zm+q2nF56E87nKwvxjJVHg1tkNEsDpesZ2a/EgXTOswPbbj5+8Xn7ykIHXynOy8g=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_s_equals_order",
+   "about": "signature hors bornes : s = n (congru à 0)",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "EuNHNkCfPNaH5syc7cimaWC0ZqilxgILKB3r6t8IQcL/////AAAAAP//////////vOb6racXnoTzucrC/GMlUQ=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_r_above_order",
+   "about": "signature hors bornes : r = 2^256 - 1",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "///////////////////////////////////////////g1tkNEsDpesZ2a/EgXTOswPbbj5+8Xn7ykIHXynOy8g=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_s_above_order",
+   "about": "signature hors bornes : s = 2^256 - 1",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "EuNHNkCfPNaH5syc7cimaWC0ZqilxgILKB3r6t8IQcL//////////////////////////////////////////w=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "signature_all_zero",
+   "about": "signature hors bornes : r = s = 0",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "bad_signature"
+   }
+  },
+  {
+   "name": "public_key_off_curve",
+   "about": "racine dont le point n'est pas sur la courbe (Y + 1) : écartée, l'ancre n'a plus de racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "058c2231f1f62c30",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+w=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "public_key_zero_point",
+   "about": "racine dont le point est (0, 0) : écartée, l'ancre n'a plus de racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "1613ee6dfc6ee98a",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "public_key_coordinate_above_field",
+   "about": "racine dont l'abscisse dépasse le corps (X = p) : écartée, l'ancre n'a plus de racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "7bb3262f829fe5aa",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/////wAAAAEAAAAAAAAAAAAAAAD////////////////hG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "public_key_compressed",
+   "about": "racine en point compressé : seul 0x04||X||Y est lu : écartée, l'ancre n'a plus de racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "d9bde905ed149d04",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgACiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOs="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "public_key_trailing_bytes",
+   "about": "racine suivie d'octets en trop : écartée, l'ancre n'a plus de racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "7afd4779b9dc9c1f",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+gA="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "public_key_p384",
+   "about": "racine sur la courbe P-384 : écartée, l'ancre n'a plus de racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "83e196afcb95e4dd",
+      "alg": "ES256",
+      "public_key": "MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEdd6srLBzXIHcGyFWBJOVIX92JUG/+7BQdzbIb0RM1MliHorQcYyRj+rt+fE9lKsooF425DUEkSKvaXGnUTLRmAthFtkxSnIibWpxL9uumOBcGHNfSnYiBKBbnfiZzReH"
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "delegation_public_key_off_curve",
+   "about": "délégation pour un point hors de la courbe",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "oiJJdzxi/d4DypgEbzA0IykYwNjRhFTuXSY+3znfvDRJVLkHLfF2zVGmk7aFGrlDJ//C6EgG6mJIB5qC7h8Z5A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI4MjFkNTNlMWE1OTY4YWJhIiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5OEE9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "pshusZ9vxk6Vrv7dbyo71x5ZrblL6mdK/0AI/AtYRtc158Y+ANRqcHpT4niOhmKLPdglpd5tfqogWNbjfexi5A=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_expired",
+   "about": "délégation dont la fenêtre est passée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "j0Iclww2aGGL8NJ7spzJvCsmH/hrt+11PRikFwsK/delbSDzsFXGx/t3zto17tFw1KKTP0nNIZLoT1X6TqZ15A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNS0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNC0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "gL3T2gf3Bzk69ZFkdoXeq5+49/iHZazsoCDGwUGf5/Tk6sIbQJgmKljQpBOm6MPGpVqf/Uh64D3uyuOhsHzkQg=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_not_yet_valid",
+   "about": "délégation dont la fenêtre n'a pas commencé",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RlWJIrKX6oSCqyJDNkzDDlgmrbZJGokK1N4ar2OM14YdiF4+mVRFb+c5GmV56bMdipv2luk3BFzjOXJBoeAAqA=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyOC0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "ZC+fOrR49P0t6x5Z0Gp9cXJtia+abyaLUZX2r25Q5KkLOGzF5kpIZoAJgpSyoBknuKnMOGdGkqYMd6V5sIPDrA=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_by_unknown_root",
+   "about": "délégation signée par une racine absente de l'ancre",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "T705G3j9cwEY16Ykfj9sNVp5nuvvcE/MvkyNFoStm4h0U/tsi/YjozYH2u5c74V+J/TXo+KeEsDxbwyblx1O3w=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "4cad409aac4af402",
+       "alg": "ES256",
+       "sig": "hSwWtp+iZfN/nyZ54opX2XBPMbbK9fk8TdG1UXghUCou128RCek3msSWfoMZflQjM4MsP5TzjtBCG+EoxNlxZA=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_keyid_mismatch",
+   "about": "délégation dont le keyid n'est pas celui de la clé portée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "KLwD9FY8DbBTEbXLRdSm16ps9NCAt5mP+VsiMrbt8K5Jfc89qe5+sKxe1dhb8D2cFxI14nbu/xLl1fxR659o6A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI5YTQ0ZmRlZDQ3NjBmODJhIiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "LVGzUiuc4yfGdXFcc1+biO0WdMxb5O+RgkjPU5b0Q0Si/T5Y4ugEe+WX1rmP4L//NVOil6i9j5DyIM4vsXzrsw=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_for_another_key",
+   "about": "délégation valide, mais pour une autre clé que la signataire",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "9a44fded4760f82a",
+      "alg": "ES256",
+      "sig": "jc8zypbC3AVwz03WsYSw5TP7iZ+0ARKiGME3+0DgB3Ui02f/Y/K9QWKHl7jCOGNGsCQCBfKqQZFSYmIF4gxHwg=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "bhd8ngY6jsIhq7X0xnawPggIhUSlmlZButLuGGG1O/Kde1BrNaUljTPbf0z6Mud7RGFQc4Kk0Ey/+9iXa5o2CA=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "unknown_key"
+   }
+  },
+  {
+   "name": "delegation_bad_dates",
+   "about": "délégation aux dates illisibles",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "r6KLjZn/gh+4nQh89rlTE5Tiq1yjzm95G3OK8jwHkpBGDR920phT/gecn98kLWHBLnQRNvlpzLFEvPVPoS/3CA=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiZGVtYWluIiwibm90X2JlZm9yZSI6IjIwMjYtMDEtMDFUMDA6MDA6MDBaIiwicHVibGljX2tleSI6Ik1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRXRVY2RDT2hnSDFhTjJqZjRhdlVBOEMrUWhTdW9FNjZXTFdTdFROM2JPNHdQNDFZRDFWUGJSQ3lqY0RNajVhc0tvcVJZd2srSG5EMjBqZnY4bHZxOTd3PT0iLCJzY2hlbWEiOiJkbS1zaWduaW5nLWRlbGVnYXRpb24vMSJ9",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "gAbTrSUNH3bSnzNInHiadMF0sHh4pdYn1a1wn7//gcDZNiOdwI9TWKrRz25xFSg02QfsOZwFBvRjUtDJCx2w+Q=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_p384_key",
+   "about": "délégation pour une clé P-384 : seule P-256 est acceptée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "j6XCc0axraD6KOLPYX2xbhOjsZgM8ksdWQPNOFCkCnNUEWnxNjmkStVPkwTl2eOvchuChanKr5N2TmpUulIh5Q=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUhZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUNJRFlnQUVkZDZzckxCelhJSGNHeUZXQkpPVklYOTJKVUcvKzdCUWR6YkliMFJNMU1saUhvclFjWXlSaitydCtmRTlsS3Nvb0Y0MjVEVUVrU0t2YVhHblVUTFJtQXRoRnRreFNuSWliV3B4TDl1dW1PQmNHSE5mU25ZaUJLQmJuZmlaelJlSCIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "JCXilRFtyQVsSIXqxrfVF5OxC2bOS6G9eSz4yos0gDxdSIOC8rQYPVrvFdkPq0Q4eDkxJtxuqmtP0PnWJJqc6Q=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_wrong_schema",
+   "about": "délégation d'un autre schéma, correctement signée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "p0tnVvYXwS6Y0YdkA3nZ7gHqLGqhujtrwX8XWJz24emvaEW/q+5jPERae1DyrQMhxQc5oMuG5s4CDcDkZQfuJg=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8yIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "GBynW9cAN96Lg0it+xHo/3GLDmqby7kjbpGVzjYlpoAlCLUWdDC0ZM6B96xbqJjr2DPKQxykilNssFGWa1YT8g=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "delegation_with_offset_dates",
+   "about": "délégation aux dates à décalage horaire, encore valide",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "W5S3sZAZpwPq4F39x9mrCpHJ6eSOUussTAS7sO77GnMn+vHw5IGE2sfh71Nquv5uGiQnW3GFNBGV8sjUEuD5uw=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNi0xMS0xNVQxMTozMDowMC0wMTowMCIsIm5vdF9iZWZvcmUiOiIyMDI2LTExLTE1VDEzOjMwOjAwKzAyOjAwIiwicHVibGljX2tleSI6Ik1Ga3dFd1lIS29aSXpqMENBUVlJS29aSXpqMERBUWNEUWdBRXRVY2RDT2hnSDFhTjJqZjRhdlVBOEMrUWhTdW9FNjZXTFdTdFROM2JPNHdQNDFZRDFWUGJSQ3lqY0RNajVhc0tvcVJZd2srSG5EMjBqZnY4bHZxOTd3PT0iLCJzY2hlbWEiOiJkbS1zaWduaW5nLWRlbGVnYXRpb24vMSJ9",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "n0KEImRgZwKAzUrbNeq8/hiFD8ylmZBzt+veTe7IUrzPbiZkPSkCTz3uxxFlK1cChjieVQyyY6HNpDi2BbGkAQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "delegation_ended_an_hour_ago",
+   "about": "délégation close une heure plus tôt, décalage compris",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "IWyg4Z8iZQ6iMgHto/DWS+p4zCR80juFL+5OH18wxH5gq7QIVHdTyUWTS5g2twqtAu0kqHwe/ndevsG+c+aDWA=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNi0xMS0xNVQxMjowMDowMCswMTowMCIsIm5vdF9iZWZvcmUiOiIyMDI2LTAxLTAxVDAwOjAwOjAwWiIsInB1YmxpY19rZXkiOiJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUV0VWNkQ09oZ0gxYU4yamY0YXZVQThDK1FoU3VvRTY2V0xXU3RUTjNiTzR3UDQxWUQxVlBiUkN5amNETWo1YXNLb3FSWXdrK0huRDIwamZ2OGx2cTk3dz09Iiwic2NoZW1hIjoiZG0tc2lnbmluZy1kZWxlZ2F0aW9uLzEifQ==",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "ltukv+aHLon3gWSu5FMH82Fg7oVl1lrdlsrniWu/Wel2rxhmF3Xez70nqYLrgqMI+pcmIoaKFlPO8FNR26DekA=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "delegation_invalid"
+   }
+  },
+  {
+   "name": "wrong_kind",
+   "about": "enveloppe de build (CI) présentée comme paquet servi",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6ImJ1aWxkIiwic2NoZW1hIjoiZG0tcGFja2FnZS1zdGF0ZW1lbnQvMSIsInNoYTI1NiI6IjZkZWQyN2I5YWE1NzVkZjc3ZjNkODFjN2M1OWUzNmQ5YTE1ZGY4YThkNzY0ZWI0YmYzMjkxNDQxZmYzYjU1NDIiLCJzaWduZWRfYXQiOiIyMDI2LTExLTE1VDA5OjAwOjAwWiIsInNpemUiOjU4LCJzbHVnIjoibWlyYWktbGlicmVvZmZpY2UiLCJ1cHN0cmVhbSI6eyJrZXlpZCI6IjAwMDAwMDAwMDAwMDAwMDAiLCJyZWYiOiJyZWZzL2hlYWRzL2RldmVsb3AiLCJzaGEyNTYiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwidmVyaWZpZWQiOnRydWV9LCJ2ZXJzaW9uIjoiMC40LjAtcmMuMTIifQ==",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "QodVTVOybC1qSuf2HSeMYWNh22Yj+tNl3vn90ISCa+ZEjRPcl5mIo5fvd4ZIpdMwlp/4wNwzs+UAkyx51eXeyQ=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "sMBFKBwMTGlUK0ol5I/6UyiwNh98sXj1HeDTx43xJM7bvySmET8iJigHEmLGpvx1omvCB8kDB/Wl4mtTDfEycA=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "wrong_kind"
+   }
+  },
+  {
+   "name": "wrong_sha256",
+   "about": "les octets téléchargés ne sont pas ceux qui ont été signés",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/3g=",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "digest_mismatch"
+   }
+  },
+  {
+   "name": "wrong_version",
+   "about": "la directive annonce une autre version que celle signée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "version_mismatch"
+   }
+  },
+  {
+   "name": "native_version_is_not_the_target",
+   "about": "l'écriture numérique de description.xml n'est pas le numéro signé",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.3.99999.2.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "version_mismatch"
+   }
+  },
+  {
+   "name": "extension_other",
+   "about": "paquet signé pour une autre extension",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoib3JnLmV4YW1wbGUuYXV0cmUiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "xgdDQJuXm3JC7Rkl1U2ucfhUyQ6NQEx/mw5azsYiFlB9ByIAI2uMZtb/CNAm9Yn/2xNvSaJRUdA6qZosT2TiNg=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "extension_mismatch"
+   }
+  },
+  {
+   "name": "extension_id_slug_differs",
+   "about": "extension_id présent et juste : le slug n'est pas comparé",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "autre-nom-au-catalogue",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "extension_id_caller_has_none",
+   "about": "la déclaration porte un extension_id, l'appelant n'en donne pas",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": null,
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "extension_mismatch"
+   }
+  },
+  {
+   "name": "extension_id_empty_in_statement",
+   "about": "extension_id présent mais vide : refus, pas de repli sur le slug",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiIiwiZmlsZSI6Im1pcmFpLWxpYnJlb2ZmaWNlLTAuNC4wLXJjLjEyLm94dCIsImtpbmQiOiJzZXJ2ZWQiLCJzY2hlbWEiOiJkbS1wYWNrYWdlLXN0YXRlbWVudC8xIiwic2hhMjU2IjoiNmRlZDI3YjlhYTU3NWRmNzdmM2Q4MWM3YzU5ZTM2ZDlhMTVkZjhhOGQ3NjRlYjRiZjMyOTE0NDFmZjNiNTU0MiIsInNpZ25lZF9hdCI6IjIwMjYtMTEtMTVUMDk6MDA6MDBaIiwic2l6ZSI6NTgsInNsdWciOiJtaXJhaS1saWJyZW9mZmljZSIsInVwc3RyZWFtIjp7ImtleWlkIjoiMDAwMDAwMDAwMDAwMDAwMCIsInJlZiI6InJlZnMvaGVhZHMvZGV2ZWxvcCIsInNoYTI1NiI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ2ZXJpZmllZCI6dHJ1ZX0sInZlcnNpb24iOiIwLjQuMC1yYy4xMiJ9",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "BWDH6wcIjEpC2kTuKQvK64YnQGMvm3YT/IgXLoVPH/AmGqSGgqFmv/9o79ms7gDnCBUeRhS+FJRDG5PHR/1lHg=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "extension_mismatch"
+   }
+  },
+  {
+   "name": "no_extension_id_slug_ok",
+   "about": "déclaration sans extension_id : repli sur le slug, qui correspond",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZmlsZSI6Im1pcmFpLWxpYnJlb2ZmaWNlLTAuNC4wLXJjLjEyLm94dCIsImtpbmQiOiJzZXJ2ZWQiLCJzY2hlbWEiOiJkbS1wYWNrYWdlLXN0YXRlbWVudC8xIiwic2hhMjU2IjoiNmRlZDI3YjlhYTU3NWRmNzdmM2Q4MWM3YzU5ZTM2ZDlhMTVkZjhhOGQ3NjRlYjRiZjMyOTE0NDFmZjNiNTU0MiIsInNpZ25lZF9hdCI6IjIwMjYtMTEtMTVUMDk6MDA6MDBaIiwic2l6ZSI6NTgsInNsdWciOiJtaXJhaS1saWJyZW9mZmljZSIsInVwc3RyZWFtIjp7ImtleWlkIjoiMDAwMDAwMDAwMDAwMDAwMCIsInJlZiI6InJlZnMvaGVhZHMvZGV2ZWxvcCIsInNoYTI1NiI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ2ZXJpZmllZCI6dHJ1ZX0sInZlcnNpb24iOiIwLjQuMC1yYy4xMiJ9",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "/TO4ZkvMGjOqqgutw/ftre4BFcPDkB6bb2rfC82WiqMRD3rn5TUJEpR3HDV08JoZDLvYLkbk8k+lpM/y314YEg=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": true,
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "wrong_slug",
+   "about": "déclaration sans extension_id, signée pour un autre plugin",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZmlsZSI6Im1pcmFpLWxpYnJlb2ZmaWNlLTAuNC4wLXJjLjEyLm94dCIsImtpbmQiOiJzZXJ2ZWQiLCJzY2hlbWEiOiJkbS1wYWNrYWdlLXN0YXRlbWVudC8xIiwic2hhMjU2IjoiNmRlZDI3YjlhYTU3NWRmNzdmM2Q4MWM3YzU5ZTM2ZDlhMTVkZjhhOGQ3NjRlYjRiZjMyOTE0NDFmZjNiNTU0MiIsInNpZ25lZF9hdCI6IjIwMjYtMTEtMTVUMDk6MDA6MDBaIiwic2l6ZSI6NTgsInNsdWciOiJtaXJhaS1saWJyZW9mZmljZSIsInVwc3RyZWFtIjp7ImtleWlkIjoiMDAwMDAwMDAwMDAwMDAwMCIsInJlZiI6InJlZnMvaGVhZHMvZGV2ZWxvcCIsInNoYTI1NiI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJ2ZXJpZmllZCI6dHJ1ZX0sInZlcnNpb24iOiIwLjQuMC1yYy4xMiJ9",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "9co1wpVSTjokCXjGaF1+G7nEw34pW73oeT0klov3HiMiGNf9x9Ae+F4hWHNAn1a1OBlCM8I+wyts2ntywIZMyA=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-matisse",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "slug_mismatch"
+   }
+  },
+  {
+   "name": "statement_wrong_schema",
+   "about": "déclaration d'un autre schéma, correctement signée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzIiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "gJR1CyuzWVQlldlwbFpNVnlFRnwUeSzLsvUf3nEFphP3Pnug5noKC4+96eU5fa2Z6FOcldUCW7nu+2grHeMtCQ=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "malformed"
+   }
+  },
+  {
+   "name": "no_envelope",
+   "about": "la directive ne porte pas d'enveloppe",
+   "envelope": null,
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_envelope"
+   }
+  },
+  {
+   "name": "envelope_wrong_schema",
+   "about": "enveloppe d'un autre schéma",
+   "envelope": {
+    "schema": "dm-package-signature/2",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "malformed"
+   }
+  },
+  {
+   "name": "envelope_not_json",
+   "about": "enveloppe illisible",
+   "envelope": "{pas du json",
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "malformed"
+   }
+  },
+  {
+   "name": "payload_not_base64",
+   "about": "payload qui n'est pas du base64",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "@@@@",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "malformed"
+   }
+  },
+  {
+   "name": "payload_urlsafe_base64",
+   "about": "payload en base64 « URL » : alphabet refusé",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "-_-_",
+    "signatures": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "sig": "aVMXgwwH/4FYjo9WXm6Z0unuYOTog2WNxAnssj3Td+dxFPdi1dQ6Y+IQqEvOVQ73086I/kK+xWtUX1Je1MtPZw=="
+     }
+    ]
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "malformed"
+   }
+  },
+  {
+   "name": "trust_empty",
+   "about": "ancre sans racine",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": []
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "trust_wrong_schema",
+   "about": "ancre d'un autre schéma",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/2",
+    "roots": [
+     {
+      "keyid": "bb8e289ed261c5de",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "trust_unreadable",
+   "about": "ancre illisible",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": "",
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  },
+  {
+   "name": "trust_root_keyid_mismatch",
+   "about": "racine dont le keyid n'est pas celui de sa clé : écartée",
+   "envelope": {
+    "schema": "dm-package-signature/1",
+    "payload": "eyJjaGFuZ2VkX2ZpbGVzIjpbImRtLXRydXN0Lmpzb24iLCJjb25maWcuZGVmYXVsdC5qc29uIiwiZGVzY3JpcHRpb24ueG1sIiwibm90ZXMvcsOpc3Vtw6kg4oCUIMOpdMOpLnR4dCJdLCJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwiZXh0ZW5zaW9uX2lkIjoiZnIuZ291di5pbnRlcmlldXIubWlyYWkiLCJmaWxlIjoibWlyYWktbGlicmVvZmZpY2UtMC40LjAtcmMuMTIub3h0Iiwia2luZCI6InNlcnZlZCIsInNjaGVtYSI6ImRtLXBhY2thZ2Utc3RhdGVtZW50LzEiLCJzaGEyNTYiOiI2ZGVkMjdiOWFhNTc1ZGY3N2YzZDgxYzdjNTllMzZkOWExNWRmOGE4ZDc2NGViNGJmMzI5MTQ0MWZmM2I1NTQyIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xNVQwOTowMDowMFoiLCJzaXplIjo1OCwic2x1ZyI6Im1pcmFpLWxpYnJlb2ZmaWNlIiwidXBzdHJlYW0iOnsia2V5aWQiOiIwMDAwMDAwMDAwMDAwMDAwIiwicmVmIjoicmVmcy9oZWFkcy9kZXZlbG9wIiwic2hhMjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIsInZlcmlmaWVkIjp0cnVlfSwidmVyc2lvbiI6IjAuNC4wLXJjLjEyIn0=",
+    "signatures": [
+     {
+      "keyid": "5a17888d8237e944",
+      "alg": "ES256",
+      "sig": "RYCjsdVIsoEHM4U/1flyN1OS7d5+Kv1Cc98cwRIvJjI/sWzVIlzVXWYAfGlMfJPIAxO/oxxa1OJW9JxhIYTD0A=="
+     }
+    ],
+    "delegation": {
+     "payload": "eyJkbSI6Imh0dHBzOi8vZG0uZXhhbXBsZS5pbnZhbGlkIiwia2V5aWQiOiI1YTE3ODg4ZDgyMzdlOTQ0Iiwibm90X2FmdGVyIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJwdWJsaWNfa2V5IjoiTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdFVjZENPaGdIMWFOMmpmNGF2VUE4QytRaFN1b0U2NldMV1N0VE4zYk80d1A0MVlEMVZQYlJDeWpjRE1qNWFzS29xUll3aytIbkQyMGpmdjhsdnE5N3c9PSIsInNjaGVtYSI6ImRtLXNpZ25pbmctZGVsZWdhdGlvbi8xIn0=",
+     "signatures": [
+      {
+       "keyid": "bb8e289ed261c5de",
+       "alg": "ES256",
+       "sig": "0CwHyL6oq0KnnEzyXG13OnldafqYLSVpWdhXmkNFarCYrfokPbuZokBkw7bZTwXhQZkhBcDmaVSUKzUMAQOFpQ=="
+      }
+     ]
+    }
+   },
+   "bytes": "UEsDBCBwYXF1ZXQgZGUgdGVzdCBzZXJ2aSBwYXIgdW4gRE0gLSBwYXMgdW5lIGFyY2hpdmUgw6kA/w==",
+   "version": "0.4.0-rc.12",
+   "slug": "mirai-libreoffice",
+   "extension_id": "fr.gouv.interieur.mirai",
+   "trust": {
+    "schema": "dm-trust/1",
+    "roots": [
+     {
+      "keyid": "9a44fded4760f82a",
+      "alg": "ES256",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiT3cplGlEP8GK+7CFL8+Ne9udlFmSiyEwSdL7cyUoOvhG92qwCxyB6RI95226rmG2oZPORYANQ5sWfmfM+Bo+g=="
+     }
+    ]
+   },
+   "now": "2026-11-15T12:00:00Z",
+   "expect": {
+    "ok": false,
+    "reason": "no_trust"
+   }
+  }
+ ]
+}
