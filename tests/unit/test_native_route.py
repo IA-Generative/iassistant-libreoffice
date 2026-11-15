@@ -2,6 +2,7 @@
 installe (dialogue « Mise à jour des extensions », feed <update-information>),
 le plugin ferme proprement. Route dirigée en repli ; refus mémorisé 24 h.
 """
+import base64
 import itertools
 import json
 import os
@@ -447,6 +448,58 @@ def test_perform_update_skips_native_after_max_attempts():
     job._perform_update(dict(DIRECTIVE))
     job._native_feed_offers.assert_not_called()
     assert job._urlopen.called
+
+
+def _anchor_the_installed_package(monkeypatch):
+    """Paquet installé factice dont la racine porte dm-trust.json : l'ancre et
+    le paquet signé viennent des vecteurs de la vérification de signature."""
+    with open(os.path.join(os.path.dirname(__file__), "..", "fixtures",
+                           "package_signature_vectors.json"), encoding="utf-8") as fh:
+        vector = next(v for v in json.load(fh)["vectors"] if v["name"] == "valid_root_direct")
+    root = _mkdtemp()
+    module_dir = os.path.join(root, "src", "mirai")
+    os.makedirs(module_dir)
+    for name, text in (("description.xml", "<description/>"),
+                       ("dm-trust.json", json.dumps(vector["trust"]))):
+        with open(os.path.join(root, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    monkeypatch.setattr(entrypoint, "__file__", os.path.join(module_dir, "entrypoint.py"))
+    return vector, base64.b64decode(vector["bytes"])
+
+
+def test_an_anchored_package_never_takes_the_native_route(monkeypatch):
+    """LibreOffice installerait sans que la signature soit vérifiée."""
+    _anchor_the_installed_package(monkeypatch)
+    job = _routing_job()
+    job._perform_update(dict(DIRECTIVE))
+    job._native_feed_offers.assert_not_called()
+    job._perform_native_update.assert_not_called()
+    assert job._urlopen.called
+
+
+def test_an_anchored_package_does_not_stage_an_unsigned_update(monkeypatch):
+    _anchor_the_installed_package(monkeypatch)
+    job = _routing_job()
+    job._perform_update(dict(DIRECTIVE))
+    job._report_update_status.assert_called_once_with(
+        7, "failed", CURRENT, "", "signature: no_envelope")
+    assert _events(job) == ["UpdateInstallFailed"]
+    assert job._send_telemetry.call_args.args[1]["signature_reason"] == "no_envelope"
+    assert not os.path.exists(job._update_state_path())
+    assert TARGET in job.runtime.update_launch_blocked
+
+
+def test_an_anchored_package_stages_a_signed_update(monkeypatch):
+    vector, package = _anchor_the_installed_package(monkeypatch)
+    job = _routing_job()
+    job._urlopen = MagicMock(return_value=http_response(package))
+    job._perform_update(dict(DIRECTIVE, target_version=vector["version"],
+                             signature=vector["envelope"]))
+    assert job._report_update_status.call_args_list[0].args[:4] == (
+        7, "deferred", CURRENT, vector["version"])
+    assert "UpdateStaged" in _events(job)
+    assert "UpdateInstallFailed" not in _events(job)
+    assert _state(job)["target_version"] == vector["version"]
 
 
 def test_directed_route_postponed_sets_cooldown():

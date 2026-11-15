@@ -13,8 +13,8 @@ processus enfant (immunisé WinError 5 / AppLocker / Defender ASR).
 
 | Route | Déclencheur | Téléchargement + installation | Cohorte/canary |
 |---|---|---|---|
-| **1. Native pilotée** (principale) | Directive `update` du DM, si le feed installé annonce exactement `target_version` | LibreOffice : dialogue « Mise à jour des extensions » ouvert par le plugin via `PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG")`, download depuis le feed, `addExtension` | ✅ sur le déclenchement (le feed, lui, est anonyme) |
-| **2. Dirigée** (repli) | Directive `update` ou `rollback` ; feed absent, injoignable ou divergent ; urgence `deferred` ; deux tentatives natives sans installation | Plugin : download failover + sha256 → `addExtension` main-thread → fermeture propre | ✅ oui |
+| **1. Native pilotée** (principale) | Directive `update` du DM, si le feed installé annonce exactement `target_version` et si le paquet installé n'exige pas de signature (voir « Signature du paquet servi ») | LibreOffice : dialogue « Mise à jour des extensions » ouvert par le plugin via `PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG")`, download depuis le feed, `addExtension` | ✅ sur le déclenchement (le feed, lui, est anonyme) |
+| **2. Dirigée** (repli) | Directive `update` ou `rollback` ; feed absent, injoignable ou divergent ; urgence `deferred` ; deux tentatives natives sans installation ; **toujours** quand le paquet installé exige une signature | Plugin : download failover + sha256 + signature → `addExtension` main-thread → fermeture propre | ✅ oui |
 | **3. Manuelle** (fallback validé GPO) | Échec de 2 | L'utilisateur double-clique l'OXT stagé → Gestionnaire des extensions | ✅ (directive) |
 
 Point établi en vérifiant les sources LibreOffice (`desktop/source/deployment/gui/`) :
@@ -44,6 +44,54 @@ cours de disposition — prouve au contraire qu'il répond et n'y donne pas droi
 **Refus et reports.** Un « Non » (route 2), une annulation ou une version ignorée dans
 le dialogue natif (route 1) posent `postponed_until` dans `pending_update/update_state.json` :
 la cible n'est pas reproposée avant 24 h, et rien n'est retéléchargé entre-temps.
+
+## Signature du paquet servi
+
+Format et chaîne complète : ADR-0006 du Device Management (« chaîne de confiance
+des paquets »). Côté plugin :
+
+- **Ancre** : `dm-trust.json`, déposé par le DM à la racine du paquet qu'il sert.
+  Il liste les clés racines (`dm-trust/1`).
+- **Règle** : un plugin dont le paquet **installé** contient un `dm-trust.json`
+  n'installe une mise à jour reçue par directive que si elle porte une enveloppe
+  valide (`update.signature`, `dm-package-signature/1`). Sans ce fichier (paquet
+  antérieur), le contrôle reste l'empreinte seule. L'exigence vient du paquet
+  installé : un DM ne peut pas la lever à distance.
+- **Déroulé** (`src/mirai/shell/update_signature.py`) : après le téléchargement
+  et le contrôle de l'empreinte, avant toute mise en place du fichier. Vérifié :
+  signature par une racine, ou par une clé couverte par une délégation valide
+  (signée par une racine, dans ses dates) ; `kind == "served"` ; `sha256` des
+  octets téléchargés ; version égale à la cible de la directive (le numéro du
+  DM, `X.Y.Z-rc.N` pour une pré-version) ; puis le lien avec cette extension :
+  l'`extension_id` de la déclaration doit être `fr.gouv.interieur.mirai`. Une
+  déclaration sans `extension_id` (DM antérieur) est comparée au slug du chemin
+  de configuration (`/config/<slug>/config.json`).
+- **Refus** : rien n'est mis en place ni installé ; le refus part vers le DM
+  (`POST /update/status`, statut `failed`, `error_detail = "signature: <raison>"`)
+  et en télémétrie (`UpdateInstallFailed`, attribut `signature_reason`) ; la
+  cible n'est plus retentée d'ici le redémarrage de LibreOffice. Raisons :
+  `no_envelope`, `malformed`, `unknown_key`, `bad_signature`,
+  `delegation_invalid`, `wrong_kind`, `digest_mismatch`, `version_mismatch`,
+  `extension_mismatch`, `slug_mismatch`, `no_trust`.
+- **Calcul** : le Python embarqué par LibreOffice n'a pas la bibliothèque
+  `cryptography`. `src/mirai/package_signature.py` vérifie ES256 (ECDSA P-256,
+  SHA-256, signature brute `r||s`) avec la bibliothèque standard seule. Ses
+  vecteurs de test sont écrits par
+  `tests/fixtures/generate_package_signature_vectors.py`, avec `cryptography`.
+
+**La route native n'est pas couverte.** Sur les routes 1 et « Vérifier les mises à
+jour », c'est LibreOffice qui télécharge et installe : le plugin ne voit pas les
+octets, rien n'y vérifie la signature, et la confiance n'y repose que sur TLS et
+sur l'adresse du flux inscrite dans `description.xml`. Deux conséquences :
+
+- un paquet qui exige une signature **n'ouvre plus lui-même** le dialogue natif
+  sur directive : il passe toujours par la route dirigée, qui vérifie ;
+- le bouton « Vérifier les mises à jour » du Gestionnaire des extensions et la
+  vérification périodique de LibreOffice restent hors de portée du plugin. Tant
+  que le paquet porte un bloc `<update-information>`, ils installent ce que le
+  flux annonce, sans signature. Fermer ce canal relève du paquet servi (ne plus
+  y inscrire de flux) ou du poste (désactiver la mise à jour en ligne des
+  extensions), pas du plugin.
 
 ## Ce que le build bake dans `description.xml`
 
