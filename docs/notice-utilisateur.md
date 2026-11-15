@@ -196,7 +196,7 @@ Corrige l'orthographe, la grammaire, la conjugaison et la ponctuation, sans refo
 >
 > Cochez **Ajouter à la suite** pour obtenir le texte corrigé après le vôtre, entre `---début-du-texte-corrigé---` et `---fin-du-texte-corrigé---`, sans toucher à l'original.
 
-> 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les caractères qui changent sont réécrits. Le modèle rend une ligne par ligne envoyée ; s'il en rend un autre nombre, rien n'est écrit. Une note, un commentaire, un champ ou une image ancrée comme caractère ne sont jamais effacés : un passage qu'une correction abîmerait n'est pas modifié, l'assistant le dit et le résultat reste affiché dans la palette. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne, et un paragraphe dans ce cas reste tel quel ; le bilan en donne le nombre.
+> 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les caractères qui changent sont réécrits. Le modèle rend une ligne par ligne envoyée ; s'il en rend un autre nombre, rien n'est écrit. Une note, un commentaire, un champ ou une image ancrée comme caractère ne sont jamais effacés : un passage qu'une correction abîmerait n'est pas modifié, l'assistant le dit et le résultat reste affiché dans la palette. Le modèle voit le numéro d'une note collé au mot qui la porte : s'il le retire en corrigeant ce mot, le mot est corrigé et la note reste. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne, et un paragraphe dans ce cas reste tel quel ; le bilan en donne le nombre.
 
 ### 3.6 🌐 Traduire
 

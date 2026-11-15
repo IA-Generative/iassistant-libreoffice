@@ -283,7 +283,9 @@ comme « la demande porte sur le document entier ».
   sélection sa place, là où Writer fondrait la plage récrite d'un coup en
   un seul paragraphe. Une plage où une note, un champ, un commentaire ou
   une image décale les positions, ou qu'un remplacement couvrirait, n'est
-  pas écrite (`word_edits.apply`) : Writer les effacerait.
+  pas écrite (`word_edits.apply`) : Writer les effacerait. Le modèle lit
+  une note comme son numéro collé au mot (« delai1 ») : ce qu'il change à
+  ce seul numéro n'est pas écrit.
   Les presets Calc lisent la partie utile de la sélection en un seul `on_main`
   avant l'appel au modèle (une colonne ou une ligne entière est bornée à la
   zone utilisée), affichent chaque réponse dans la palette au fil du flux, puis

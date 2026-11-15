@@ -119,7 +119,8 @@ class WriterTargetSink(_FilteredWriterSink):
     un objet que ces remplacements abîmeraient (`objects_kept`, voir
     `word_edits.apply`).
     Avec `skip_unchanged`, une réponse identique au texte lu n'est pas écrite
-    (`unchanged`).
+    (`unchanged`) ; `unchanged` aussi quand les remplacements ne laissent
+    rien à écrire (voir `word_edits.apply`).
     """
 
     def __init__(self, ctx, target, append, header_marker, footer_marker,
@@ -200,9 +201,12 @@ class WriterTargetSink(_FilteredWriterSink):
         if edits is None:
             self.target.setString(final)
         else:
-            written = word_edits.apply(self.target, self.original, final, edits)
+            written = word_edits.apply(self.target, self.original, edits)
             if written is None:
                 self.objects_kept = True
+                return
+            if written.getString() == self.original:
+                self.unchanged = True
                 return
         try:
             self.ctx.controller.select(written)

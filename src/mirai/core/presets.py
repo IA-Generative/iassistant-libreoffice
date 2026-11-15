@@ -503,8 +503,8 @@ def _paragraphs_writer(ctx, snapshot, drafts, changed, action, append_mode, kept
         lines = [(draft.paragraphs[0], snapshot.styles[draft.indexes[0]]) for draft in drafts]
         return lambda: whole_document.append_block(ctx, snapshot, lines, action.begin_marker,
                                                    action.end_marker)
-    edits = {draft.indexes[0]: (draft.paragraphs[0], word_edits.plan(
-        snapshot.texts[draft.indexes[0]], draft.paragraphs[0], by_word=action.edit_by == "word"))
+    edits = {draft.indexes[0]: word_edits.plan(
+        snapshot.texts[draft.indexes[0]], draft.paragraphs[0], by_word=action.edit_by == "word")
         for draft in changed}
     return lambda: kept.append(whole_document.apply_edits(snapshot, edits))
 

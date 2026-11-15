@@ -76,10 +76,61 @@ def test_correct_keeps_a_footnote_glued_to_the_word_it_fixes():
     assert message == _t("preset.done_correct_replaced")
 
 
-def test_translate_keeps_a_footnote_whose_number_ends_the_translated_line():
+@pytest.mark.parametrize("reply", ["Le délai est fixé.", "Le délai¹ est fixé."],
+                         ids=["dropped", "superscript"])
+def test_correct_keeps_a_footnote_whose_number_the_reply_rewrites(reply):
+    """Le modèle lit « delai1 » et corrige aussi le « 1 » de la note."""
+    doc = FakeBodyDoc(["Avant."], selection=[("Le delai", None), Anchored("Footnote", "1"),
+                                             (" est fixé.", None)])
+    shell = _reply(reply)
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Le délai1 est fixé."
+    assert doc.selection.anchored() == ["Footnote"]
+    assert message == _t("preset.done_correct_replaced")
+
+
+def test_correct_writes_a_plural_s_before_the_footnote_number_it_replaces():
+    doc = FakeBodyDoc(["Avant."], selection=[("Les pièce", None), Anchored("Footnote", "1"),
+                                             (" sont jointes.", None)])
+    shell = _reply("Les pièces sont jointes.")
+
+    presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Les pièces1 sont jointes."
+    assert doc.selection.anchored() == ["Footnote"]
+
+
+def test_correct_finds_no_mistake_when_the_reply_only_drops_a_footnote_number():
+    doc = FakeBodyDoc(["Avant."], selection=[("Le délai", None), Anchored("Footnote", "1"),
+                                             (" est fixé.", None)])
+    shell = _reply("Le délai est fixé.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.selection.getString() == "Le délai1 est fixé."
+    assert doc.writes == 0
+    assert message == _t("preset.no_error")
+
+
+def test_correct_without_selection_keeps_a_footnote_whose_number_the_reply_drops():
+    doc = FakeBodyDoc([[("Le delai", None), Anchored("Footnote", "1"), (" est fixé.", None)]])
+    shell = _reply("Le délai est fixé.")
+
+    message = presets.run_correct(_ctx(doc, shell), shell, "", None)
+
+    assert doc.items[0].getString() == "Le délai1 est fixé."
+    assert doc.items[0].anchored() == ["Footnote"]
+    assert message == _t("preset.done_correct_document_replaced")
+
+
+@pytest.mark.parametrize("reply", ["The deadline is set by decree.1",
+                                   "The deadline is set by decree."], ids=["kept", "dropped"])
+def test_translate_keeps_a_footnote_whose_number_ends_the_translated_line(reply):
     doc = FakeBodyDoc(["Avant."], selection=[("Le délai est fixé par décret.", None),
                                              Anchored("Footnote", "1")])
-    shell = _reply("The deadline is set by decree.1")
+    shell = _reply(reply)
 
     presets.run_translate(_ctx(doc, shell), shell, "anglais", None)
 

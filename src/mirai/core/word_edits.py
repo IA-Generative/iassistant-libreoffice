@@ -22,6 +22,8 @@ _TOKEN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]|\w+|\s+|[^\w\s]"
 # valeur), une image ancrée comme caractère (rien).
 _OBJECTS = {"Footnote", "Annotation", "AnnotationEnd", "TextField", "Frame"}
 
+_SUPERSCRIPT = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
 # XTextCursor.goRight et goLeft prennent un short.
 _MAX_STEP = 2 ** 15 - 1
 
@@ -105,15 +107,42 @@ def _key(token):
     return " " if len(token) == 1 and token.isspace() else token
 
 
-def _fits(text, rng, cursor, old, edits):
-    """`cursor`, posé sur `rng`, se lit position par position comme `old`, et
-    aucun remplacement ne couvre un objet ancré, qu'il effacerait."""
+def _fitted(text, rng, cursor, old, edits):
+    """`edits` à écrire dans `cursor`, posé sur `rng`, ou None si `cursor` ne
+    se lit pas position par position comme `old` ou si un remplacement
+    effacerait un objet ancré (voir `_spare`)."""
     if _plain(cursor.getString()) != old or text.compareRegionEnds(cursor, rng):
-        return False
+        return None
     objects = _objects(cursor)
     if any(len(read) != 1 for _, read in objects):
-        return False
-    return not any(start <= offset < end for offset, _ in objects for start, end, _ in edits)
+        return None
+    return _spare(old, edits, dict(objects))
+
+
+def _spare(old, edits, objects):
+    """`edits` qui n'effacent aucun objet de `objects` (position : lecture).
+    Le modèle lit une note comme son numéro collé au mot (« delai1 »), et le
+    retire ou le met en exposant en corrigeant le mot : un remplacement qui
+    finit sur un objet s'écrit donc juste avant lui, sans ce numéro. None si
+    un remplacement couvre un objet ailleurs qu'à sa fin."""
+    spared = []
+    for start, end, new in edits:
+        covered = [offset for offset in objects if start <= offset < end]
+        if covered and covered != [end - 1]:
+            return None
+        if covered:
+            start, end, new = _trim(old, (start, end - 1, _unnumbered(new, objects[end - 1])))
+        if start != end or new:
+            spared.append((start, end, new))
+    return spared
+
+
+def _unnumbered(new, number):
+    """`new` sans le numéro de note qui le finit, tel que lu ou en exposant."""
+    for form in (number, number.translate(_SUPERSCRIPT)):
+        if new.endswith(form):
+            return new[:-len(form)]
+    return new
 
 
 def _objects(cursor):
@@ -155,16 +184,16 @@ def _go(move, count, expand):
         count -= step
 
 
-def apply(rng, old, new, edits):
-    """Écrit `new` dans `rng`, qui contient `old`, par les remplacements
-    `edits` de `plan`, et rend la plage écrite, à sélectionner : `rng` ne
-    couvre plus un texte remplacé à l'un de ses bords.
+def apply(rng, old, edits):
+    """Écrit dans `rng`, qui contient `old`, les remplacements `edits` de
+    `plan`, et rend la plage écrite, à sélectionner : `rng` ne couvre plus un
+    texte remplacé à l'un de ses bords.
 
     Rend None sans rien écrire si la plage ne se lit pas position par position
     comme `old` (un champ, un commentaire ou une image y occupe une position
     mais se lit autrement, et les remplacements tomberaient à côté), ou si un
-    remplacement couvre une note, un champ, un commentaire ou une image, qu'il
-    effacerait.
+    remplacement couvre une note ou un champ ailleurs qu'à sa fin : il
+    l'effacerait (voir `_spare`).
     Un seul curseur remonte la plage depuis sa fin, d'un remplacement au
     précédent : le thread principal ne la parcourt qu'une fois.
     Thread principal exclusivement."""
@@ -172,17 +201,19 @@ def apply(rng, old, new, edits):
     text = rng.getText()
     cursor = text.createTextCursorByRange(rng.getStart())
     _go_right(cursor, len(old), True)
-    if not _fits(text, rng, cursor, old, edits):
+    edits = _fitted(text, rng, cursor, old, edits)
+    if edits is None:
         return None
     cursor.collapseToEnd()
-    position = len(old)
+    position = length = len(old)
     for start, end, replacement in edits:
         _go_left(cursor, position - end, False)
         _go_left(cursor, end - start, True)
         cursor.setString(replacement)
         cursor.collapseToStart()
         position = start
+        length += len(replacement) - (end - start)
     # Le texte avant le premier remplacement n'a pas bougé.
     _go_left(cursor, position, False)
-    _go_right(cursor, len(_plain(new)), True)
+    _go_right(cursor, length, True)
     return cursor
