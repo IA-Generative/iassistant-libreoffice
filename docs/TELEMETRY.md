@@ -69,6 +69,24 @@ Envoyé lors de l'utilisation de la reformulation (CTRL+L).
 - `action`: "simplify_selection"
 - `text_length`: Longueur du texte sélectionné
 
+### CorrectSelection
+Envoyé par le bouton Corriger de la palette, avant l'appel au modèle.
+
+**Attributs :**
+- `plugin.action`: "correct"
+- `action`: "correct_selection"
+- `text_length`: Longueur du texte sélectionné, ou du document sans sélection
+- `tables`: Nombre de tableaux laissés de côté, sans sélection seulement
+
+### TranslateSelection
+Envoyé par le bouton Traduire de la palette, avant l'appel au modèle. La langue cible n'est pas envoyée.
+
+**Attributs :**
+- `plugin.action`: "translate"
+- `action`: "translate_selection"
+- `text_length`: Longueur du texte sélectionné, ou du document sans sélection
+- `tables`: Nombre de tableaux laissés de côté, sans sélection seulement
+
 ### OpenSettings
 Envoyé lors de l'ouverture du dialogue des paramètres.
 

@@ -90,3 +90,9 @@ def patterns_absent_from(source, patterns):
     """Motifs absents du texte source : une question citée de la sélection
     n'est pas une question du modèle."""
     return [p for p in patterns if not contains_pattern(source, [p])]
+
+
+def same_text(a, b):
+    """Vrai si deux textes ne diffèrent que par leurs espaces et retours à la
+    ligne : une réponse du modèle qui ne change que cela ne change rien."""
+    return a.split() == b.split()

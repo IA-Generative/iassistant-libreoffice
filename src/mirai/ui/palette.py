@@ -130,10 +130,12 @@ def _bilan_line(summary):
 
 
 def _pipeline_summary(message):
-    """Résumé d'un bouton d'action : son bilan dit s'il a écrit, et une
-    erreur du modèle porte son code."""
+    """Résumé d'un bouton d'action : son bilan dit s'il a écrit ou s'il
+    n'avait rien à changer, et une erreur du modèle porte son code."""
     if isinstance(message, presets_module.Written):
         return {"ok": True, "written": True, "bilan": message}
+    if isinstance(message, presets_module.Unchanged):
+        return {"ok": True, "bilan": message}
     reason = message.code if isinstance(message, presets_module.Failed) else "not_written"
     return {"ok": False, "reason": reason, "bilan": message}
 

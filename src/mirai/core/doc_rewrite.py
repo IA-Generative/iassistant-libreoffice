@@ -155,6 +155,38 @@ def build_rewrite_prompt(paragraphs, instruction: str, headings=None) -> str:
     )
 
 
+def build_paragraph_prompt(lines, instruction: str) -> str:
+    """Demande qui garde le découpage du texte : une ligne rendue par ligne
+    envoyée, titres compris, chacune remise à la place de la sienne."""
+    numbered = "\n".join(f"[P{index}] {text}"
+                         for index, text in enumerate(lines, start=1))
+    return (
+        "TEXTE (une ligne par élément, numérotées) :\n"
+        f"{numbered}\n\n"
+        f"DEMANDE : {instruction}\n\n"
+        "RÈGLES DE RÉPONSE :\n"
+        f"- Renvoie exactement {len(lines)} lignes, une par ligne reçue, dans "
+        "le même ordre, sans les marqueurs [Pn], sans ligne vide.\n"
+        "- Une ligne qui n'a pas à changer est rendue telle quelle.\n"
+        "- Pas d'introduction, pas de commentaire, pas de markdown."
+    )
+
+
+def parse_lines(text: str):
+    """Les lignes d'une réponse à `build_paragraph_prompt`, sans les marqueurs
+    [Pn] ni les lignes vides : un marqueur seul ne rend aucune ligne. Une
+    clôture de bloc de code n'est retirée qu'en tête ou en fin de réponse ;
+    ailleurs, elle peut être une ligne du texte, comme une puce en tête de
+    ligne."""
+    lines = [re.sub(r"^\[P\d+\]\s*", "", raw.strip()) for raw in (text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if lines and lines[0].startswith("```"):
+        del lines[0]
+    if lines and lines[-1].startswith("```"):
+        del lines[-1]
+    return lines
+
+
 def build_compose_prompt(instruction: str, headings=None) -> str:
     """Demande de rédaction pour un document sans texte de corps : il n'y a
     rien à réécrire, le modèle écrit ce que la demande décrit, sous les titres

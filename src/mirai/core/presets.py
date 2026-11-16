@@ -15,12 +15,13 @@ import os
 import re
 from functools import partial
 
+from ..i18n import get_locale
 from ..i18n import t as _t
-from . import doc_rewrite, whole_document
+from . import doc_rewrite, whole_document, word_edits
 from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
-from .prompts import PIPELINE_TEXT_SYSTEM
+from .prompts import PIPELINE_TEXT_SYSTEM, TRANSLATION_SYSTEM
 from .sinks import CalcCellSink, WriterTargetSink
 from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
@@ -56,6 +57,8 @@ class Preset:
 
 def _legacy_telemetry(ctx, span, attrs=None):
     payload = {"via": "palette"}
+    if span in _PLUGIN_ACTIONS:
+        payload["plugin.action"] = _PLUGIN_ACTIONS[span]
     payload.update(attrs or {})
     ctx.shell.telemetry(span, payload)
 
@@ -122,6 +125,10 @@ def text_sink(ctx, append_mode, header, footer, target, tee=None,
 
 class Written(str):
     """Bilan d'un runner qui a écrit son résultat dans le document."""
+
+
+class Unchanged(str):
+    """Bilan d'un runner qui n'avait rien à changer : ce n'est pas un échec."""
 
 
 class Failed(str):
@@ -320,6 +327,195 @@ def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
                  dispatcher=None, append_mode=False, progress=None):
     return _run_resize(ctx, shell, 1.4, _t("preset.undo_lengthen"), tee, cancel_event,
                        append_mode=append_mode, progress=progress)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Rewrite:
+    """Action qui récrit le texte sans en changer le découpage : la sélection
+    à sa place, ou chaque paragraphe du document à la sienne. Une réponse
+    identique au texte n'est pas écrite."""
+    span: str
+    plugin_action: str         # `plugin.action` de sa télémétrie
+    action: str
+    system: str
+    sent_label: str            # titres, dans la consigne, du texte envoyé
+    answer_label: str          # et du texte attendu
+    begin_marker: str          # le texte ajouté à la suite va entre ces marqueurs
+    end_marker: str
+    undo_key: str
+    done_key: str              # bilans : sur la sélection, à la suite ou à sa place
+    done_replaced_key: str
+    done_document_key: str     # sur tout le document, à la suite ou à sa place
+    done_document_replaced_key: str
+    unchanged_key: str
+    edit_by: str = "line"      # grain des remplacements : "word" ou "line"
+    question_patterns: tuple = ()
+
+    def done(self, document, append_mode):
+        """Bilan d'une écriture, sur tout le document ou sur la sélection."""
+        if document:
+            return _t(self.done_document_key if append_mode else self.done_document_replaced_key)
+        return _t(self.done_key if append_mode else self.done_replaced_key)
+
+
+_CORRECT = _Rewrite(
+    span="CorrectSelection", plugin_action="correct", action="correct_selection",
+    system=_system(
+        "Tu es un correcteur professionnel. Tu corriges l'orthographe, la grammaire, "
+        "la conjugaison et la ponctuation, sans jamais reformuler : chaque mot juste "
+        "reste à sa place, et le texte garde sa langue."),
+    sent_label="TEXTE À CORRIGER", answer_label="TEXTE CORRIGÉ",
+    begin_marker="---début-du-texte-corrigé---", end_marker="---fin-du-texte-corrigé---",
+    undo_key="preset.undo_correct",
+    done_key="preset.done_correct", done_replaced_key="preset.done_correct_replaced",
+    done_document_key="preset.done_correct_document",
+    done_document_replaced_key="preset.done_correct_document_replaced",
+    unchanged_key="preset.no_error",
+    edit_by="word", question_patterns=tuple(EXTEND_QUESTION_PATTERNS))
+
+_CORRECT_RULES = (
+    "Corrige uniquement les fautes : orthographe, grammaire, conjugaison, accords, "
+    "ponctuation. Ne reformule pas, ne change ni l'ordre des mots ni le style, "
+    "n'ajoute et ne retire rien. S'il n'y a aucune faute, rends le texte tel quel.")
+
+# Sans motifs de question : traduire « Pouvez-vous préciser… » en donne un.
+_TRANSLATE = _Rewrite(
+    span="TranslateSelection", plugin_action="translate", action="translate_selection",
+    system=TRANSLATION_SYSTEM,
+    sent_label="TEXTE À TRADUIRE", answer_label="TRADUCTION",
+    begin_marker="---début-de-la-traduction---", end_marker="---fin-de-la-traduction---",
+    undo_key="preset.undo_translate",
+    done_key="preset.done_translate", done_replaced_key="preset.done_translate_replaced",
+    done_document_key="preset.done_translate_document",
+    done_document_replaced_key="preset.done_translate_document_replaced",
+    unchanged_key="preset.already_in_language")
+
+# Le nom court des autres actions vient de la coquille (`_ACTION_NAMES`), qui
+# ne grandit plus.
+_PLUGIN_ACTIONS = {rewrite.span: rewrite.plugin_action for rewrite in (_CORRECT, _TRANSLATE)}
+
+# Langue cible par défaut : celle de l'interface, nommée dans la langue des
+# consignes.
+_LANGUAGE_NAMES = {"fr": "français", "en": "anglais", "es": "espagnol",
+                   "pt": "portugais", "zh": "chinois"}
+
+
+def _translate_rules(user_text):
+    """Consigne de traduction vers la langue tapée dans le champ, sinon vers
+    celle de l'interface. Le champ est cité tel quel : « anglais » et « en
+    anglais » y nomment la même langue. Un texte déjà dans cette langue
+    revient tel quel : c'est ce qui permet de demander une autre langue à
+    l'utilisateur."""
+    language = user_text.strip() or _LANGUAGE_NAMES[get_locale()]
+    return (f"Langue cible : {language}. Traduis le texte dans cette langue. Un passage "
+            "déjà dans cette langue est rendu tel quel. Conserve le sens, le ton et les "
+            "noms propres.")
+
+
+def _rewrite_budget(chars):
+    """Jetons accordés à une réponse qui récrit `chars` caractères : un jeton
+    couvre en général au moins un caractère (pas en chinois), et la marge
+    absorbe une réponse plus longue que le texte. Une réponse coupée par ce
+    plafond n'est pas écrite."""
+    return chars + 1000
+
+
+def run_correct(ctx, shell, user_text, tee, cancel_event=None,
+                dispatcher=None, append_mode=False, progress=None):
+    return _run_rewrite(ctx, shell, _CORRECT, _CORRECT_RULES, tee, cancel_event,
+                        append_mode, progress)
+
+
+def run_translate(ctx, shell, user_text, tee, cancel_event=None,
+                  dispatcher=None, append_mode=False, progress=None):
+    return _run_rewrite(ctx, shell, _TRANSLATE, _translate_rules(user_text), tee,
+                        cancel_event, append_mode, progress)
+
+
+def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, progress):
+    original, target = _read_target(ctx)
+    refusal = _refusal(target)
+    if refusal:
+        return refusal
+    if target is None:
+        return _rewrite_document(ctx, shell, action, rules, tee, cancel_event,
+                                 append_mode, progress)
+    _legacy_telemetry(ctx, action.span,
+                      {"action": action.action, "text_length": str(len(original))})
+    sink = text_sink(ctx, append_mode,
+                     "\n\n" + action.begin_marker + "\n", "\n" + action.end_marker + "\n",
+                     tee=tee, target=target, original=original,
+                     cancel_event=cancel_event, undo_label=_t(action.undo_key),
+                     question_patterns=patterns_absent_from(original, action.question_patterns),
+                     edit_by=action.edit_by, skip_unchanged=True)
+    prompt = (f"{action.sent_label} :\n{original}\n\n{rules}\n"
+              "Garde les lignes du texte : une ligne rendue par ligne non vide reçue, "
+              "dans le même ordre.\n"
+              "Ne pose AUCUNE question.\n"
+              "Produis UNIQUEMENT le texte demandé, sans introduction ni commentaire.\n\n"
+              f"{action.answer_label} :\n")
+    step = _text_client(shell, _rewrite_budget(len(original))).step(
+        [{"role": "system", "content": action.system},
+         {"role": "user", "content": prompt}],
+        on_text_delta=sink.stream_delta, cancel_event=cancel_event, progress=progress)
+    if step.error:
+        return Failed(step.error)
+    if step.finish_reason == "length":
+        # Le texte manquant deviendrait des suppressions.
+        return Failed("truncated")
+    sink.finish(step.text, step.streamed)
+    if sink.unchanged:
+        return Unchanged(_t(action.unchanged_key))
+    if sink.lines_mismatch:
+        return Failed("paragraphs_mismatch")
+    if sink.objects_kept:
+        return _t("preset.objects_kept")
+    return _outcome(sink, action.done(document=False, append_mode=append_mode))
+
+
+def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode, progress):
+    snapshot = _read_document(ctx, action.span, action.action)
+    if snapshot.empty:
+        return _empty_message(snapshot)
+    limit = whole_document.max_chars(shell)
+    model = whole_document.Model(
+        _text_client(shell, _rewrite_budget(min(limit, len(snapshot.text)))), action.system,
+        cancel_event=cancel_event, progress=progress,
+        question_patterns=patterns_absent_from(snapshot.text, action.question_patterns))
+    result = whole_document.rewrite_paragraphs(model, snapshot, rules, limit, tee)
+    changed = whole_document.changed(snapshot, result.drafts)
+    if not (result.error or result.question or changed):
+        return Unchanged(_t(action.unchanged_key))
+    kept = []
+    apply = _paragraphs_writer(ctx, snapshot, result.drafts, changed, action, append_mode, kept)
+    message = _write_document(ctx, snapshot, result, apply, _t(action.undo_key), cancel_event,
+                              action.done(document=True, append_mode=append_mode))
+    return _with_kept(message, sum(kept), len(changed))
+
+
+def _paragraphs_writer(ctx, snapshot, drafts, changed, action, append_mode, kept):
+    """L'écriture, à faire sur le thread principal : les paragraphes changés à
+    leur place, par mots ou par lignes selon l'action, ou tout le texte rendu
+    après le document, chaque ligne dans le style de son paragraphe. Le plan
+    des remplacements se calcule ici, dans le worker. `kept` reçoit le nombre
+    de paragraphes laissés tels quels (voir `whole_document.apply_edits`)."""
+    if append_mode:
+        lines = [(draft.paragraphs[0], snapshot.styles[draft.indexes[0]]) for draft in drafts]
+        return lambda: whole_document.append_block(ctx, snapshot, lines, action.begin_marker,
+                                                   action.end_marker)
+    edits = {draft.indexes[0]: word_edits.plan(
+        snapshot.texts[draft.indexes[0]], draft.paragraphs[0], by_word=action.edit_by == "word")
+        for draft in changed}
+    return lambda: kept.append(whole_document.apply_edits(snapshot, edits))
+
+
+def _with_kept(message, kept, changed):
+    """Le bilan, suivi du nombre de paragraphes laissés tels quels ; quand ils
+    le sont tous, rien n'a été écrit."""
+    if not kept:
+        return message
+    note = _t("preset.paragraphs_kept", count=kept)
+    return note if kept == changed else Written(message + " " + note)
 
 
 # Sans sélection, les actions Writer portent sur tout le document : le modèle
@@ -809,6 +1005,10 @@ PRESETS = [
            mode="pipeline", runner=run_shorten),
     Preset(id="lengthen", label_key="preset.lengthen", apps=("writer",),
            mode="pipeline", runner=run_lengthen),
+    Preset(id="correct", label_key="preset.correct", apps=("writer",),
+           mode="pipeline", runner=run_correct),
+    Preset(id="translate", label_key="preset.translate", apps=("writer",),
+           mode="pipeline", runner=run_translate),
     Preset(id="transform", label_key="preset.transform", apps=("calc",),
            mode="pipeline", needs_input=True,
            input_hint_key="preset.transform_hint",
