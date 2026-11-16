@@ -93,6 +93,11 @@ def ahead_of(announced, winner, unreachable=()):
     return result
 
 
+def is_unreachable(unreachable, base):
+    """Vrai quand le processus a déjà vu `base` échouer."""
+    return local_config._dm_base_url(base) in unreachable
+
+
 def mark_reachability(unreachable, base, answered):
     """Met à jour l'ensemble des bases injoignables du processus ; vrai quand il change."""
     key = local_config._dm_base_url(base)

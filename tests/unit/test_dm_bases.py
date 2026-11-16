@@ -98,6 +98,7 @@ def test_marking_reachability_normalizes_the_base_and_reports_a_change():
     seen = set()
     assert dm_bases.mark_reachability(seen, "HTTPS://B.example/", False) is True
     assert seen == {"https://b.example"}
+    assert dm_bases.is_unreachable(seen, "https://B.example/") is True
     assert dm_bases.mark_reachability(seen, "https://b.example", False) is False
     assert dm_bases.mark_reachability(seen, "https://b.example/", True) is True
     assert seen == set()

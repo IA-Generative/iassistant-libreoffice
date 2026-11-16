@@ -355,9 +355,10 @@ autre, l'ancien DM place le nouveau en tête de cette liste (et le nouveau annon
 dès la récupération qui lui apporte la liste, chaque poste interroge le nouveau DM, efface la
 paire relais, son émetteur (`relay_dm_base`), le `llmToken` et la clé de télémétrie de l'ancien,
 et se ré-enrôle en silence tant que sa session Keycloak est vivante ; sinon l'assistant
-d'enrôlement s'ouvre de lui-même. Un repli vers le DM suivant quand le premier ne répond pas est
-aussi une passation ; le DM qui n'a pas répondu passe en queue jusqu'au redémarrage de
-LibreOffice, où son retour en tête est une autre passation. Limite connue : le flux de mise à
+d'enrôlement s'ouvre de lui-même. Le premier DM de la liste est réessayé une fois avant le repli :
+un raté passager ne change pas de DM. Un repli vers le DM suivant quand le premier ne répond
+toujours pas est aussi une passation ; le DM qui n'a pas répondu passe en queue jusqu'au
+redémarrage de LibreOffice, où son retour en tête est une autre passation. Limite connue : le flux de mise à
 jour natif (`<update-information>`) reste celui de l'OXT ; après une passation, la route dirigée
 livre la mise à jour une fois la route native en échec.
 

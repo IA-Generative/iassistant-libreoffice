@@ -57,14 +57,23 @@ def first_answer(candidates, fetch_from, unreachable, baked):
     `unreachable`, les bases que le processus a vues échouer. `baked`, la liste de
     l'OXT, dit quelles bases annoncées suivre (`dm_bases.announced_list`).
 
+    Le premier candidat est réessayé une fois avant d'être déclassé : un raté
+    passager (redémarrage, coupure brève) ne vaut pas une passation, et la vague
+    de ré-enrôlements qui va avec. Une base déjà déclassée n'a pas cette faveur.
+
     Les bases que la gagnante nomme avant elle sont essayées dans la même
     récupération, en un seul saut : la liste rapportée par le saut attend la
     récupération suivante.
     """
     winner, queue, hopped, last_error = None, list(candidates), False, "unknown"
+    retry = bool(candidates) and not dm_bases.is_unreachable(unreachable, candidates[0])
     while queue:
         base_url = queue.pop(0)
         got, error = fetch_from(base_url)
+        if got is None and retry:
+            logging.info(f"DM base {base_url}: no answer, trying it once more")
+            got, error = fetch_from(base_url)
+        retry = False
         if error:
             last_error = error
         if dm_bases.mark_reachability(unreachable, base_url, got is not None):

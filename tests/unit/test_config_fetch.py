@@ -25,6 +25,7 @@ class FakeDms:
         self.announce = {A: [A], B: [B], C: [C]}
         self.known = {A: set(), B: set(), C: set()}
         self.down = set()
+        self.misses = {}     # base -> requêtes qui échouent encore avant qu'elle réponde
         self.requests = []   # (base, valeur de X-Relay-Client ou None)
 
     def __call__(self, request, **_kwargs):
@@ -33,6 +34,9 @@ class FakeDms:
         self.requests.append((base, client))
         if base in self.down:
             raise urllib.error.URLError("down")
+        if self.misses.get(base):
+            self.misses[base] -= 1
+            raise urllib.error.URLError("missed")
         inner = {"enabled": True, "llm_base_urls": base + "/llm/v1"}
         if self.announce[base] is not None:
             inner["bootstrapUrls"] = self.announce[base]
@@ -168,7 +172,7 @@ def test_a_base_that_failed_goes_last_for_the_rest_of_the_process(tmp_path):
     job.set_config("dm_bootstrap_urls", [B, A])
     dms.down.add(B)
     job._fetch_config(force=True)
-    assert dms.bases() == [B, A]
+    assert dms.bases() == [B, B, A]
     dms.down.clear()
     dms.requests.clear()
     job._fetch_config(force=True)            # B répond de nouveau, mais n'est plus essayée en premier
@@ -189,11 +193,35 @@ def test_a_demoted_base_is_sound_again_as_soon_as_it_answers(tmp_path):
     dms.down.add(A)
     dms.requests.clear()
     job._fetch_config(force=True)            # A tombe : B, dernier recours, répond
-    assert dms.bases() == [A, B]
+    assert dms.bases() == [A, A, B]
     dms.down.clear()
     dms.requests.clear()
     job._fetch_config(force=True)
     assert dms.bases() == [B]                # B réhabilitée, A en queue
+
+
+def test_the_first_dm_gets_a_second_try_before_it_goes_last(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job.set_config("dm_bootstrap_urls", [A, B])
+    dms.down.add(A)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, A, B]
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [B]
+
+
+def test_once_every_dm_has_failed_none_is_tried_twice(tmp_path):
+    dms = FakeDms()
+    job = _device(tmp_path, dms)
+    job.set_config("dm_bootstrap_urls", [A, B])
+    dms.down.update({A, B})
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, A, B]
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, B]
 
 
 def test_the_hop_skips_a_base_that_failed_earlier_in_the_process(tmp_path):
@@ -428,6 +456,24 @@ def test_when_no_dm_named_ahead_answers_nothing_is_dropped(tmp_path):
     job._schedule_relay_recovery.assert_not_called()
 
 
+def test_a_single_miss_of_the_active_dm_is_not_a_switch(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = [A, B]
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    _enrolled_with(job, dms, A)
+    job._schedule_relay_recovery.reset_mock()
+    dms.misses[A] = 1
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [A, A]
+    assert job._get_config_from_file("relay_client_id", "") == "relay-" + A
+    job._schedule_relay_recovery.assert_not_called()
+    dms.requests.clear()
+    job._fetch_config(force=True)
+    assert dms.bases() == [A]                                # A reste en tête
+
+
 def test_a_fallback_is_a_switch_and_the_primary_returns_at_the_next_start(tmp_path):
     job, dms = _handed_over(tmp_path)
     dms.announce[B] = [B, A]
@@ -437,7 +483,7 @@ def test_a_fallback_is_a_switch_and_the_primary_returns_at_the_next_start(tmp_pa
     dms.down.add(B)
     dms.requests.clear()
     job._fetch_config(force=True)                            # repli : bascule vers A
-    assert dms.bases() == [B, A]
+    assert dms.bases() == [B, B, A]
     assert job._active_bootstrap_url() == A
     assert job._get_config_from_file("relay_client_id", "") == ""
     assert job._schedule_relay_recovery.call_args_list == [SWITCH_RECOVERY]
