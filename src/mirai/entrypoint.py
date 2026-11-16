@@ -1080,7 +1080,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         use_proxy=use_proxy))
 
             winner, last_error = config_fetch.first_answer(
-                base_urls, fetch_from, self.runtime.unreachable_dm_bases)
+                base_urls, fetch_from, self.runtime.unreachable_dm_bases, self._bootstrap_urls())
             if winner is None:
                 self._config_last_failure_at = now
                 log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")
@@ -1128,7 +1128,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     pass
                 self._persist_bootstrap_config(config_data)
                 self._persist_config_cache(config_data)
-                announced = dm_bases.announced_list(config_data)
+                announced = dm_bases.announced_list(config_data, self._bootstrap_urls())
                 if announced is not None and announced != self._get_config_from_file("dm_bootstrap_urls", None):
                     self.set_config("dm_bootstrap_urls", announced)
                 # Une paire antérieure à l'émetteur enregistré : le DM qui l'accepte

@@ -142,6 +142,15 @@ def test_one_hop_only_the_list_the_hop_brings_waits_for_the_next_fetch(tmp_path)
     assert job._active_bootstrap_url() == B
 
 
+def test_a_cleartext_base_announced_by_the_dm_is_neither_tried_nor_stored(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = ["http://dm-b.example", A]
+    job = _device(tmp_path, dms)
+    job._fetch_config(force=True)
+    assert dms.bases() == [A]
+    assert read_user_config(str(tmp_path))["dm_bootstrap_urls"] == [A]
+
+
 def test_a_response_without_a_usable_list_keeps_the_stored_one(tmp_path):
     dms = FakeDms()
     job = _device(tmp_path, dms)

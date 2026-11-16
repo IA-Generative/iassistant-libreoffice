@@ -25,14 +25,26 @@ def test_same_base_ignores_the_case_of_scheme_and_host_and_the_trailing_slash():
 
 def test_the_announced_list_comes_from_bootstrap_urls_of_the_config_section():
     data = {"config": {"bootstrapUrls": [" https://b/ ", "https://a", "https://B", None, 42]}}
-    assert dm_bases.announced_list(data) == ["https://b", "https://a"]
+    assert dm_bases.announced_list(data, []) == ["https://b", "https://a"]
 
 
 def test_the_announced_list_is_none_when_absent_empty_or_unusable():
     for data in (None, {}, {"config": {}}, {"config": {"bootstrapUrls": []}},
                  {"config": {"bootstrapUrls": ["", "/"]}},
                  {"config": {"bootstrapUrls": "https://a"}}):
-        assert dm_bases.announced_list(data) is None
+        assert dm_bases.announced_list(data, []) is None
+
+
+def test_the_announced_list_keeps_only_https_bases():
+    data = {"config": {"bootstrapUrls": ["http://b", "https://a", "ftp://c", "dm-d.example"]}}
+    assert dm_bases.announced_list(data, ["https://a"]) == ["https://a"]
+    assert dm_bases.announced_list({"config": {"bootstrapUrls": ["http://b"]}}, ["https://a"]) is None
+
+
+def test_an_oxt_that_embeds_an_http_base_also_follows_announced_http_bases():
+    data = {"config": {"bootstrapUrls": ["http://localhost:8090", "https://a"]}}
+    assert dm_bases.announced_list(data, ["http://localhost:8089"]) == [
+        "http://localhost:8090", "https://a"]
 
 
 def test_a_pair_belongs_to_another_dm_only_when_its_recorded_issuer_differs():

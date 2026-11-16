@@ -348,7 +348,9 @@ sequenceDiagram
 
 Le DM sert dans `/config` la liste `bootstrapUrls` (variable `DM_BOOTSTRAP_URLS`). Le plugin la
 garde dans `settings.json` (`dm_bootstrap_urls`) et l'essaie avant la liste embarquée dans l'OXT ;
-le dernier DM ayant répondu n'est plus qu'un repli en queue. Pour passer un parc d'un DM à un
+le dernier DM ayant répondu n'est plus qu'un repli en queue. Seules les adresses `https` de la
+liste sont suivies, et les adresses `http` quand l'OXT en embarque une (banc local) : une faute de
+frappe dans `DM_BOOTSTRAP_URLS` ne fait pas passer le parc en clair. Pour passer un parc d'un DM à un
 autre, l'ancien DM place le nouveau en tête de cette liste (et le nouveau annonce la même liste) :
 dès la récupération qui lui apporte la liste, chaque poste interroge le nouveau DM, efface la
 paire relais, son émetteur (`relay_dm_base`), le `llmToken` et la clé de télémétrie de l'ancien,

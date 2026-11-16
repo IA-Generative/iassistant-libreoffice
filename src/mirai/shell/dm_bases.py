@@ -48,14 +48,28 @@ def _dedupe(urls):
     return result
 
 
-def announced_list(config_data):
+def _scheme(url):
+    try:
+        return urllib.parse.urlsplit(str(url or "").strip()).scheme
+    except ValueError:
+        return ""
+
+
+def announced_list(config_data, baked):
     """Les bases que le DM annonce (`bootstrapUrls` des réglages), nettoyées et
-    dédoublonnées ; None quand la réponse n'en porte aucune exploitable."""
+    dédoublonnées ; None quand la réponse n'en porte aucune exploitable.
+
+    Seules les bases https sont suivies, et les bases http quand la liste de
+    l'OXT (`baked`) en compte une : une faute de frappe côté DM ne fait pas
+    passer la flotte en clair, le banc local en http reste possible.
+    """
     settings = local_config.select_settings(config_data)
     urls = settings.get("bootstrapUrls") if isinstance(settings, dict) else None
     if not isinstance(urls, (list, tuple)):
         return None
-    result = _dedupe(item.strip().rstrip("/") for item in urls if isinstance(item, str))
+    schemes = {"https"} | ({"http"} if any(_scheme(url) == "http" for url in baked) else set())
+    result = _dedupe(item.strip().rstrip("/") for item in urls
+                     if isinstance(item, str) and _scheme(item) in schemes)
     return result or None
 
 

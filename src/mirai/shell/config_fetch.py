@@ -51,10 +51,11 @@ def attempt(base_url, config_path, modes, headers, open_url):
     return None, error
 
 
-def first_answer(candidates, fetch_from, unreachable):
+def first_answer(candidates, fetch_from, unreachable, baked):
     """Interroge les candidats dans l'ordre avec `fetch_from(base)` (le rendu
     d'`attempt`) ; rend ((base, réponse) ou None, dernière erreur) et tient à jour
-    `unreachable`, les bases que le processus a vues échouer.
+    `unreachable`, les bases que le processus a vues échouer. `baked`, la liste de
+    l'OXT, dit quelles bases annoncées suivre (`dm_bases.announced_list`).
 
     Les bases que la gagnante nomme avant elle sont essayées dans la même
     récupération, en un seul saut : la liste rapportée par le saut attend la
@@ -75,7 +76,7 @@ def first_answer(candidates, fetch_from, unreachable):
         if hopped:
             break
         hopped = True
-        queue = dm_bases.ahead_of(dm_bases.announced_list(got[0]), base_url, unreachable)
+        queue = dm_bases.ahead_of(dm_bases.announced_list(got[0], baked), base_url, unreachable)
         if queue:
             logging.info(f"DM {base_url} names {queue} ahead of itself: trying them now")
     return winner, last_error
