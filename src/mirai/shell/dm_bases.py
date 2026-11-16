@@ -32,6 +32,13 @@ def same_base(a, b):
     return local_config._dm_base_url(a) == local_config._dm_base_url(b)
 
 
+def issued_by_another(issuer, target):
+    """Vrai quand la paire relais a un émetteur enregistré et que ce n'est pas
+    `target` ; une paire antérieure à l'émetteur vaut pour tout DM."""
+    issuer, target = str(issuer or "").strip(), str(target or "").strip()
+    return bool(issuer and target) and not same_base(issuer, target)
+
+
 def _dedupe(urls):
     result = []
     for url in urls:

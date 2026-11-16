@@ -35,6 +35,13 @@ def test_the_announced_list_is_none_when_absent_empty_or_unusable():
         assert dm_bases.announced_list(data) is None
 
 
+def test_a_pair_belongs_to_another_dm_only_when_its_recorded_issuer_differs():
+    assert dm_bases.issued_by_another("https://a", "https://b") is True
+    assert dm_bases.issued_by_another(" HTTPS://A/ ", "https://a") is False
+    assert dm_bases.issued_by_another("", "https://a") is False     # paire antérieure à l'émetteur
+    assert dm_bases.issued_by_another("https://a", "") is False
+
+
 def test_candidates_follow_the_announced_list_then_the_baked_one_then_the_last_winner():
     assert dm_bases.candidate_order(["https://b", "https://a"], ["https://a", "https://c"],
                                     "https://c") == ["https://b", "https://a", "https://c"]

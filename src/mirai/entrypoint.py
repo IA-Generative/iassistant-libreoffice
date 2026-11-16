@@ -4161,9 +4161,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         client_key = str(self._get_config_from_file("relay_client_key", "") or "").strip()
         if not client_id or not client_key:
             return False
-        issuer = str(self._get_config_from_file("relay_dm_base", "") or "").strip()
-        target = str((self._active_bootstrap_url() if base is None else base) or "").strip()
-        if issuer and target and not dm_bases.same_base(issuer, target):
+        if dm_bases.issued_by_another(self._get_config_from_file("relay_dm_base", ""),
+                                      self._active_bootstrap_url() if base is None else base):
             return False
         return not self._token_expired_at(
             self._get_config_from_file("relay_key_expires_at", 0), skew_seconds
@@ -4348,9 +4347,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not relay_client_id or not relay_client_key:
             log_to_file(f"[RELAY] no relay creds: id={'yes' if relay_client_id else 'no'} key={'yes' if relay_client_key else 'no'}")
             return {}
-        issuer = str(self._get_config_from_file("relay_dm_base", "") or "").strip()
-        target = str((self._active_bootstrap_url() if base is None else base) or "").strip()
-        if issuer and target and not dm_bases.same_base(issuer, target):
+        if dm_bases.issued_by_another(self._get_config_from_file("relay_dm_base", ""),
+                                      self._active_bootstrap_url() if base is None else base):
             log_to_file("[RELAY] relay creds issued by another DM: not sent")
             return {}
         if self._token_expired_at(self._get_config_from_file("relay_key_expires_at", 0)):
