@@ -50,13 +50,15 @@ def test_every_writer_preset_accepts_the_choice():
 
 
 def test_defaults_match_historic_behaviour():
-    """Sans choix transmis, chaque preset garde son comportement d'origine."""
+    """Sans choix transmis, Résumer et Simplifier ajoutent à la suite ; les
+    autres actions remplacent le texte."""
     import inspect
 
     from src.mirai.core import presets
 
     expected = {"summarize": True, "simplify": True,
-                "shorten": False, "lengthen": False}
+                "shorten": False, "lengthen": False, "correct": False,
+                "translate": False}
     for preset_id, appends in expected.items():
         runner = next(p for p in presets.PRESETS if p.id == preset_id).runner
         default = inspect.signature(runner).parameters["append_mode"].default

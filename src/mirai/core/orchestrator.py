@@ -56,6 +56,9 @@ ERROR_KEYS = {
     # Flux terminé sans texte ni appel d'outil (garde dans run_agentic).
     "empty_response": "run.err_empty",
     "truncated": "run.err_truncated",
+    # Une action qui garde le découpage du texte reçoit un autre nombre de
+    # lignes que de paragraphes envoyés : elle ne sait plus où les écrire.
+    "paragraphs_mismatch": "run.err_paragraphs",
     "max_iterations": "run.not_converged",
     # Plafond atteint après un outil mutant : le document a changé, et
     # relancer la demande le réécrirait.

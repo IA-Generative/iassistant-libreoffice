@@ -5,13 +5,43 @@ Il sert aux actions qui portent sur tout le document : ce qu'elles écrivent,
 où, avec quel style, et si l'écriture a eu lieu dans une action d'annulation,
 se lit directement sur `paragraphs`, `styles` et `undo`. `TABLE` à la place
 d'un texte met un tableau dans le corps ; `tables` dit combien il en reste.
+
+Un paragraphe, comme la sélection, peut aussi être donné en passages
+`[(texte, mise en forme), …]` : chaque caractère garde la mise en forme de son
+passage, et `runs()` dit ce qu'il en reste après l'action. Un passage
+`Anchored` y met un objet qui occupe une seule position mais se lit autrement,
+et `anchored()` dit lesquels restent.
 """
 
+import dataclasses
 from types import SimpleNamespace
 
 from tests.stubs.thread_guard import UnoStruct
 
 TABLE = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class Anchored:
+    """Objet qui occupe une seule position du texte, comme sous Writer, mais
+    se lit autrement : une note comme son numéro, un commentaire ou une image
+    comme rien, un champ comme sa valeur. `kind` est son TextPortionType.
+    Écrire par-dessus l'efface."""
+    kind: str
+    read: str = ""
+
+
+# Saut de paragraphe d'une sélection : une seule position, lue « \n », et
+# « \r\n » sous Windows. Ce n'est pas une portion Writer ; l'écrire par-dessus
+# fond les deux paragraphes.
+BREAK = Anchored("ParagraphBreak", "\n")
+WINDOWS_BREAK = Anchored("ParagraphBreak", "\r\n")
+
+
+def _enumeration(items):
+    items = list(items)
+    return SimpleNamespace(hasMoreElements=lambda: bool(items),
+                           nextElement=lambda: items.pop(0))
 
 
 class FakeTable:
@@ -25,19 +55,65 @@ class FakeTable:
 class FakeParagraph:
     def __init__(self, doc, text, style):
         self._doc = doc
-        self.text = text
+        # Chaque objet ancré tient dans `text` sous un caractère réservé.
+        self._anchored = {}
+        if isinstance(text, list):
+            parts = [(self._reserve(part), None) if isinstance(part, Anchored) else part
+                     for part in text]
+            self.text = "".join(part for part, _ in parts)
+            self.formats = [fmt for part, fmt in parts for _ in part]
+        else:
+            self.text = text
+            self.formats = [None] * len(text)
         self.style = style
         self.index = None        # index (table des matières…) qui contient le paragraphe
+
+    def _reserve(self, anchored):
+        char = chr(0xE000 + len(self._anchored))
+        self._anchored[char] = anchored
+        return char
+
+    def read(self, chars):
+        """Ce que Writer rend pour ces positions."""
+        return "".join(self._anchored[c].read if c in self._anchored else c for c in chars)
+
+    def kind(self, char):
+        return self._anchored[char].kind if char in self._anchored else "Text"
+
+    def anchored(self):
+        """Les objets ancrés encore là, dans l'ordre."""
+        return [self._anchored[c].kind for c in self.text if c in self._anchored]
 
     def supportsService(self, name):
         return name == "com.sun.star.text.Paragraph"
 
     def getString(self):
-        return self.text
+        return self.read(self.text)
 
     def setString(self, text):
+        # Comme Writer : le nouveau texte prend la mise en forme du premier
+        # caractère remplacé.
         self._doc.record_write()
+        first = self.formats[0] if self.formats else None
         self.text = text
+        self.formats = [first] * len(text)
+
+    def runs(self):
+        """[(texte, mise en forme)] : les caractères consécutifs de même mise
+        en forme, regroupés."""
+        result = []
+        for char, fmt in zip(self.text, self.formats, strict=True):
+            if result and result[-1][1] == fmt:
+                result[-1] = (result[-1][0] + self.read(char), fmt)
+            else:
+                result.append((self.read(char), fmt))
+        return result
+
+    def getText(self):
+        return self._doc.Text
+
+    def getStart(self):
+        return UnoStruct(paragraph=self, offset=0)
 
     def getPropertyValue(self, name):
         if name == "ParaStyleName":
@@ -87,17 +163,95 @@ class FakeBodyCursor:
         self.anchor.style = value
 
 
+class FakeInlineCursor:
+    """Curseur posé dans le texte d'un paragraphe : il se déplace position par
+    position, sans jamais sortir du paragraphe, et remplace ce qu'il couvre.
+    Comme sous Writer, `point` bouge et `mark` reste, sauf sans `expand`."""
+
+    def __init__(self, doc, paragraph, offset):
+        self._doc = doc
+        self.paragraph = paragraph
+        self.mark = self.point = offset
+
+    @property
+    def start(self):
+        return min(self.mark, self.point)
+
+    @property
+    def end(self):
+        return max(self.mark, self.point)
+
+    def goRight(self, count, expand):
+        return self._go(count, expand)
+
+    def goLeft(self, count, expand):
+        return self._go(-count, expand)
+
+    def _go(self, count, expand):
+        if not -2 ** 15 <= count < 2 ** 15:
+            raise OverflowError("goRight et goLeft prennent un short")
+        target = self.point + count
+        before = self.point
+        self.point = min(max(target, 0), len(self.paragraph.text))
+        self._doc.moved += abs(self.point - before)
+        if not expand:
+            self.mark = self.point
+        return self.point == target
+
+    def collapseToStart(self):
+        self.mark = self.point = self.start
+
+    def collapseToEnd(self):
+        self.mark = self.point = self.end
+
+    def getString(self):
+        return self.paragraph.read(self.paragraph.text[self.start:self.end])
+
+    def createEnumeration(self):
+        """Le paragraphe couvert, dont les portions se limitent à la plage."""
+        covered = self.paragraph.text[self.start:self.end]
+        if not covered:
+            return _enumeration([])
+        portions = [SimpleNamespace(TextPortionType=self.paragraph.kind(c),
+                                    getString=lambda c=c: self.paragraph.read(c))
+                    for c in covered]
+        return _enumeration([SimpleNamespace(
+            supportsService=lambda name: name == "com.sun.star.text.Paragraph",
+            createEnumeration=lambda: _enumeration(portions))])
+
+    def setString(self, text):
+        # Comme Writer : le texte remplaçant prend la mise en forme du premier
+        # caractère remplacé ; inséré, celle du caractère qui le précède.
+        self._doc.record_write()
+        p = self.paragraph
+        if self.end > self.start:
+            fmt = p.formats[self.start]
+        elif self.start:
+            fmt = p.formats[self.start - 1]
+        else:
+            fmt = p.formats[0] if p.formats else None
+        start = self.start
+        p.text = p.text[:start] + text + p.text[self.end:]
+        p.formats = p.formats[:start] + [fmt] * len(text) + p.formats[self.end:]
+        self.mark, self.point = start, start + len(text)
+
+
 class FakeBodyText:
     def __init__(self, doc):
         self._doc = doc
 
     def createEnumeration(self):
-        items = list(self._doc.items)
-        return SimpleNamespace(hasMoreElements=lambda: bool(items),
-                               nextElement=lambda: items.pop(0))
+        return _enumeration(self._doc.items)
 
     def createTextCursorByRange(self, position):
+        if hasattr(position, "offset"):
+            return FakeInlineCursor(self._doc, position.paragraph, position.offset)
         return FakeBodyCursor(self._doc, position)
+
+    def compareRegionEnds(self, first, second):
+        """1 si `first` finit avant `second`, 0 au même endroit, -1 après."""
+        ends = [r.end if isinstance(r, FakeInlineCursor) else len(r.text) for r in (first, second)]
+        return (ends[0] < ends[1]) - (ends[0] > ends[1])
 
     def removeTextContent(self, paragraph):
         # Comme Writer : quand les modifications sont enregistrées, rien
@@ -116,6 +270,7 @@ class FakeBodyText:
     def insertString(self, cursor, text, _absorb):
         self._doc.record_write()
         cursor.anchor.text += text
+        cursor.anchor.formats += [None] * len(text)
 
 
 class FakeUndo:
@@ -139,7 +294,7 @@ class FakeBodyDoc:
     d'annulation. Les écritures faites hors d'une action d'annulation sont
     comptées dans `writes_outside_undo`."""
 
-    def __init__(self, paragraphs, styles=None, selection_text=""):
+    def __init__(self, paragraphs, styles=None, selection=""):
         styles = list(styles or ["Standard"] * len(paragraphs))
         self.items = [FakeTable() if text is TABLE else FakeParagraph(self, text, style)
                       for text, style in zip(paragraphs, styles, strict=True)]
@@ -148,12 +303,16 @@ class FakeBodyDoc:
         self.undo = FakeUndo()
         self.writes = 0
         self.writes_outside_undo = 0
-        selection = SimpleNamespace(getString=lambda: selection_text)
+        self.moved = 0                   # positions parcourues par les curseurs
+        # La sélection, hors du corps : un passage du document qu'une action
+        # peut lire et réécrire.
+        self.selection = FakeParagraph(self, selection, "Standard")
+        self.selected = None             # ce qu'une action a sélectionné en dernier
         self.controller = SimpleNamespace(
             getSelection=lambda: SimpleNamespace(getCount=lambda: 1,
-                                                 getByIndex=lambda _i: selection),
+                                                 getByIndex=lambda _i: self.selection),
             getViewCursor=lambda: SimpleNamespace(gotoRange=lambda *_a: None),
-            select=lambda _target: None)
+            select=lambda target: setattr(self, "selected", target))
         self.CurrentController = self.controller
 
     @property

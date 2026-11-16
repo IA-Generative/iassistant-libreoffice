@@ -49,12 +49,68 @@ class FakeCursor:
         return self._doc.text_obj
 
 
+class _FakeInlineCursor:
+    """Curseur posé dans le texte de la sélection : il se déplace caractère
+    par caractère et remplace ce qu'il couvre. `point` bouge, `mark` reste,
+    sauf sans `expand`."""
+
+    def __init__(self, rng):
+        self._range = rng
+        self.mark = self.point = 0
+
+    @property
+    def start(self):
+        return min(self.mark, self.point)
+
+    @property
+    def end(self):
+        return max(self.mark, self.point)
+
+    def goRight(self, count, expand):
+        return self._go(count, expand)
+
+    def goLeft(self, count, expand):
+        return self._go(-count, expand)
+
+    def _go(self, count, expand):
+        self.point = min(max(self.point + count, 0), len(self._range._text))
+        if not expand:
+            self.mark = self.point
+        return True
+
+    def collapseToStart(self):
+        self.mark = self.point = self.start
+
+    def collapseToEnd(self):
+        self.mark = self.point = self.end
+
+    def getString(self):
+        return self._range._text[self.start:self.end]
+
+    def createEnumeration(self):
+        """Du texte seul : aucun objet ancré à rendre."""
+        return _FakeParagraphEnum([])
+
+    def setString(self, value):
+        text, start = self._range._text, self.start
+        self._range.setString(text[:start] + value + text[self.end:])
+        self.mark, self.point = start, start + len(value)
+
+
 class FakeWriterText:
     def __init__(self, doc):
         self._doc = doc
 
     def createTextCursorByRange(self, rng):
+        if isinstance(rng, SimpleNamespace) and hasattr(rng, "inline"):
+            return _FakeInlineCursor(rng.inline)
         return FakeCursor(self._doc)
+
+    def compareRegionEnds(self, first, second):
+        """1 si `first` finit avant `second`, 0 au même endroit, -1 après."""
+        ends = [r.end if isinstance(r, _FakeInlineCursor) else len(r._text)
+                for r in (first, second)]
+        return (ends[0] < ends[1]) - (ends[0] > ends[1])
 
     def createTextCursor(self):
         return FakeCursor(self._doc)
@@ -105,6 +161,9 @@ class FakeTextRange:
 
     def getText(self):
         return self._doc.text_obj
+
+    def getStart(self):
+        return SimpleNamespace(inline=self)
 
 
 class FakeWriterDoc:
