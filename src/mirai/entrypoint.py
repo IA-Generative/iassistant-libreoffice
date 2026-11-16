@@ -6272,9 +6272,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 _t("msg.action_failed_body", action=action, exc=exc))
         return True
 
-    def _open_url_config(self, key):
-        """Ouvre l'URL d'une clé de configuration, avec repli sur le portail."""
-        url = self.get_config(key, "") or self.get_config("portal_url", "")
+    def _open_url_config(self, key, url=""):
+        """Ouvre `url`, sinon l'URL d'une clé de configuration, avec repli sur le portail."""
+        url = url or self.get_config(key, "") or self.get_config("portal_url", "")
         if not url:
             raise RuntimeError(f"aucune URL configurée ({key})")
         if not open_url(self.ctx, url):

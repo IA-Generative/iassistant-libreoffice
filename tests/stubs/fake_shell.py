@@ -106,6 +106,7 @@ class FakeShell:
         self.telemetry_events = []   # (span, attrs)
         self.llm_errors = []         # (status, body)
         self.logs = []
+        self.opened_urls = []        # URL ouvertes dans le navigateur
         self._config_dir = config_dir
         self.recover_auth_calls = 0
         self._recover_auth_result = recover_auth_result
@@ -119,6 +120,13 @@ class FakeShell:
 
     def data_dir(self):
         return self._config_dir
+
+    def get_link(self, link_id):
+        from src.mirai.core.links import find_link
+        return find_link(self.config.get("links", []), link_id)
+
+    def open_link(self, url):
+        self.opened_urls.append(url)
 
     # Transport
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):

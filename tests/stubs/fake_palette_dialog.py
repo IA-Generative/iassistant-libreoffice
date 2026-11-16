@@ -41,9 +41,10 @@ class FakeControl:
         # Ce que l'écran affiche : écrire `model.Text` ne repeint pas un
         # contrôle doté d'un peer, seul `setText()` le fait.
         self.shown_text = ""
+        self.pos_size = None        # (x, y, w, h, flags) du dernier placement
 
-    def setPosSize(self, *_args):
-        pass
+    def setPosSize(self, *args):
+        self.pos_size = args
 
     def getPosSize(self):
         return FakePosSize()
@@ -153,11 +154,13 @@ class FakeDialogModel:
         control.model = model
 
 
-def build_palette(palette_module, app="writer"):
+def build_palette(palette_module, app="writer", links=None):
+    """`links` : les liens DM par rôle que le faux shell sert ; aucun par défaut."""
     shell = MagicMock()
     shell.toolkit.return_value = MagicMock()
     shell.data_dir.return_value = "/tmp/mirai-test-palette"
     shell.get_config.side_effect = lambda key, default=None: default
+    shell.get_link.side_effect = lambda link_id: (links or {}).get(link_id)
     shell.log = lambda _m: None
 
     uno_ctx = MagicMock()

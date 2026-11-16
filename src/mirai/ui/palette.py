@@ -59,6 +59,7 @@ from ..core import (
 from ..core import presets as presets_module
 from ..core.context import ToolContext
 from ..core.conversation import ConversationStore
+from ..core.links import target_url
 from ..core.llm_client import LLMClient
 from ..core.orchestrator import Orchestrator, RunObserver, error_message, is_outage
 from ..core.progress import RunProgress
@@ -108,6 +109,12 @@ TABS = (("response", "tab.conversation"),
 
 REASONING_PANE = "reasoning"
 BOTTOM_PANES = tuple(tab_id for tab_id, _ in TABS)
+
+# Liens distribués par le DM (config.links) que la palette sait montrer, dans
+# l'ordre d'affichage : les rôles sont fixés ici, libellés et destinations
+# viennent du serveur (contrat DM §4.2 bis). Un rôle absent de la config n'a
+# pas de ligne. La liste est relue à chaque construction de la palette.
+LINK_IDS = ("search-portal", "beta-feedback")
 
 # Le retour d'un run doit se VOIR : une ligne de statut colorée selon l'issue.
 STATUS_COLORS = {
@@ -534,6 +541,7 @@ class AssistantPalette:
         self._models = {}
         self._handlers = []                 # garde les listeners vivants (GC)
         self._chip_names = []
+        self._link_names = []               # lignes de liens DM du pied (ordre d'affichage)
         # Exécution non bloquante : le run vit dans un worker, tout ce qui
         # touche UNO repasse par le dispatcher (voir core/ui_thread.py).
         self.dispatcher = MainThreadDispatcher(uno_ctx, log=shell.log)
@@ -703,7 +711,9 @@ class AssistantPalette:
             self._handlers.append(handler)
 
         # Réglages / À propos / Documentation vivent UNIQUEMENT dans le menu
-        # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler.
+        # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler. Seuls les
+        # liens distribués par le DM s'y ajoutent : le menu, statique
+        # (Addons.xcu), ne peut pas les porter.
         dsfr.add_link(dialog, model, "link_clear", _t("palette.new_conversation"),
                       0, 0, 120, 16, font, self._on_clear)
         _, hint_model = dsfr.add_control(
@@ -713,6 +723,7 @@ class AssistantPalette:
                 "FontName": font, "FontHeight": 6, "Align": 2,
             })
         self._models["hint"] = hint_model
+        self._add_dm_links(dialog, model, font)
 
         # La palette est une fenêtre POSSÉDÉE par la fenêtre de document (sur
         # macOS elle la suit et ne peut pas quitter son écran). Passer `None` en
@@ -929,6 +940,8 @@ class AssistantPalette:
         clear_w = int((clear_pref.Width if clear_pref else 120) + 6 * scale)
         self._place("link_clear", max(x, width - margin - clear_w), y, clear_w, line_h)
         y += line_h + int(4 * scale)
+
+        y = self._place_link_rows(y, margin, width, line_h, scale)
 
         hint_pref = self._preferred("hint")
         hint_w = int((hint_pref.Width if hint_pref else 90) + 6 * scale)
@@ -1641,6 +1654,54 @@ class AssistantPalette:
             self._current_exchange.append(_t("palette.assistant_prefix"))
         self._current_exchange[-1] += text
         self._render_conversation()
+
+    def _place_link_rows(self, y, margin, width, line_h, scale):
+        """Une ligne par lien DM, large comme son texte, au-dessus du hint ; rend le y suivant."""
+        for name in self._link_names:
+            pref = self._preferred(name)
+            w = min(width - 2 * margin, int((pref.Width if pref else width) + 6 * scale))
+            self._place(name, margin, y, w, line_h)
+            y += line_h + int(4 * scale)
+        return y
+
+    def _add_dm_links(self, dialog, model, font):
+        """Une ligne par lien DM connu, son hint dessous ; les libellés viennent du serveur."""
+        for link_id in LINK_IDS:
+            link = self.shell.get_link(link_id)
+            if not link:
+                continue
+            name = "link_" + link_id.replace("-", "_")
+            _, link_model = dsfr.add_link(
+                dialog, model, name, link["label"] + " ↗", 0, 0, 120, 16, font,
+                lambda u=target_url(link), i=link_id: self._on_link(i, u))
+            link_model.HelpText = link["label"]
+            self._models[name] = link_model
+            self._link_names.append(name)
+            if link.get("hint"):
+                self._add_link_hint(dialog, model, font, name + "_hint", link_id, link)
+
+    def _add_link_hint(self, dialog, model, font, name, link_id, link):
+        """Le hint est un lien quand le DM lui donne une cible, du texte sinon."""
+        if link.get("hintUrl"):
+            _, hint_model = dsfr.add_link(
+                dialog, model, name, link["hint"] + " ↗", 0, 0, 120, 16, font,
+                lambda u=link["hintUrl"], i=link_id + ".hint": self._on_link(i, u))
+        else:
+            _, hint_model = dsfr.add_control(
+                dialog, model, name, "FixedText", 0, 0, 120, 16, {
+                    "Label": link["hint"], "TextColor": dsfr.TOKENS["text_mention"],
+                    "FontName": font, "FontHeight": 8})
+        hint_model.HelpText = link["hint"]
+        self._models[name] = hint_model
+        self._link_names.append(name)
+
+    def _on_link(self, link_id, url):
+        self.shell.telemetry("LinkClick", {"link": link_id})
+        try:
+            self.shell.open_link(url)
+        except Exception as exc:
+            self.shell.log(f"[palette] ouverture du lien {link_id} impossible : {exc}")
+            self.set_status(_t("msg.no_browser").split("\n")[0], tone="error")
 
     def _on_clear(self):
         if self.busy:
