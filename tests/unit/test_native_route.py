@@ -209,6 +209,15 @@ def test_native_feed_offers_false_when_version_differs():
     assert job._native_feed_offers(TARGET) is False
 
 
+def test_native_feed_offers_a_prerelease_under_its_native_writing():
+    """Le feed annonce ce que description.xml porte : pour une pré-version,
+    l'écriture numérique, pas le numéro du Device Management."""
+    job, _ = _job_with_provider([("fr.gouv.interieur.mirai", "0.3.99999.2.12")])
+    assert job._native_feed_offers("0.4.0-rc.12") is True
+    job, _ = _job_with_provider([("fr.gouv.interieur.mirai", "0.4.0-rc.12")])
+    assert job._native_feed_offers("0.4.0-rc.12") is False
+
+
 def test_native_feed_offers_false_when_feed_silent():
     """Bloc feed absent, feed injoignable ou pas plus récent → séquence vide."""
     job, _ = _job_with_provider([])
@@ -772,6 +781,11 @@ def test_get_extension_version_reads_registry_pairs():
     assert not pip.getExtensionVersion.called
 
 
+def test_get_extension_version_gives_a_prerelease_its_device_management_number():
+    job, _ = _job_with_extension_list([("fr.gouv.interieur.mirai", "0.3.99999.2.12")])
+    assert job._get_extension_version() == "0.4.0-rc.12"
+
+
 def test_get_extension_version_falls_back_when_registry_unavailable():
     """Registre injoignable → repli description.xml (ici absent) → chaîne vide,
     jamais d'exception."""
@@ -870,6 +884,12 @@ def test_cached_package_versions_lists_our_identifier_only():
     job = _job()
     job._package_cache_dir = lambda: _fake_cache([CURRENT, TARGET])
     assert job._versions_of(job._cached_package_versions()) == {CURRENT, TARGET}
+
+
+def test_cached_package_versions_give_prereleases_their_device_management_number():
+    job = _job()
+    job._package_cache_dir = lambda: _fake_cache(["0.3.0", "0.3.99999.1.7"])
+    assert job._versions_of(job._cached_package_versions()) == {"0.3.0", "0.4.0-dev.7"}
 
 
 def test_cached_package_versions_never_raises():

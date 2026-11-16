@@ -123,7 +123,8 @@ Un seul appel fait tout : upload de l'artefact, création de la version, extract
 
 Les versions sont publiées par release-please : la fusion de `develop` dans
 `master` met à jour une PR de release, dont la fusion crée le tag, la release
-GitHub et l'OXT de production (voir [docs/DEPLOY.md](docs/DEPLOY.md)).
+GitHub et le paquet neutre signé, que chaque Device Management adapte à l'import
+(voir [docs/DEPLOY.md](docs/DEPLOY.md) et [docs/pre-versions.md](docs/pre-versions.md)).
 
 ```bash
 # Déployer la version publiée, depuis son tag

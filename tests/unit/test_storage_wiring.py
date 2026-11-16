@@ -93,6 +93,14 @@ def test_seeded_transport_still_drives_tests(tmp_path):
     assert job._bootstrap_urls() == ["https://dm"]
 
 
+def test_the_example_address_of_a_neutral_package_is_not_a_dm(tmp_path):
+    seed_user_config(str(tmp_path), {"enabled": True,
+                                     "bootstrap_urls": [local_config.EXAMPLE_DM_URL]})
+    job = make_job(config_dir=str(tmp_path))
+    assert job._bootstrap_urls() == []
+    assert job._fetch_config(force=True) is None
+
+
 def test_revoked_dm_token_is_forgotten(tmp_path):
     job = make_job(config_dir=str(tmp_path))
     _fetch(job, {"config": {"llmToken": "tok-123456"}})

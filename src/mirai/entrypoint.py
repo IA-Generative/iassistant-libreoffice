@@ -156,7 +156,7 @@ import platform
 import shutil
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from . import credentials, feed_rewrite, local_config, log_setup
+from . import credentials, feed_rewrite, local_config, log_setup, package_version
 from .i18n import t as _t
 from .i18n import (
     get_locale as _i18n_get_locale,
@@ -988,23 +988,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return True
 
     def _bootstrap_urls(self):
-        """Ordered list of DM bootstrap base URLs (failover).
-
-        Reads the `bootstrap_urls` list when present; otherwise falls back to the
-        legacy single `bootstrap_url` string. Empty entries are dropped.
-        """
-        result = []
-        urls = self._get_config_from_file("bootstrap_urls", None)
-        if isinstance(urls, (list, tuple)):
-            for item in urls:
-                value = str(item or "").strip()
-                if value and value not in result:
-                    result.append(value)
-        if not result:
-            legacy = str(self._get_config_from_file("bootstrap_url", "") or "").strip()
-            if legacy:
-                result.append(legacy)
-        return result
+        """Ordered list of DM bootstrap base URLs (failover): `bootstrap_urls`,
+        else the legacy `bootstrap_url`; see local_config.dm_urls."""
+        return local_config.dm_urls(self._get_config_from_file("bootstrap_urls", None),
+                                    self._get_config_from_file("bootstrap_url", ""))
 
     def _failover_ordered_urls(self):
         """Bootstrap URLs with the DM that last answered tried first.
@@ -1274,7 +1261,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         une mise à jour native, notre propre description.xml décrit encore
         l'ancien paquet (LibreOffice le garde chargé jusqu'au redémarrage) :
         lire le registre, jamais son propre dossier. Repli sur description.xml
-        (tests, LibreOffice dégradé)."""
+        (tests, LibreOffice dégradé). Rendue dans l'écriture du Device
+        Management : une pré-version y est X.Y.Z-rc.N, pas le numéro à cinq
+        éléments de description.xml (package_version)."""
         try:
             pip = self.ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.deployment.PackageInformationProvider", self.ctx
@@ -1286,7 +1275,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     except Exception:
                         continue
                     if ident == _EXTENSION_IDENTIFIER and version.strip():
-                        return version.strip()
+                        return package_version.dm_version(version)
         except Exception as exc:
             if not getattr(self, "_registry_read_failure_logged", False):
                 log_to_file(f"_get_extension_version: registry read failed: {exc}")
@@ -1299,7 +1288,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 with open(desc_path, "r", encoding="utf-8") as f:
                     m = re.search(r'<version\s+value="([^"]+)"', f.read())
                     if m:
-                        return m.group(1)
+                        return package_version.dm_version(m.group(1))
         except Exception:
             pass
         return ""
@@ -2268,7 +2257,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _native_feed_offers(self, target_version):
         """Vrai si le feed de l'extension INSTALLÉE annonce exactement
-        target_version. Interrogé par LibreOffice lui-même
+        target_version, dans l'écriture de description.xml. Interrogé par LibreOffice lui-même
         (PackageInformationProvider.isUpdateAvailable, pile HTTP de LO — le
         même chemin que son contrôle périodique). Faux si bloc feed absent,
         feed injoignable, version divergente, ou erreur : la route dirigée prend
@@ -2299,7 +2288,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             if ident == _EXTENSION_IDENTIFIER:
                 announced = version
                 break
-        offers = announced == target
+        offers = announced == package_version.native_version(target)
         log_to_file(
             f"_native_feed_offers: target={target} announced={announced or '-'} offers={offers}")
         return offers
@@ -2409,7 +2398,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         continue
                     m = re.search(r'<version\s+value="([^"]+)"', text)
                     if m:
-                        entries.add((lu, m.group(1).strip()))
+                        entries.add((lu, package_version.dm_version(m.group(1))))
         except Exception as exc:
             log_to_file(f"_cached_package_versions: {exc}")
         return entries

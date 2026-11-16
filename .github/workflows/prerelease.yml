@@ -1,0 +1,61 @@
+# Pré-versions : X.Y.Z-rc.N à chaque push sur develop, X.Y.Z-dev.N sur
+# lancement manuel depuis une branche exp/**. X.Y.Z est la prochaine version de
+# master, N le numéro de ce run. Rien n'est committé : le numéro est inscrit
+# dans le paquet au build, et le tag v<version> est posé sur le commit
+# construit. Voir docs/pre-versions.md.
+name: Pre-release
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: prerelease-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Compute the pre-release number
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Compute the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            push:refs/heads/develop)            KIND=rc ;;
+            workflow_dispatch:refs/heads/exp/*) KIND=dev ;;
+            *)
+              echo "::error::Lancé depuis $GITHUB_REF ($GITHUB_EVENT_NAME) : seules les branches exp/** produisent une version d'essai, et develop une version candidate."
+              exit 1 ;;
+          esac
+          VERSION="$(bash scripts/prerelease-version.sh "$KIND" "$GITHUB_RUN_NUMBER")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Pré-version \`$VERSION\` (tag \`v$VERSION\`) depuis \`$GITHUB_REF_NAME\`." >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    needs: version
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-package.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      tag: ${{ needs.version.outputs.tag }}
+      prerelease: true

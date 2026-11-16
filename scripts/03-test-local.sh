@@ -14,7 +14,7 @@ done
 echo "[2/6] Python syntax checks"
 find "$ROOT_DIR/src" "$ROOT_DIR/main.py" -name '*.py' -print0 | xargs -0 "$PYTHON" -m py_compile
 
-for profile in docker kubernetes local-llm dev; do
+for profile in docker kubernetes local-llm dev neutral; do
   f="$ROOT_DIR/config/profiles/config.default.$profile.json"
   [ -f "$f" ] && "$PYTHON" -m json.tool "$f" >/dev/null
 done
