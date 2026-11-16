@@ -107,11 +107,13 @@ def remember_dm_tokens(settings):
 
 SERVICE = "MIrAI-LibreOffice"
 STORED_KEYS = ("relay_client_id", "relay_client_key", "relay_key_expires_at",
-               "refresh_token", "proxy_password", "llm_api_tokens")
+               "relay_dm_base", "refresh_token", "proxy_password", "llm_api_tokens")
 # Émis par un DM : liés à l'empreinte du transport (LocalConfig.transport_scope).
 SCOPED_KEYS = frozenset({"relay_client_id", "relay_client_key", "relay_key_expires_at",
-                         "refresh_token"})
+                         "relay_dm_base", "refresh_token"})
 MEMORY_KEYS = frozenset({"access_token", "access_token_expires_at"})
+# La paire relais et son émetteur : effacés ensemble quand un autre DM prend la main.
+RELAY_KEYS = ("relay_client_id", "relay_client_key", "relay_key_expires_at", "relay_dm_base")
 
 
 class MemoryStore:
@@ -319,3 +321,13 @@ def wipe():
     for name in STORED_KEYS:
         delete_secret(name)
     forget_all()
+
+
+def drop_dm_issued():
+    """Efface ce que le DM a émis (paire relais, émetteur, jetons courts), coffre et
+    mémoire ; la session Keycloak et le mot de passe proxy restent."""
+    for name in RELAY_KEYS:
+        delete_secret(name)
+        forget(name)
+    forget(DM_LLM_TOKEN)
+    forget(DM_TELEMETRY_KEY)

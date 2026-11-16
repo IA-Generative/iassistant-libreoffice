@@ -9,12 +9,27 @@ import threading
 
 from .. import credentials, local_config, log_setup
 
+# Un enrôlement de fond rend la main en une ou deux secondes (refresh Keycloak,
+# POST /enroll) ; au-delà, on le laisse finir sans l'attendre.
+ENROLLMENT_WAIT_SECONDS = 10
+
 
 class ShellRuntime:
     def __init__(self):
         self.enrollment_dismissed = False
         self.enrollment_wizard_active = False
         self.enrollment_wizard_lock = threading.Lock()
+        # Le DM fait tourner la paire relais à chaque POST /enroll : deux enrôlements
+        # concurrents laisseraient le poste avec une paire révoquée. Un seul à la
+        # fois dans le processus ; le compteur dit à celui qui a attendu qu'un
+        # autre a abouti entre-temps.
+        self.enrollment_lock = threading.Lock()
+        self.enrollment_generation = 0
+        # Bases DM (normalisées) qui n'ont répondu à aucune récupération de config
+        # dans ce processus : essayées en dernier et ignorées par la passation,
+        # sinon chaque récupération paierait leur délai ; une base redevient saine
+        # dès qu'elle répond.
+        self.unreachable_dm_bases = set()
 
         self.update_in_progress = False
         self.update_lock = threading.Lock()
@@ -60,6 +75,14 @@ class ShellRuntime:
         self.unhandled_reported = set()
         # Anti-tempête LlmRelayError : heure du dernier envoi par code d'erreur.
         self.llm_error_last_sent = {}
+
+    def enrollment_settled(self):
+        """Attend la fin de l'enrôlement en cours, au plus ENROLLMENT_WAIT_SECONDS ;
+        faux s'il tourne encore."""
+        if not self.enrollment_lock.acquire(timeout=ENROLLMENT_WAIT_SECONDS):
+            return False
+        self.enrollment_lock.release()
+        return True
 
 
 _current = ShellRuntime()

@@ -14,7 +14,7 @@ Tout vit dans un seul dossier du profil LibreOffice : `<profil LibreOffice>/user
 
 | Fichier | Contenu |
 |---|---|
-| `settings.json` | Préférences, état local, identité de l'appareil (`extensionUUID`, `plugin_uuid`), drapeau `enrolled` |
+| `settings.json` | Préférences, état local, identité de l'appareil (`extensionUUID`, `plugin_uuid`), drapeau `enrolled`, liste des DM annoncée par le Device Management (`dm_bootstrap_urls`), dernier DM ayant répondu (`last_bootstrap_url`) |
 | `dm_snapshot.json` | Dernière réponse `/config` du Device Management, secrets vidés |
 | `install_state.json` | Version installée, dossier du paquet, empreinte du transport (environnement visé par l'OXT) |
 | `assistant_conversation.json` | Historique de la conversation de l'assistant |
@@ -31,12 +31,12 @@ Aucun secret n'est écrit dans ces fichiers. Les versions qui embarquaient l'anc
 
 - Les jetons de courte durée (`llmToken` du DM, `telemetryKey`, `access_token` Keycloak) ne vivent qu'en mémoire du processus.
 - Les secrets de longue durée vont dans le coffre du système :
-  - **Windows** : Gestionnaire d'identification, entrées génériques `MIrAI-LibreOffice/relay_client_id`, `MIrAI-LibreOffice/relay_client_key`, `MIrAI-LibreOffice/relay_key_expires_at`, `MIrAI-LibreOffice/refresh_token`, `MIrAI-LibreOffice/proxy_password`, `MIrAI-LibreOffice/llm_api_tokens`. Persistance « entreprise » (suit le profil itinérant), avec repli sur « ordinateur local ».
-  - **macOS** : trousseau, service `MIrAI-LibreOffice`, compte = nom de la clé (mêmes six noms).
+  - **Windows** : Gestionnaire d'identification, entrées génériques `MIrAI-LibreOffice/relay_client_id`, `MIrAI-LibreOffice/relay_client_key`, `MIrAI-LibreOffice/relay_key_expires_at`, `MIrAI-LibreOffice/relay_dm_base`, `MIrAI-LibreOffice/refresh_token`, `MIrAI-LibreOffice/proxy_password`, `MIrAI-LibreOffice/llm_api_tokens`. Persistance « entreprise » (suit le profil itinérant), avec repli sur « ordinateur local ».
+  - **macOS** : trousseau, service `MIrAI-LibreOffice`, compte = nom de la clé (mêmes sept noms).
   - **Linux** : mémoire seulement. L'assistant d'enrôlement se rejoue à chaque session LibreOffice.
 - Ce que le coffre apporte : les secrets sont chiffrés au repos par le système et restent hors du profil LibreOffice (une copie du profil n'en emporte aucun). Il ne les cache pas aux autres programmes de la même session : tout processus de l'utilisateur peut lire un identifiant générique du Gestionnaire d'identification ; sous macOS, un élément créé par l'outil `security` reste lisible sans confirmation par tout programme de l'utilisateur qui passe par ce même outil.
 - Si le coffre refuse une écriture, le secret est gardé en mémoire pour la session.
-- La paire relais et le `refresh_token` sont liés à l'environnement visé : l'ensemble des adresses DM de l'OXT (`bootstrap_urls` et `bootstrap_url`, sans égard à l'ordre, à la casse de l'hôte ni à la barre finale) et son `config_path` (donc le `?profile=`). `enabled` et `bootstrap_insecure_urls` n'en font pas partie ; ajouter ou retirer une adresse de repli change d'environnement.
+- La paire relais et le `refresh_token` sont liés à l'environnement visé : l'ensemble des adresses DM de l'OXT (`bootstrap_urls` et `bootstrap_url`, sans égard à l'ordre, à la casse de l'hôte ni à la barre finale) et son `config_path` (donc le `?profile=`). `enabled` et `bootstrap_insecure_urls` n'en font pas partie ; ajouter ou retirer une adresse de repli change d'environnement. La paire est en outre liée au DM qui l'a émise (`relay_dm_base`) : elle n'est présentée qu'à lui, et une passation vers un autre DM l'efface avant le ré-enrôlement.
 
 ## Mise à jour
 
@@ -52,7 +52,7 @@ Tout est conservé ; seuls les caches dérivés sont recalculés. Un OXT constru
 ```powershell
 Remove-Item -Recurse -Force "$env:APPDATA\LibreOffice\4\user\config\mirai" -ErrorAction SilentlyContinue
 Remove-Item -Force "$env:APPDATA\LibreOffice\4\user\config\config.json" -ErrorAction SilentlyContinue
-foreach ($n in "relay_client_id","relay_client_key","relay_key_expires_at","refresh_token","proxy_password","llm_api_tokens") {
+foreach ($n in "relay_client_id","relay_client_key","relay_key_expires_at","relay_dm_base","refresh_token","proxy_password","llm_api_tokens") {
     cmdkey /delete:"MIrAI-LibreOffice/$n" 2>$null | Out-Null
 }
 ```
@@ -60,7 +60,7 @@ foreach ($n in "relay_client_id","relay_client_key","relay_key_expires_at","refr
 À confirmer sur un poste : que `cmdkey /delete:<cible>` supprime bien des identifiants de type générique. Contrôle : `cmdkey /list | findstr MIrAI-LibreOffice` ne doit plus rien renvoyer. Sinon, utiliser la forme `LegacyGeneric` :
 
 ```powershell
-foreach ($n in "relay_client_id","relay_client_key","relay_key_expires_at","refresh_token","proxy_password","llm_api_tokens") {
+foreach ($n in "relay_client_id","relay_client_key","relay_key_expires_at","relay_dm_base","refresh_token","proxy_password","llm_api_tokens") {
     cmdkey /delete:"LegacyGeneric:target=MIrAI-LibreOffice/$n" 2>$null | Out-Null
 }
 ```

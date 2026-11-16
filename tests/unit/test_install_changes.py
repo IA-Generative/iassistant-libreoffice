@@ -60,7 +60,8 @@ def test_upgrade_keeps_settings_identity_and_credentials_drops_caches(tmp_path):
 
 def test_new_environment_drops_bound_credentials(tmp_path):
     seed_user_config(str(tmp_path), {"plugin_uuid": "u-1", "enrolled": True,
-                                     "relay_client_id": "rc", "refresh_token": "rt"})
+                                     "relay_client_id": "rc", "refresh_token": "rt",
+                                     "relay_dm_base": "https://dm-a.example"})
     job = make_job(config_dir=str(tmp_path))
     job._apply_install_changes({"transport"})
     settings = read_user_config(str(tmp_path))
@@ -68,6 +69,7 @@ def test_new_environment_drops_bound_credentials(tmp_path):
     assert "enrolled" not in settings
     assert job._get_config_from_file("relay_client_id", "") == ""
     assert job._get_config_from_file("refresh_token", "") == ""
+    assert job._get_config_from_file("relay_dm_base", "") == ""
 
 
 def test_refused_purge_after_an_environment_change_is_retried(tmp_path, monkeypatch):
@@ -105,8 +107,10 @@ def test_first_run_changes_nothing(tmp_path):
     assert read_user_config(str(tmp_path))["llm_tool_mode_detected"] == "json"
 
 
-def test_stale_last_bootstrap_url_is_ignored(tmp_path):
+def test_a_persisted_winner_outside_the_baked_list_stays_the_active_dm(tmp_path):
+    """Après une passation, le DM qui a enrôlé le poste n'est pas dans l'OXT : il
+    reste le DM actif tant qu'un autre n'a pas répondu."""
     seed_user_config(str(tmp_path), {"bootstrap_urls": ["https://new"],
                                      "last_bootstrap_url": "https://old"})
     job = make_job(config_dir=str(tmp_path))
-    assert job._active_bootstrap_url() == "https://new"
+    assert job._active_bootstrap_url() == "https://old"

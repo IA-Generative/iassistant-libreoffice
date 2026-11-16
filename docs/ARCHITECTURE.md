@@ -334,6 +334,19 @@ application (Writer ou Calc) dans le contexte (cap ~4 000 caractères).
 L'onglet « Conversation » de la palette affiche le fil d'une seule application
 et suit le document actif (activation de la fenêtre ou début de run).
 
+## Bases DM — `shell/dm_bases.py`
+
+Fonctions pures, sans UNO ni `self`, appelées par les enveloppes `_failover_ordered_urls`,
+`_active_bootstrap_url`, `_is_insecure_bootstrap_url` de `MainJob` : ordre des candidats (liste
+annoncée par le DM, puis celle de l'OXT, puis le dernier gagnant en repli ; les bases que le
+processus a vues échouer en queue, `ShellRuntime.unreachable_dm_bases`), bases à essayer dans la
+même récupération quand le DM qui répond en nomme d'autres avant lui (`ahead_of`, un seul saut),
+DM actif, détection d'une passation (`is_switch`), hôtes sans vérification TLS. La tentative HTTP
+par base et le parcours des candidats vivent dans `shell/config_fetch.py`, qui reçoit les en-têtes
+(relais compris) et de quoi ouvrir la requête, sans le `MainJob`. L'enrôlement est unique par processus
+(`ShellRuntime.enrollment_lock`, `enrollment_generation`) parce que le DM fait tourner la paire à
+chaque `POST /enroll`.
+
 ## Fichiers locaux et secrets — modules partagés de `src/mirai/`
 
 - `local_config.py` : dossier `<UserConfig>/mirai/`, écritures atomiques, aucune valeur secrète
