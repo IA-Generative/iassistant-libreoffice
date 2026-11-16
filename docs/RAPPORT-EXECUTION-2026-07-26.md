@@ -267,7 +267,7 @@ document intact — exactement le « ça ne fait rien » de la famille 4.
 - Le journal des actions affichant `✓ Lecture du document` là où il affichait
   `✗ … maximum 20000`.
 
-C'est précisément l'objet de `docs/TEST-HUMAIN-2026-07-26.md`.
+C'est précisément l'objet de `docs/RECETTE.md`.
 
 ## Incident du 2026-07-26 — le crash « latent » ne l'était pas
 
@@ -409,7 +409,7 @@ se comportent-elles pas pareil ?*
 1. A-02 (une condition, gros effet), puis A-03.
 2. Étape 8 du plan : supprimer le cœur legacy — ce qui règle T-02/03/04 et une bonne part de
    Q-01/Q-02 par soustraction.
-3. Dérouler `TEST-HUMAIN-2026-07-26.md` en interactif et corriger ce qu'il révèle —
+3. Dérouler `RECETTE.md` en interactif et corriger ce qu'il révèle —
    en priorité les scénarios 3.9 à 3.11 et 8.2, ajoutés après la session de recette
    et **non encore validés par un humain**.
 4. Étape 20ter : découpage d'`entrypoint.py` en mixins.
