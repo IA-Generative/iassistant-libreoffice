@@ -1061,7 +1061,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             else:
                 log_to_file("DM config fetch: proxy disabled, skipping proxy retry")
 
-            last_error = "unknown"
             headers = {"Accept": "application/json",
                        "X-Plugin-Version": self._get_extension_version() or "unknown",
                        "X-Platform-Type": "libreoffice"}
@@ -1073,30 +1072,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 headers["X-Client-UUID"] = client_uuid
             headers = _with_user_agent(headers)
 
-            # Les bases que la gagnante nomme avant elle sont essayées dans la même
-            # récupération, en un seul saut : la liste rapportée par le saut attend
-            # la récupération suivante.
-            winner, queue, hopped = None, list(base_urls), False
-            while queue:
-                base_url = queue.pop(0)
-                got, error = config_fetch.attempt(self, base_url, config_path, attempts,
-                                                  fetch_timeout, headers)
-                if error:
-                    last_error = error
-                if dm_bases.mark_reachability(self.runtime.unreachable_dm_bases, base_url, got is not None):
-                    log_to_file(f"DM base {base_url}: " + ("reachable again" if got
-                                else "unreachable, tried last for the rest of the session"))
-                if got is None:
-                    continue
-                winner = (base_url, got)
-                if hopped:
-                    break
-                hopped = True
-                queue = dm_bases.ahead_of(dm_bases.announced_list(got[0]), base_url,
-                                          self.runtime.unreachable_dm_bases)
-                if queue:
-                    log_to_file(f"DM {base_url} names {queue} ahead of itself: trying them now")
+            def fetch_from(base):
+                return config_fetch.attempt(
+                    base, config_path, attempts, {**headers, **self._relay_headers(base)},
+                    lambda request, use_proxy: self._urlopen(
+                        request, context=self.get_ssl_context(base), timeout=fetch_timeout,
+                        use_proxy=use_proxy))
 
+            winner, last_error = config_fetch.first_answer(
+                base_urls, fetch_from, self.runtime.unreachable_dm_bases)
             if winner is None:
                 self._config_last_failure_at = now
                 log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")

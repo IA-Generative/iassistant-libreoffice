@@ -342,8 +342,8 @@ annoncée par le DM, puis celle de l'OXT, puis le dernier gagnant en repli ; les
 processus a vues échouer en queue, `ShellRuntime.unreachable_dm_bases`), bases à essayer dans la
 même récupération quand le DM qui répond en nomme d'autres avant lui (`ahead_of`, un seul saut),
 DM actif, détection d'une passation (`is_switch`), hôtes sans vérification TLS. La tentative HTTP
-par base vit dans `shell/config_fetch.py`, qui reçoit le `MainJob` pour ses en-têtes relais, son
-contexte TLS et son transport. L'enrôlement est unique par processus
+par base et le parcours des candidats vivent dans `shell/config_fetch.py`, qui reçoit les en-têtes
+(relais compris) et de quoi ouvrir la requête, sans le `MainJob`. L'enrôlement est unique par processus
 (`ShellRuntime.enrollment_lock`, `enrollment_generation`) parce que le DM fait tourner la paire à
 chaque `POST /enroll`.
 
