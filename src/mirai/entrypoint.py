@@ -6151,32 +6151,26 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _needs_first_enrollment(self):
         """True si le wizard d'enrôlement doit s'ouvrir (DM actif) : jamais
         enrôlé et sans session valide, ou enrôlé sans creds relay ni session
-        valide."""
+        valide. Un enrôlement de fond en cours décide d'abord : son issue est
+        attendue, un temps borné, plutôt que d'ouvrir l'assistant pendant la
+        tentative silencieuse ou de le taire quand elle échoue."""
+        def lacking():
+            enrolled = self._as_bool(self._get_config_from_file("enrolled", False))
+            access_token = str(self._get_config_from_file("access_token", "")).strip()
+            has_login = bool(access_token) and not self._token_is_expired(access_token)
+            # Enrôlé « à moitié » : sans creds relay le DM ne mint aucun
+            # llmToken, et le ré-enrôlement de fond a lui-même besoin d'une
+            # session valide (il dérive l'email du token). Sans les deux, le
+            # poste ne peut plus sortir de l'impasse tout seul → wizard.
+            return not has_login and (not enrolled or not self._relay_credentials_valid())
+
         try:
             # No enrollment needed if device management is disabled
             if not self._device_management_enabled():
                 return False
-            # Un enrôlement de fond est en cours : pas d'assistant qui clignote
-            # pendant la tentative silencieuse.
-            if self.runtime.enrollment_lock.locked():
+            if not (lacking() and self.runtime.enrollment_settled() and lacking()):
                 return False
-            enrolled = self._as_bool(self._get_config_from_file("enrolled", False))
-            access_token = str(self._get_config_from_file("access_token", "")).strip()
-            has_login = bool(access_token) and not self._token_is_expired(access_token)
-            if enrolled:
-                # Enrôlé « à moitié » : sans creds relay le DM ne mint aucun
-                # llmToken, et le ré-enrôlement de fond a lui-même besoin d'une
-                # session valide (il dérive l'email du token). Sans les deux, le
-                # poste ne peut plus sortir de l'impasse tout seul → wizard.
-                if not self._relay_credentials_valid() and not has_login:
-                    log_to_file(
-                        "[ENROLL] enrolled=True mais ni creds relay ni session "
-                        "valide — wizard d'enrôlement requis"
-                    )
-                    return True
-                return False
-            if has_login:
-                return False
+            log_to_file("[ENROLL] ni session valide ni creds relay — wizard d'enrôlement requis")
             return True
         except Exception:
             return False

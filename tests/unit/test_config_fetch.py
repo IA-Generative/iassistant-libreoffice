@@ -484,7 +484,8 @@ def test_an_enrollment_that_waited_for_the_lock_does_nothing_once_another_succee
     assert second._get_config_from_file("relay_client_id", "") == "id-" + B
 
 
-def test_the_wizard_gate_stays_closed_while_an_enrollment_is_running(tmp_path):
+def test_the_wizard_gate_stays_closed_while_an_enrollment_outlasts_the_wait(tmp_path, monkeypatch):
+    monkeypatch.setattr(shell_runtime, "ENROLLMENT_WAIT_SECONDS", 0.05)
     seed_user_config(str(tmp_path), {"enabled": True})
     job = make_job(config_dir=str(tmp_path))
     lock = shell_runtime.get().enrollment_lock
@@ -494,6 +495,43 @@ def test_the_wizard_gate_stays_closed_while_an_enrollment_is_running(tmp_path):
     finally:
         lock.release()
     assert job._needs_first_enrollment() is True
+
+
+def test_the_wizard_opens_once_a_background_attempt_ends_without_session(tmp_path):
+    seed_user_config(str(tmp_path), {"enabled": True})
+    attempt = _enrolling(make_job(config_dir=str(tmp_path)))
+    refreshing = threading.Event()
+
+    def refresh_refused(*_args, **_kwargs):
+        refreshing.set()
+        time.sleep(0.2)                                       # Keycloak refuse le refresh_token
+        return None
+
+    attempt._ensure_access_token = MagicMock(side_effect=refresh_refused)
+    worker = threading.Thread(target=attempt._ensure_device_management_state)
+    worker.start()
+    assert refreshing.wait(5)
+    assert make_job(config_dir=str(tmp_path))._needs_first_enrollment() is True
+    worker.join(5)
+
+
+def test_the_wizard_stays_closed_once_a_background_attempt_enrolls(tmp_path):
+    seed_user_config(str(tmp_path), {"enabled": True})
+    attempt = _enrolling(make_job(config_dir=str(tmp_path)))
+    enrolling = threading.Event()
+    pair = attempt._urlopen.return_value
+
+    def slow_enroll(_request, **_kwargs):
+        enrolling.set()
+        time.sleep(0.2)
+        return pair
+
+    attempt._urlopen = MagicMock(side_effect=slow_enroll)
+    worker = threading.Thread(target=attempt._ensure_device_management_state)
+    worker.start()
+    assert enrolling.wait(5)
+    assert make_job(config_dir=str(tmp_path))._needs_first_enrollment() is False
+    worker.join(5)
 
 
 def test_a_switch_without_session_leaves_the_device_unenrolled_for_the_wizard(tmp_path):
