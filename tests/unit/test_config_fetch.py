@@ -208,6 +208,22 @@ def test_the_announced_list_survives_an_upgrade_and_not_a_transport_change(tmp_p
     assert "dm_bootstrap_urls" not in read_user_config(str(tmp_path))
 
 
+def test_the_last_dm_to_answer_survives_an_upgrade_and_not_a_transport_change(tmp_path):
+    dms = FakeDms()
+    dms.announce[A] = dms.announce[B] = None              # DM sans DM_BOOTSTRAP_URLS
+    seed_user_config(str(tmp_path), {"enabled": True, "bootstrap_urls": [A, B]})
+    job = _wired(make_job(config_dir=str(tmp_path)), dms)
+    dms.down.add(A)
+    job._fetch_config(force=True)                         # repli sur B, qui enrôle le poste
+    _enrolled_with(job, dms, B)
+    job._apply_install_changes({"version", "package"})
+    upgraded = _restarted(tmp_path, dms)
+    assert upgraded._active_bootstrap_url() == B          # avant toute récupération
+    assert upgraded._relay_credentials_valid() is True
+    upgraded._apply_install_changes({"transport"})
+    assert "last_bootstrap_url" not in read_user_config(str(tmp_path))
+
+
 def test_a_relative_artifact_is_downloaded_in_the_announced_order(tmp_path):
     job = _device(tmp_path, FakeDms())
     job.set_config("dm_bootstrap_urls", [B])
@@ -595,8 +611,8 @@ def test_a_successful_switch_re_enrollment_binds_the_pair_to_the_new_dm(tmp_path
 
 
 def test_a_status_report_never_carries_the_pair_of_another_dm(tmp_path):
-    """Après une mise à jour de l'OXT, le DM actif est la tête de la liste annoncée
-    alors que la paire vient d'un autre DM : elle ne lui est pas présentée."""
+    """Sans dernier DM connu, le DM actif est la tête de la liste annoncée alors
+    que la paire vient d'un autre DM : elle ne lui est pas présentée."""
     seed_user_config(str(tmp_path), {"enabled": True, "bootstrap_urls": [A],
                                      "dm_bootstrap_urls": [B, A],
                                      "relay_client_id": "relay-" + A,

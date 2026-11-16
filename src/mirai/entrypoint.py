@@ -555,12 +555,12 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     # Caches dérivés d'une version, d'un modèle ou d'un DM : jamais conservés
     # d'une installation à l'autre.
     _DERIVED_CACHE_KEYS = ("assistant_model_capabilities", "llm_tool_mode_detected",
-                           "calc_transform_suggestions_cache", "last_bootstrap_url")
+                           "calc_transform_suggestions_cache")
     # Émis par un DM précis : sans valeur pour un autre environnement.
     _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
                                "relay_key_expires_at", "relay_dm_base", "refresh_token",
                                "access_token", "access_token_expires_at",
-                               "dm_bootstrap_urls")
+                               "dm_bootstrap_urls", "last_bootstrap_url")
 
     def __init__(self, ctx):
         log_to_file("=== MainJob.__init__ called ===")
