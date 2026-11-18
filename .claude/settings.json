@@ -3,7 +3,6 @@
     "allow": [
       "Bash(python3 -m venv .venv)",
       "Bash(.venv/bin/pip install:*)",
-      "Bash(.venv/bin/pytest tests/unit/test_security_flow.py -v)",
       "Bash(.venv/bin/pytest -q tests/unit)",
       "Bash(bash scripts/03-test-local.sh)",
       "Bash(.venv/bin/pytest tests/unit/ -v)"

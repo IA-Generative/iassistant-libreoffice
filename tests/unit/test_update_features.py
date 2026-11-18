@@ -6,63 +6,21 @@ Run with:
     pytest tests/unit/test_update_features.py -v --tb=short
 """
 import hashlib
-import json
-import time
-from unittest.mock import MagicMock, patch
+import threading
+from unittest.mock import MagicMock
 
 # ── Stubs must be installed before importing entrypoint ──────────────
+from tests.stubs.helpers import enriched_v2, http_response, make_update_directive
 from tests.stubs.uno_stubs import install, make_job
 
 install()
 
-from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 # ── helpers ──────────────────────────────────────────────────────────
 
-def _response(data: bytes, status: int = 200):
-    """Build a minimal HTTP response mock for _urlopen."""
-    resp = MagicMock()
-    resp.read.return_value = data
-    resp.status = status
-    resp.headers = MagicMock()
-    resp.headers.items.return_value = []
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
-
-
-def _json_response(obj, status: int = 200):
-    return _response(json.dumps(obj).encode(), status)
-
-
-def _enriched_v2(features=None, update=None):
-    """Build a minimal EnrichedConfigResponse (schema_version=2)."""
-    return {
-        "meta": {"schema_version": 2, "generated_at": "2026-03-15T00:00:00Z"},
-        "config": {},
-        "features": features or {},
-        "update": update,
-    }
-
-
-def _make_update_directive(action="update", target="2.0.0", current="1.0.0",
-                            checksum=None, artifact_url="/binaries/lo/2.0.0/mirai.oxt",
-                            urgency="normal", campaign_id=1):
-    d = {
-        "action": action,
-        "target_version": target,
-        "current_version": current,
-        "artifact_url": artifact_url,
-        "checksum": checksum or "",
-        "urgency": urgency,
-        "campaign_id": campaign_id,
-    }
-    return d
-
-
-# ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
-
-def test_lo04_fetch_v2_populates_features_cache():
+def _dm_job(payload):
+    """Job dont le fetch de config reçoit *payload* du DM."""
     job = make_job()
     job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
         "bootstrap_url": "http://localhost:9999",
@@ -76,9 +34,14 @@ def test_lo04_fetch_v2_populates_features_cache():
     job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
     job._persist_bootstrap_config = MagicMock()
     job._schedule_update = MagicMock()
+    job._urlopen = MagicMock(return_value=http_response(payload))
+    return job
 
-    payload = _enriched_v2(features={"writer_assistant": True, "calc_assistant": False})
-    job._urlopen = MagicMock(return_value=_json_response(payload))
+
+# ── TC-LO-04 : fetch v2 popule _features_cache ───────────────────────
+
+def test_lo04_fetch_v2_populates_features_cache():
+    job = _dm_job(enriched_v2(features={"writer_assistant": True, "calc_assistant": False}))
 
     result = job._fetch_config(force=True)
 
@@ -89,23 +52,8 @@ def test_lo04_fetch_v2_populates_features_cache():
 # ── TC-LO-05 : fetch v2 schedule_update appelé si action présente ────
 
 def test_lo05_fetch_v2_calls_schedule_update():
-    job = make_job()
-    job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
-        "bootstrap_url": "http://localhost:9999",
-        "config_path": "/config/lo/config.json",
-        "enabled": True,
-        "proxy_enabled": False,
-    }.get(k, d))
-    job._relay_headers = MagicMock(return_value={})
-    job._get_extension_version = MagicMock(return_value="1.0.0")
-    job._get_lo_version = MagicMock(return_value="24.8.0")
-    job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
-    job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
-
-    directive = _make_update_directive()
-    payload = _enriched_v2(features={}, update=directive)
-    job._urlopen = MagicMock(return_value=_json_response(payload))
+    directive = make_update_directive()
+    job = _dm_job(enriched_v2(features={}, update=directive))
 
     job._fetch_config(force=True)
 
@@ -115,22 +63,7 @@ def test_lo05_fetch_v2_calls_schedule_update():
 # ── TC-LO-06 : fetch v2 update=null → schedule_update non appelé ────
 
 def test_lo06_fetch_v2_no_update_directive():
-    job = make_job()
-    job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
-        "bootstrap_url": "http://localhost:9999",
-        "config_path": "/config/lo/config.json",
-        "enabled": True,
-        "proxy_enabled": False,
-    }.get(k, d))
-    job._relay_headers = MagicMock(return_value={})
-    job._get_extension_version = MagicMock(return_value="1.0.0")
-    job._get_lo_version = MagicMock(return_value="24.8.0")
-    job._ensure_plugin_uuid = MagicMock(return_value="test-uuid")
-    job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
-
-    payload = _enriched_v2(features={}, update=None)
-    job._urlopen = MagicMock(return_value=_json_response(payload))
+    job = _dm_job(enriched_v2(features={}, update=None))
 
     job._fetch_config(force=True)
 
@@ -140,24 +73,9 @@ def test_lo06_fetch_v2_no_update_directive():
 # ── TC-LO-07 : fetch legacy (schema_version absent) → features_cache inchangé
 
 def test_lo07_fetch_legacy_does_not_touch_features_cache():
-    job = make_job()
-    job._features_cache = {"existing_flag": True}
-    job._get_config_from_file = MagicMock(side_effect=lambda k, d=None, **kw: {
-        "bootstrap_url": "http://localhost:9999",
-        "config_path": "/config/lo/config.json",
-        "enabled": True,
-        "proxy_enabled": False,
-    }.get(k, d))
-    job._relay_headers = MagicMock(return_value={})
-    job._get_extension_version = MagicMock(return_value="")
-    job._get_lo_version = MagicMock(return_value="")
-    job._ensure_plugin_uuid = MagicMock(return_value="")
-    job._persist_bootstrap_config = MagicMock()
-    job._schedule_update = MagicMock()
-
     # Legacy flat response without meta.schema_version
-    legacy_payload = {"config": {"telemetryEnabled": False}, "update_url": "http://old"}
-    job._urlopen = MagicMock(return_value=_json_response(legacy_payload))
+    job = _dm_job({"config": {"telemetryEnabled": False}, "update_url": "http://old"})
+    job._features_cache = {"existing_flag": True}
 
     job._fetch_config(force=True)
 
@@ -170,7 +88,7 @@ def test_lo07_fetch_legacy_does_not_touch_features_cache():
 
 def test_lo08_update_not_retriggered_if_in_progress():
     job = make_job()
-    MainJob._update_in_progress_cls = True
+    shell_runtime.get().update_in_progress = True
 
     called = []
 
@@ -178,15 +96,17 @@ def test_lo08_update_not_retriggered_if_in_progress():
         called.append(directive)
 
     job._perform_update = fake_perform
-    job._schedule_update(_make_update_directive())
+    before = set(threading.enumerate())
+    job._schedule_update(make_update_directive())
+    for thread in set(threading.enumerate()) - before:
+        thread.join(5)
 
-    time.sleep(0.1)
     assert called == [], "perform_update should not be called when already in progress"
 
 
 # ── TC-LO-09 : _perform_update checksum OK → install ────────────────
 
-def test_lo09_perform_update_checksum_ok_stages():
+def test_lo09_perform_update_checksum_ok_stages(fast_clock):
     """checksum OK → l'artefact est stagé (statut 'deferred' rapporté — le
     rapport « installed » n'arrive qu'à la réconciliation post-redémarrage,
     quand la nouvelle version est réellement active). L'install
@@ -202,27 +122,26 @@ def test_lo09_perform_update_checksum_ok_stages():
     job._report_update_status = MagicMock()
     job._install_and_restart_in_process = MagicMock()  # ne doit PAS être appelé au staging
 
-    directive = _make_update_directive(
+    directive = make_update_directive(
         action="update",
         target="2.0.0",
         checksum=expected_checksum,
         artifact_url="/binaries/lo/2.0.0/mirai.oxt",
     )
-    job._urlopen = MagicMock(return_value=_response(fake_binary))
+    job._urlopen = MagicMock(return_value=http_response(fake_binary))
 
-    with patch("src.mirai.entrypoint.time.sleep"):
-        job._perform_update(directive)
+    job._perform_update(directive)
 
     statuses = [c.args[1] for c in job._report_update_status.call_args_list if len(c.args) > 1]
     assert "deferred" in statuses                  # stagé, install à suivre
     assert "installed" not in statuses             # véridique : pas encore actif
     job._install_and_restart_in_process.assert_not_called()  # pas d'install au staging
-    assert MainJob._update_in_progress_cls is False
+    assert shell_runtime.get().update_in_progress is False
 
 
 # ── TC-LO-09b : download failover multi-bootstrap ───────────────────
 
-def test_lo09b_download_fails_over_to_next_bootstrap():
+def test_lo09b_download_fails_over_to_next_bootstrap(fast_clock):
     """Si la 1re base bootstrap est injoignable (DGX hors réseau : Errno 8), le
     download bascule sur la suivante au lieu d'abandonner (bug observé : figé sur
     l'hôte GPU interne)."""
@@ -241,21 +160,20 @@ def test_lo09b_download_fails_over_to_next_bootstrap():
         tried.append(url)
         if "onyxia" in url:
             raise OSError("nodename nor servname provided, or not known")
-        return _response(fake_binary)
+        return http_response(fake_binary)
 
     job._urlopen = _fake_urlopen
 
-    directive = _make_update_directive(
+    directive = make_update_directive(
         action="update", target="0.0.1.0.23", checksum=checksum,
         artifact_url="/catalog/mirai-libreoffice/download",
     )
-    with patch("src.mirai.entrypoint.time.sleep"):
-        job._perform_update(directive)
+    job._perform_update(directive)
 
     assert any("onyxia" in u for u in tried), "doit d'abord tenter la 1re base"
     assert "https://scaleway.ok/catalog/mirai-libreoffice/download" in tried, \
         "doit basculer (failover) sur la base suivante"
-    assert MainJob._update_in_progress_cls is False
+    assert shell_runtime.get().update_in_progress is False
 
 
 def test_active_bootstrap_url_prefers_persisted_last_good():
@@ -283,8 +201,8 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
 
     job._install_and_restart_in_process = MagicMock()
 
-    directive = _make_update_directive(checksum=wrong_checksum)
-    job._urlopen = MagicMock(return_value=_response(fake_binary))
+    directive = make_update_directive(checksum=wrong_checksum)
+    job._urlopen = MagicMock(return_value=http_response(fake_binary))
 
     job._perform_update(directive)
 
@@ -294,18 +212,18 @@ def test_lo10_perform_update_checksum_mismatch_no_install():
 
 # ── TC-LO-11 : _perform_update libère flag sur exception ─────────────
 
-def test_lo11_perform_update_releases_flag_on_exception():
+def test_lo11_perform_update_releases_flag_on_exception(fast_clock):
     job = make_job()
     job._get_config_from_file = MagicMock(return_value="http://localhost:9999")
 
     import urllib.error
     job._urlopen = MagicMock(side_effect=urllib.error.URLError("connection refused"))
 
-    directive = _make_update_directive()
-    # _perform_update must not raise and must not leave _update_in_progress True
+    directive = make_update_directive()
+    # _perform_update must not raise and must not leave update_in_progress True
     job._perform_update(directive)
     # _schedule_update sets/clears the flag; here we test perform directly
-    assert MainJob._update_in_progress_cls is False  # perform_update doesn't touch the flag itself
+    assert shell_runtime.get().update_in_progress is False  # perform_update doesn't touch the flag itself
 
 
 # ── TC-LO-12 : _get_extension_version retourne une version ───────────

@@ -1,20 +1,21 @@
 """Sinks de streaming : où va le texte généré par le LLM.
 
 Contrat : stream_delta(chunk) reçoit les deltas au fil de l'eau (si le client
-streame en direct) ; finish(text, streamed) clôt le run — si streamed est
-False, le sink écrit le texte complet à ce moment-là. Jamais de perte.
+streame en direct) ; finish(text, streamed) clôt le run — un sink qui n'a reçu
+aucun delta écrit alors le texte complet. Jamais de perte.
 
 Les sinks sont appelés depuis le thread worker du run (stream_delta à chaque
-delta, puis finish). Les sinks Writer reportent chaque accès UNO sur le thread
-principal via ctx.on_main.
+delta, puis finish). Les sinks Writer et Calc reportent chaque accès UNO sur
+le thread principal via ctx.on_main.
 """
 
+from . import word_edits
 from .text_filters import (
-    check_stop_phrase,
     contains_pattern,
+    same_text,
+    stop_phrase_position,
     strip_markdown,
 )
-from .tools.calc_tools import safe_set_string
 
 
 class PaletteSink:
@@ -39,141 +40,209 @@ class PaletteSink:
             self._on_finish(self.text or text)
 
 
-class WriterInsertSink:
-    """Insertion streamée après la sélection : marqueurs d'en-tête/pied,
-    stop phrases et détection de question."""
+class _FilteredWriterSink:
+    """Filtre commun des sinks Writer : arrêt sur une question du modèle,
+    coupure aux stop phrases, rejeu d'une réponse arrivée d'un bloc. Les
+    sous-classes décident où va le texte retenu (`_emit`)."""
 
-    def __init__(self, ctx, header_marker, footer_marker,
-                 question_patterns=None, on_question=None,
-                 stop_phrases=None, tee=None):
+    def __init__(self, ctx, question_patterns=None, stop_phrases=None, tee=None):
         self.ctx = ctx
-        self.header_marker = header_marker
-        self.footer_marker = footer_marker
         self.question_patterns = question_patterns or []
-        self.on_question = on_question
         self.stop_phrases = stop_phrases
         self.tee = tee                    # callback optionnel (palette)
         self.accumulated = ""
         self.done = False
         self.question_detected = False
-        self._cursor = None
-        self._text_obj = None
-        self._started = False
 
-    def _ensure_started(self):
-        if self._started:
-            return
-        self._started = True
-        self.ctx.on_main(self._start_on_main)
-
-    def _start_on_main(self):
-        """Prépare le curseur d'insertion. Thread principal exclusivement."""
-        rng = self.ctx.controller.getSelection().getByIndex(0)
-        self._text_obj = rng.getText()
-        self._cursor = self._text_obj.createTextCursorByRange(rng)
-        self._cursor.collapseToEnd()
-        if self.header_marker:
-            self._text_obj.insertString(self._cursor, self.header_marker, False)
-
-    def _insert(self, text):
-        if not text:
-            return
-        self.ctx.on_main(lambda: self._insert_on_main(text))
-        if self.tee:
-            self.tee(text)
-
-    def _insert_on_main(self, text):
-        """Écrit dans le document et suit du regard. Thread principal exclusivement."""
-        self._text_obj.insertString(self._cursor, text, False)
-        try:
-            view_cursor = self.ctx.controller.getViewCursor()
-            view_cursor.gotoRange(self._cursor.getEnd(), False)
-        except Exception:
-            pass
+    def _emit(self, text):
+        raise NotImplementedError
 
     def stream_delta(self, chunk):
         if self.done:
             return
-        self._ensure_started()
         self.accumulated += chunk
         if self.question_patterns and contains_pattern(
                 self.accumulated, self.question_patterns):
             self.done = True
             self.question_detected = True
-            if self.on_question:
-                self.on_question(self)
             return
-        if self.stop_phrases is not None:
-            to_insert, stopped = check_stop_phrase(
-                self.accumulated, chunk, self.stop_phrases)
-            if stopped:
-                self.accumulated = self.accumulated[
-                    :len(self.accumulated) - len(chunk) + len(to_insert)].rstrip()
-                self.done = True
-            self._insert(to_insert)
+        pos = (stop_phrase_position(self.accumulated, self.stop_phrases)
+               if self.stop_phrases else -1)
+        if pos == -1:
+            self._emit(chunk)
             return
-        self._insert(chunk)
+        # La stop phrase peut arriver en plusieurs deltas : on coupe à sa
+        # position dans le texte accumulé, pas dans le dernier delta.
+        self._emit(self.accumulated[len(self.accumulated) - len(chunk):pos])
+        self.accumulated = self.accumulated[:pos].rstrip()
+        self.done = True
 
-    def insert_message(self, message):
-        """Insère un message de repli (ex. échec après retry)."""
-        self._ensure_started()
-        self._insert(message)
-
-    def finish(self, text, streamed):
-        self._ensure_started()
-        if not streamed and text and not self.accumulated and not self.done:
-            # Texte arrivé d'un bloc (mode JSON retenu) : rejoue le filtrage.
+    def _replay(self, text):
+        # Aucun delta reçu : réponse arrivée d'un bloc (mode JSON). Le texte
+        # final passe alors par le même filtrage.
+        if text and not self.accumulated and not self.done:
             self.stream_delta(text)
-        if self.footer_marker:
-            self.ctx.on_main(lambda: self._text_obj.insertString(
-                self._cursor, self.footer_marker, False))
 
 
-class WriterReplaceSink:
-    """Remplace la sélection par le texte final accumulé, puis la resélectionne
-    pour permettre l'itération."""
+class DraftSink(_FilteredWriterSink):
+    """Texte retenu pour une écriture faite plus tard, en une fois : filtré
+    comme par les sinks Writer, affiché dans la palette (`tee`), jamais écrit
+    par le sink lui-même."""
 
-    def __init__(self, ctx, tee=None):
-        self.ctx = ctx
-        self.tee = tee
-        self.accumulated = ""
+    def __init__(self, question_patterns=None, stop_phrases=None, tee=None):
+        super().__init__(None, question_patterns=question_patterns,
+                         stop_phrases=stop_phrases, tee=tee)
 
-    def stream_delta(self, chunk):
-        self.accumulated += chunk
-        if self.tee:
-            self.tee(chunk)
+    def _emit(self, text):
+        if text and self.tee:
+            self.tee(text)
 
     def finish(self, text, streamed):
-        final = (self.accumulated or text or "").strip()
-        if not final:
-            return
-        self.ctx.on_main(lambda: self._replace_on_main(final))
+        self._replay(text)
 
-    def _replace_on_main(self, final):
-        """Remplace puis resélectionne. Thread principal exclusivement."""
-        rng = self.ctx.controller.getSelection().getByIndex(0)
-        rng.setString(final)
+
+class WriterTargetSink(_FilteredWriterSink):
+    """Cible lue avant le run, écrite une fois la réponse complète.
+
+    Pendant le flux, le texte retenu ne va qu'à la palette (`tee`). `finish`
+    l'écrit ensuite en un seul passage sur le thread principal, dans une seule
+    action d'annulation : après la cible entre les marqueurs, ou à sa place,
+    resélectionnée pour permettre l'itération. Rien n'est écrit sur une
+    question du modèle, après un arrêt (`stopped`), ni si la cible ne contient
+    plus le texte lu avant le run (`target_changed`) : le résultat reste alors
+    dans la palette.
+
+    Avec `edit_by` ("word" ou "line"), un remplacement ne réécrit que les mots
+    ou les lignes qui changent : le reste garde sa mise en forme, et chaque
+    paragraphe sa place. Rien n'est écrit si la réponse n'a pas autant de
+    lignes non vides que la cible (`lines_mismatch`), ni si la cible contient
+    un objet que ces remplacements abîmeraient (`objects_kept`, voir
+    `word_edits.apply`).
+    Avec `skip_unchanged`, une réponse identique au texte lu n'est pas écrite
+    (`unchanged`) ; `unchanged` aussi quand les remplacements ne laissent
+    rien à écrire (voir `word_edits.apply`).
+    """
+
+    def __init__(self, ctx, target, append, header_marker, footer_marker,
+                 original="", undo_label="", cancel_event=None,
+                 question_patterns=None, stop_phrases=None, tee=None,
+                 edit_by=None, skip_unchanged=False):
+        super().__init__(ctx, question_patterns=question_patterns,
+                         stop_phrases=stop_phrases, tee=tee)
+        self.target = target
+        self.append = append
+        self.header_marker = header_marker
+        self.footer_marker = footer_marker
+        self.original = original
+        self.undo_label = undo_label
+        self.cancel_event = cancel_event
+        self.edit_by = edit_by
+        self.skip_unchanged = skip_unchanged
+        self.unchanged = False
+        self.lines_mismatch = False
+        self.objects_kept = False
+        self.target_changed = False
+        self.stopped = False
+
+    def _emit(self, text):
+        if text and self.tee:
+            self.tee(text)
+
+    def finish(self, text, streamed):
+        self._replay(text)
+        if self.question_detected or not self.accumulated.strip():
+            return
+        if self.skip_unchanged and same_text(self.accumulated, self.original):
+            self.unchanged = True
+            return
+        final = self.accumulated if self.append else self.accumulated.strip()
+        edits = None
+        if self.edit_by and not self.append:
+            final = word_edits.fit_lines(self.original, self.accumulated)
+            if final is None:
+                self.lines_mismatch = True
+                return
+            edits = word_edits.plan(self.original, final, by_word=self.edit_by == "word")
+        self.ctx.on_main(lambda: self._write_on_main(final, edits))
+
+    def _write_on_main(self, final, edits=None):
+        """Thread principal exclusivement, celui du bouton Arrêter : un arrêt
+        demandé avant cette écriture est donc toujours vu. Rien n'est écrit
+        après un arrêt, ni si la cible a été modifiée pendant le run."""
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            self.stopped = True
+            return
+        if self.target.getString() != self.original:
+            self.target_changed = True
+            return
+        undo = self.ctx.model.getUndoManager()
+        undo.enterUndoContext(self.undo_label)
         try:
-            self.ctx.controller.select(rng)
+            if self.append:
+                self._insert_after_target(final)
+            else:
+                self._replace_target(final, edits)
+        finally:
+            undo.leaveUndoContext()
+
+    def _insert_after_target(self, final):
+        text_obj = self.target.getText()
+        cursor = text_obj.createTextCursorByRange(self.target)
+        cursor.collapseToEnd()
+        text_obj.insertString(
+            cursor, self.header_marker + final + self.footer_marker, False)
+        try:
+            self.ctx.controller.getViewCursor().gotoRange(cursor.getEnd(), False)
+        except Exception:
+            pass
+
+    def _replace_target(self, final, edits):
+        written = self.target
+        if edits is None:
+            self.target.setString(final)
+        else:
+            written = word_edits.apply(self.target, self.original, edits)
+            if written is None:
+                self.objects_kept = True
+                return
+            if written.getString() == self.original:
+                self.unchanged = True
+                return
+        try:
+            self.ctx.controller.select(written)
         except Exception:
             pass
 
 
 class CalcCellSink:
-    """Accumule et réécrit la cellule (markdown nettoyé) à chaque delta."""
+    """Réponse destinée à une cellule Calc. Le flux part vers la palette
+    (`tee`) delta par delta, ou d'un bloc à `finish` quand le client n'a pas
+    streamé ; la cellule n'est écrite qu'une fois la réponse complète, d'un
+    seul appel sur le thread principal : `write(texte)` y écrit par
+    safe_set_string et rend la raison d'un refus.
 
-    def __init__(self, cell, tee=None):
-        self.cell = cell
+    Après `finish`, `written` dit si le texte est dans la cellule et `refusal`
+    pourquoi la garde des formules l'a remplacé par #ERREUR. Une réponse vide
+    n'écrit rien et ne laisse pas de ligne blanche dans la palette."""
+
+    def __init__(self, ctx, write, tee=None):
+        self.ctx = ctx
+        self.write = write
         self.tee = tee
-        self.accumulated = ""
+        self.written = False
+        self.refusal = ""
 
     def stream_delta(self, chunk):
-        self.accumulated += chunk
-        safe_set_string(self.cell, strip_markdown(self.accumulated))
         if self.tee:
             self.tee(chunk)
 
     def finish(self, text, streamed):
-        final = self.accumulated or text or ""
-        if final:
-            safe_set_string(self.cell, strip_markdown(final))
+        if self.tee and text:
+            if not streamed:
+                self.tee(text)   # rien n'est passé par stream_delta
+            self.tee("\n")       # chaque réponse finit sa ligne dans la palette
+        final = strip_markdown(text or "")
+        if not final.strip():
+            return
+        self.refusal = self.ctx.on_main(lambda: self.write(final))
+        self.written = not self.refusal

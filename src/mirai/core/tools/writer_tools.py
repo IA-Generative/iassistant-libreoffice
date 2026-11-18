@@ -5,12 +5,24 @@ JAMAIS en argument JSON — elle arrive par le sink de streaming (voir
 orchestrator). Les tools mutants restent donc courts et sûrs.
 """
 
+from ..registry import result_max_chars
 from ..tool_calls import ToolResult, ToolSpec
 
 try:
     from com.sun.star.text.ControlCharacter import PARAGRAPH_BREAK
 except ImportError:      # hors LibreOffice (tests)
     PARAGRAPH_BREAK = 0
+
+# Rappel d'action DANS le résultat de l'outil. Une consigne du prompt
+# système se dilue ; celle-ci arrive juste avant que le modèle ne décide de
+# son prochain coup. Sans elle, il lisait le document (iterations=2) puis
+# répondait du texte, en laissant le document intact.
+_NEXT_STEP = ("\n\nÉTAPE SUIVANTE OBLIGATOIRE : si la demande implique de "
+              "modifier le document, appelle MAINTENANT writer_replace_paragraphs "
+              "avec le texte réécrit. Ne réponds pas le texte modifié en clair — "
+              "il ne serait PAS appliqué au document.")
+# Borne haute d'un repère de fin de carte, numéros compris.
+_END_MARKER_ROOM = 100
 
 
 def _selection_range(ctx):
@@ -31,7 +43,11 @@ def get_selection(ctx, args):
 
 
 def get_document_map(ctx, args):
-    max_chars = int(args.get("max_chars", 6000))
+    # Le registre coupe tout résultat au-delà de son plafond : la place des
+    # repères de fin est réservée avant de remplir, sinon ce sont eux qu'il
+    # couperait.
+    max_chars = min(int(args.get("max_chars", 6000)),
+                    result_max_chars(ctx) - _END_MARKER_ROOM - len(_NEXT_STEP))
     lines = []
     total = 0
     index = 0
@@ -72,30 +88,27 @@ def get_document_map(ctx, args):
         # paragraphes, le modèle ignorant combien il y en avait.
         body += (f"\n[FIN DU DOCUMENT — {index} paragraphes au total, "
                  f"de [P1] à [P{index}]]")
-    # Rappel d'action DANS le résultat de l'outil. Une consigne du prompt
-    # système se dilue ; celle-ci arrive juste avant que le modèle ne décide de
-    # son prochain coup. Sans elle, il lisait le document (iterations=2) puis
-    # répondait du texte, en laissant le document intact.
-    body += ("\n\nÉTAPE SUIVANTE OBLIGATOIRE : si la demande implique de "
-             "modifier le document, appelle MAINTENANT writer_replace_paragraphs "
-             "avec le texte réécrit. Ne réponds pas le texte modifié en clair — "
-             "il ne serait PAS appliqué au document.")
+    body += _NEXT_STEP
     return ToolResult(call_id="", ok=True, content=body or "(document vide)",
                       data={"paragraph_count": index, "truncated": truncated})
 
 
-def _paragraphs(ctx):
-    """Liste les objets paragraphe du document, dans l'ordre."""
-    items = []
+def document_body(ctx):
+    """Les objets paragraphe du document, dans l'ordre, et pour chaque tableau
+    du corps l'index du paragraphe qui le suit : l'énumération rend un
+    tableau comme un seul élément, sans le texte de ses cellules."""
+    items, tables = [], []
     enumeration = ctx.model.Text.createEnumeration()
     while enumeration.hasMoreElements():
-        para = enumeration.nextElement()
+        element = enumeration.nextElement()
         try:
-            if para.supportsService("com.sun.star.text.Paragraph"):
-                items.append(para)
+            if element.supportsService("com.sun.star.text.Paragraph"):
+                items.append(element)
+            elif element.supportsService("com.sun.star.text.TextTable"):
+                tables.append(len(items))
         except Exception:
             continue
-    return items
+    return items, tables
 
 
 def paragraph_style(para):
@@ -104,6 +117,50 @@ def paragraph_style(para):
         return str(para.getPropertyValue("ParaStyleName") or "")
     except Exception:
         return ""
+
+
+def write_paragraphs(body, targets, new_texts, styles=None):
+    """Écrit `new_texts` à la place des paragraphes consécutifs `targets`, un
+    paragraphe par texte. Avec `styles`, un par texte, chaque paragraphe prend
+    le sien ; sans, il garde celui qu'il avait. Thread principal exclusivement."""
+    styles = styles or [""] * len(new_texts)
+    # Remplacer PARAGRAPHE PAR PARAGRAPHE, jamais une plage d'un seul geste.
+    # `setString` sur une étendue couvrant plusieurs paragraphes applique le
+    # style du PREMIER à tout le bloc : un document dont [P1] est un titre se
+    # retrouvait intégralement en style titre. Écrire dans chaque paragraphe
+    # séparément préserve le style de chacun.
+    # strict=False assumé : les longueurs diffèrent dès qu'on change le nombre
+    # de paragraphes, et le surplus est traité juste après.
+    for para, new_text, style in zip(targets, new_texts, styles, strict=False):
+        para.setString(new_text)
+        _set_style(para, style)
+
+    if len(new_texts) < len(targets):
+        # Moins de paragraphes qu'avant : effacer le surplus d'un seul tenant.
+        # removeTextContent ne supprime rien, sans erreur, quand Writer
+        # enregistre les modifications ; effacer la plage marche dans les deux cas.
+        cursor = body.createTextCursorByRange(targets[len(new_texts) - 1].getEnd())
+        cursor.gotoRange(targets[-1].getEnd(), True)
+        cursor.setString("")
+    elif len(new_texts) > len(targets):
+        # Plus de paragraphes qu'avant : les ajouter après le dernier, qui
+        # sert de modèle de style.
+        cursor = body.createTextCursorByRange(targets[-1].getEnd())
+        for extra, style in zip(new_texts[len(targets):], styles[len(targets):],
+                                strict=True):
+            body.insertControlCharacter(cursor, PARAGRAPH_BREAK, False)
+            _set_style(cursor, style)
+            body.insertString(cursor, extra, False)
+
+
+def _set_style(target, style):
+    """Style de paragraphe d'un paragraphe ou de celui d'un curseur."""
+    if not style:
+        return
+    try:
+        target.setPropertyValue("ParaStyleName", style)
+    except Exception:
+        pass
 
 
 def replace_paragraphs(ctx, args):
@@ -124,42 +181,29 @@ def replace_paragraphs(ctx, args):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"plage de paragraphes invalide : {start}..{end}")
 
-    paragraphs = _paragraphs(ctx)
+    paragraphs, tables = document_body(ctx)
     if start > len(paragraphs):
         return ToolResult(
             call_id="", ok=False, content="",
             error=f"le document ne contient que {len(paragraphs)} paragraphe(s)")
     end = min(end, len(paragraphs))
+    new_texts = text.split("\n")
+    crossed = [after for after in tables if start - 1 < after < end]
+    if crossed and len(new_texts) != end - start + 1:
+        # Une ligne par paragraphe garde chaque texte de son côté du tableau :
+        # moins de lignes l'effaceraient avec le surplus, plus de lignes
+        # feraient passer du texte de l'autre côté.
+        places = ", ".join(f"[P{after}] et [P{after + 1}]" for after in crossed)
+        return ToolResult(
+            call_id="", ok=False, content="",
+            error=(f"un tableau sépare {places} : rends une ligne par paragraphe, "
+                   "ou remplace séparément les paragraphes de chaque côté du tableau, "
+                   "en commençant par le dernier : un remplacement renumérote les "
+                   "paragraphes qui le suivent"))
 
     ctx.undo_begin("Réécriture de paragraphes")
     targets = paragraphs[start - 1:end]
-    new_texts = text.split("\n")
-
-    # Remplacer PARAGRAPHE PAR PARAGRAPHE, jamais une plage d'un seul geste.
-    # `setString` sur une étendue couvrant plusieurs paragraphes applique le
-    # style du PREMIER à tout le bloc : un document dont [P1] est un titre se
-    # retrouvait intégralement en style titre. Écrire dans chaque paragraphe
-    # séparément préserve le style de chacun.
-    # strict=False assumé : les longueurs diffèrent dès qu'on change le nombre
-    # de paragraphes, et le surplus est traité juste après.
-    for para, new_text in zip(targets, new_texts, strict=False):
-        para.setString(new_text)
-
-    body = ctx.model.Text
-    if len(new_texts) < len(targets):
-        # Moins de paragraphes qu'avant : vider puis supprimer le surplus.
-        for para in targets[len(new_texts):]:
-            try:
-                body.removeTextContent(para)
-            except Exception:
-                para.setString("")
-    elif len(new_texts) > len(targets):
-        # Plus de paragraphes qu'avant : les ajouter après le dernier, qui
-        # sert de modèle de style.
-        cursor = body.createTextCursorByRange(targets[-1].getEnd())
-        for extra in new_texts[len(targets):]:
-            body.insertControlCharacter(cursor, PARAGRAPH_BREAK, False)
-            body.insertString(cursor, extra, False)
+    write_paragraphs(ctx.model.Text, targets, new_texts)
 
     return ToolResult(
         call_id="", ok=True,
@@ -275,7 +319,7 @@ def register(registry):
             "text": {"type": "string",
                      "description": "Texte de remplacement ; « \\n » sépare les paragraphes."},
         }, "required": ["start", "text"]},
-        handler=replace_paragraphs, apps=("writer",),
+        handler=replace_paragraphs, apps=("writer",), mutates=True,
     ))
     registry.register(ToolSpec(
         name="writer_replace_selection",

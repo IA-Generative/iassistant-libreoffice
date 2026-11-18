@@ -17,7 +17,7 @@ set -euo pipefail
 UNOPKG="/Applications/LibreOffice.app/Contents/MacOS/unopkg"
 LO_USER_DIR="$HOME/Library/Application Support/LibreOffice/4/user"
 KEYCHAIN_SERVICE="MIrAI-LibreOffice"
-KEYCHAIN_ACCOUNTS=(relay_client_id relay_client_key relay_key_expires_at refresh_token proxy_password llm_api_tokens)
+KEYCHAIN_ACCOUNTS=(relay_client_id relay_client_key relay_key_expires_at relay_dm_base refresh_token proxy_password llm_api_tokens)
 LEGACY_FILES=(config_cache.json assistant_conversation.json prompts_calc.txt prompt.txt telemetry_queue.json secure_bootstrap_state.json)
 
 DO_UNINSTALL=false

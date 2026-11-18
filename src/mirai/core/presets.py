@@ -2,8 +2,7 @@
 
 Deux modes :
 - "pipeline" : Python pilote, le LLM n'est qu'une fonction texte (marqueurs,
-  stop phrases, retry sur question, colonne Résultat IA…), robuste petits
-  modèles.
+  stop phrases, colonne Résultat IA…), robuste petits modèles.
 - "agentic"  : le LLM pilote les tools (edit, formule, analyse libre).
 
 Chaque preset émet son span de télémétrie avec {"via": "palette"} pour
@@ -14,16 +13,21 @@ import dataclasses
 import json
 import os
 import re
+from functools import partial
 
+from ..i18n import get_locale
 from ..i18n import t as _t
+from . import doc_rewrite, whole_document, word_edits
+from .calc_functions import formula_refusal
 from .llm_client import LLMClient
 from .orchestrator import error_message
-from .prompts import PIPELINE_TEXT_SYSTEM
-from .sinks import CalcCellSink, WriterInsertSink, WriterReplaceSink
+from .prompts import PIPELINE_TEXT_SYSTEM, TRANSLATION_SYSTEM
+from .sinks import CalcCellSink, WriterTargetSink
 from .text_filters import (
     EXTEND_QUESTION_PATTERNS,
     SIMPLIFY_QUESTION_PATTERNS,
     STOP_PHRASES,
+    patterns_absent_from,
 )
 from .tools import calc_tools
 
@@ -37,11 +41,10 @@ class Preset:
     needs_input: bool = False     # requiert une instruction tapée dans le prompt
     input_hint_key: str = ""
     # pipeline : fn(ctx, shell, user_text, tee, cancel_event=None,
-    #               dispatcher=None, append_mode=…) -> str
+    #               dispatcher=None, append_mode=…, progress=None) -> str,
+    #            Written s'il a écrit son résultat, Failed si le modèle a échoué
     runner: object = None
     build_extra: object = None    # agentic : fn(ctx, shell, user_text) -> str
-    sink_spec: str = "palette"    # agentic : "palette" | "replace_selection" | "auto_edit"
-    prompt_template: object = None  # agentic : fn(user_text) -> prompt utilisateur
 
     @property
     def label(self):
@@ -54,39 +57,57 @@ class Preset:
 
 def _legacy_telemetry(ctx, span, attrs=None):
     payload = {"via": "palette"}
+    if span in _PLUGIN_ACTIONS:
+        payload["plugin.action"] = _PLUGIN_ACTIONS[span]
     payload.update(attrs or {})
     ctx.shell.telemetry(span, payload)
 
 
-def _target_selection_text(ctx):
-    """Texte cible d'une action directe : la sélection si elle existe, sinon
-    le PARAGRAPHE COURANT (identifié sous le curseur, puis sélectionné pour
-    que les sinks opèrent dessus). Retourne "" si aucun texte ciblable."""
+def _read_target(ctx):
+    """Cible d'une action directe, lue en un seul passage sur le thread
+    principal avant l'appel au modèle : la sélection.
+
+    Rend (texte, plage) ; Writer fait suivre à la plage les modifications du
+    document, c'est elle qui recevra le résultat. ("", None) si aucun texte
+    n'est sélectionné : les actions portent alors sur tout le document.
+    ("", _NOT_TEXT) ou ("", _SEVERAL_RANGES) si la sélection ne se prête pas
+    à l'action : `_refusal` en donne le message."""
+    return ctx.on_main(lambda: _read_target_on_main(ctx))
+
+
+# Sélection qui n'est pas du texte : cellules de tableau, cadre, image.
+_NOT_TEXT = object()
+# Plusieurs passages sélectionnés (Ctrl) : l'action ne traiterait que le premier.
+_SEVERAL_RANGES = object()
+
+
+def _refusal(target):
+    """Message d'une cible sur laquelle l'action ne peut rien faire, sinon None."""
+    if target is _NOT_TEXT:
+        return _t("sel.no_target")
+    if target is _SEVERAL_RANGES:
+        return _t("sel.several_ranges")
+    return None
+
+
+def _read_target_on_main(ctx):
     try:
-        rng = ctx.controller.getSelection().getByIndex(0)
+        selection = ctx.controller.getSelection()
+        if selection.getCount() > 1:
+            return "", _SEVERAL_RANGES
+        rng = selection.getByIndex(0)
+        text = rng.getString()
     except Exception:
-        return ""
-    text = rng.getString()
-    if text.strip():
-        return text
-    try:
-        cursor = rng.getText().createTextCursorByRange(rng)
-        cursor.gotoStartOfParagraph(False)
-        cursor.gotoEndOfParagraph(True)
-        paragraph = cursor.getString()
-        if not paragraph.strip():
-            return ""
-        ctx.controller.select(cursor)
-        return paragraph
-    except Exception:
-        return ""
+        return "", _NOT_TEXT
+    return (text, rng) if text.strip() else ("", None)
 
 
 def _text_client(shell, max_tokens):
     return LLMClient(shell, max_tokens=max_tokens)
 
 
-def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
+def text_sink(ctx, append_mode, header, footer, target, tee=None,
+              cancel_event=None, **kwargs):
     """Où va le texte produit : à la suite entre marqueurs, ou en remplacement.
 
     Les deux usages sont légitimes et les utilisateurs ne s'accordent pas :
@@ -94,10 +115,42 @@ def text_sink(ctx, append_mode, header, footer, tee=None, **kwargs):
     choix vient de la case « Ajouter à la suite » de la palette ; ce helper est
     le SEUL endroit qui le traduit en destination, pour qu'aucun preset ne
     puisse l'ignorer.
+
+    `target` est la plage lue avant le run : le texte ne fait que s'afficher
+    pendant le flux et n'est écrit qu'une fois la réponse complète.
     """
-    if append_mode:
-        return WriterInsertSink(ctx, header, footer, tee=tee, **kwargs)
-    return WriterReplaceSink(ctx, tee=tee)
+    return WriterTargetSink(ctx, target, append_mode, header, footer,
+                            tee=tee, cancel_event=cancel_event, **kwargs)
+
+
+class Written(str):
+    """Bilan d'un runner qui a écrit son résultat dans le document."""
+
+
+class Unchanged(str):
+    """Bilan d'un runner qui n'avait rien à changer : ce n'est pas un échec."""
+
+
+class Failed(str):
+    """Bilan d'un runner dont l'appel au modèle a échoué ; `code` nomme l'erreur."""
+
+    def __new__(cls, code):
+        failed = super().__new__(cls, error_message(code))
+        failed.code = code
+        return failed
+
+
+def _outcome(sink, done_message):
+    """Message de fin d'un runner Writer, selon ce que le sink a retenu."""
+    if sink.question_detected:
+        return _t("preset.question_asked")
+    if not sink.accumulated.strip():
+        return error_message("empty_response")
+    if sink.stopped:
+        return error_message("cancelled")
+    if sink.target_changed:
+        return _t("preset.target_changed")
+    return Written(done_message)
 
 
 def _system(specific):
@@ -105,76 +158,16 @@ def _system(specific):
     return PIPELINE_TEXT_SYSTEM + " " + specific if specific else PIPELINE_TEXT_SYSTEM
 
 
-def run_extend(ctx, shell, user_text, tee, cancel_event=None,
-               dispatcher=None):
-    base_text = _target_selection_text(ctx)
-    _legacy_telemetry(ctx, "ExtendSelection",
-                      {"action": "extend_selection",
-                       "text_length": str(len(base_text))})
-    if not base_text:
-        return _t("sel.no_target")
-
-    configured = str(shell.get_config("extend_selection_system_prompt", "") or "").strip()
-    directive = (
-        "Continue DIRECTEMENT le texte fourni par l'utilisateur. "
-        "Écris uniquement la suite naturelle, sans question, sans reformulation, "
-        "sans introduction."
-    )
-    system_prompt = _system((directive + " " + configured) if configured else directive)
-    max_tokens = shell.get_config("extend_selection_max_tokens", 15000)
-    llm = _text_client(shell, max_tokens)
-
-    sink = WriterInsertSink(
-        ctx, "\n\n---début-du-texte-généré---\n", "\n---fin-du-texte-généré---\n",
-        question_patterns=EXTEND_QUESTION_PATTERNS, tee=tee)
-
-    ctx.undo_begin(_t("preset.undo_extend"))
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": base_text}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-
-        if sink.question_detected:
-            # Retry unique avec directive renforcée.
-            sink.done = False
-            sink.question_detected = False
-            sink.accumulated = ""
-            retry_system = _system(
-                "Tu dois CONTINUER le texte de l'utilisateur mot après mot, "
-                "comme si tu en étais l'auteur. Il est INTERDIT de poser une "
-                "question ou de reformuler. Commence immédiatement par les mots "
-                "qui suivent naturellement le texte fourni.")
-            retry_prompt = ("Voici le texte à continuer :\n\n" + base_text
-                            + "\n\nÉcris UNIQUEMENT la suite directe, sans "
-                              "aucune introduction.")
-            step = llm.step([{"role": "system", "content": retry_system},
-                             {"role": "user", "content": retry_prompt}],
-                            on_text_delta=sink.stream_delta,
-                            cancel_event=cancel_event)
-            if sink.question_detected:
-                sink.insert_message(
-                    "\n[Le modèle n'a pas pu continuer le texte."
-                    " Essayez de sélectionner plus de contexte.]")
-        sink.finish(step.text, step.streamed)
-        return _t("preset.done_extend")
-    finally:
-        ctx.undo_end()
+_SUMMARY_SYSTEM = (
+    "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
+    "en utilisant le minimum de mots nécessaire tout en préservant "
+    "les informations clés. Tu réponds TOUJOURS dans la même langue "
+    "que le texte fourni.")
 
 
-def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
-                  dispatcher=None, append_mode=True):
-    original = _target_selection_text(ctx)
-    _legacy_telemetry(ctx, "SummarizeSelection",
-                      {"action": "summarize_selection",
-                       "text_length": str(len(original))})
-    if not original.strip():
-        return _t("sel.no_target")
-
-    prompt = (
-        "TEXTE À RÉSUMER :\n" + original + "\n\n"
+def _summary_prompt(text):
+    return (
+        "TEXTE À RÉSUMER :\n" + text + "\n\n"
         "Crée le résumé le plus court possible qui capture les informations essentielles.\n"
         "Sois extrêmement concis — utilise le minimum de mots nécessaire.\n"
         "Ne pose AUCUNE question.\n"
@@ -182,40 +175,67 @@ def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
         "IMPORTANT : Réponds dans la MÊME LANGUE que le texte original.\n\n"
         "RÉSUMÉ :\n"
     )
-    system_prompt = _system(
-        "Tu es un résumeur professionnel. Tu crées des résumés ultra-concis "
-        "en utilisant le minimum de mots nécessaire tout en préservant "
-        "les informations clés. Tu réponds TOUJOURS dans la même langue "
-        "que le texte fourni.")
+
+
+def run_summarize(ctx, shell, user_text, tee, cancel_event=None,
+                  dispatcher=None, append_mode=True, progress=None):
+    original, target = _read_target(ctx)
+    refusal = _refusal(target)
+    if refusal:
+        return refusal
+    if target is None:
+        return _summarize_document(ctx, shell, tee, cancel_event, progress)
+    _legacy_telemetry(ctx, "SummarizeSelection",
+                      {"action": "summarize_selection",
+                       "text_length": str(len(original))})
+
+    system_prompt = _system(_SUMMARY_SYSTEM)
     max_tokens = int(shell.get_config("summarize_selection_max_tokens", 15000))
     llm = _text_client(shell, max_tokens)
 
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-résumé---\n", "\n---fin-du-résumé---\n",
-                     tee=tee, stop_phrases=STOP_PHRASES)
+                     tee=tee, target=target, original=original,
+                     cancel_event=cancel_event,
+                     undo_label=_t("preset.undo_summarize"),
+                     stop_phrases=STOP_PHRASES,
+                     question_patterns=patterns_absent_from(
+                         original, EXTEND_QUESTION_PATTERNS))
 
-    ctx.undo_begin(_t("preset.undo_summarize"))
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-        sink.finish(step.text, step.streamed)
-        return _t("preset.done_summarize")
-    finally:
-        ctx.undo_end()
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": _summary_prompt(original)}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event, progress=progress)
+    if step.error:
+        return Failed(step.error)
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.done_summarize") if append_mode
+                    else _t("preset.done_summarize_replaced"))
+
+
+_SIMPLIFY_SYSTEM = (
+    "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
+    "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
+    "la même langue que le texte fourni. Tu utilises des phrases courtes "
+    "et des mots courants.")
+
+
+def _simplify_system(shell):
+    configured = str(shell.get_config("simplify_selection_system_prompt", "") or "").strip()
+    return _system((configured + " " + _SIMPLIFY_SYSTEM) if configured else _SIMPLIFY_SYSTEM)
 
 
 def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
-                 dispatcher=None, append_mode=True):
-    original = _target_selection_text(ctx)
+                 dispatcher=None, append_mode=True, progress=None):
+    original, target = _read_target(ctx)
+    refusal = _refusal(target)
+    if refusal:
+        return refusal
+    if target is None:
+        return _simplify_document(ctx, shell, tee, cancel_event, append_mode, progress)
     _legacy_telemetry(ctx, "SimplifySelection",
                       {"action": "simplify_selection",
                        "text_length": str(len(original))})
-    if not original.strip():
-        return _t("sel.no_target")
 
     prompt = (
         "TEXTE À REFORMULER :\n" + original + "\n\n"
@@ -228,49 +248,46 @@ def run_simplify(ctx, shell, user_text, tee, cancel_event=None,
         "- N'ajoute AUCUNE explication\n- Produis UNIQUEMENT le texte reformulé\n\n"
         "VERSION REFORMULÉE :\n"
     )
-    base_system = (
-        "Tu es un expert en langage simplifié. Tu réécris les textes complexes "
-        "dans un langage clair et simple accessible à tous. Tu utilises TOUJOURS "
-        "la même langue que le texte fourni. Tu utilises des phrases courtes "
-        "et des mots courants.")
-    configured = str(shell.get_config("simplify_selection_system_prompt", "") or "").strip()
-    system_prompt = _system((configured + " " + base_system) if configured else base_system)
     max_tokens = len(original) + int(shell.get_config("simplify_selection_max_tokens", 15000))
     llm = _text_client(shell, max_tokens)
-
-    def _on_question(active_sink):
-        # Signaler l'échec sans toucher au texte déjà inséré.
-        active_sink.insert_message(
-            "[Le modèle a posé une question. Veuillez réessayer.]")
 
     sink = text_sink(ctx, append_mode,
                      "\n\n---reformulation-du-texte---\n",
                      "\n---fin-de-reformulation---\n", tee=tee,
-                     question_patterns=SIMPLIFY_QUESTION_PATTERNS,
-                     on_question=_on_question, stop_phrases=STOP_PHRASES)
+                     target=target, original=original, cancel_event=cancel_event,
+                     undo_label=_t("preset.undo_simplify"),
+                     question_patterns=patterns_absent_from(
+                         original, SIMPLIFY_QUESTION_PATTERNS),
+                     stop_phrases=STOP_PHRASES)
 
-    ctx.undo_begin(_t("preset.undo_simplify"))
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-        sink.finish(step.text, step.streamed)
-        return _t("preset.done_simplify")
-    finally:
-        ctx.undo_end()
+    step = llm.step([{"role": "system", "content": _simplify_system(shell)},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event, progress=progress)
+    if step.error:
+        return Failed(step.error)
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.done_simplify") if append_mode
+                    else _t("preset.done_simplify_replaced"))
+
+
+_RESIZE_SYSTEM = (
+    "Tu réécris des textes en ajustant leur longueur sans en changer le "
+    "sens ni la langue. Tu réponds uniquement avec le texte réécrit.")
 
 
 def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
-                append_mode=False):
-    original = _target_selection_text(ctx)
+                append_mode=False, progress=None):
+    original, target_range = _read_target(ctx)
+    refusal = _refusal(target_range)
+    if refusal:
+        return refusal
+    if target_range is None:
+        return _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event,
+                                append_mode, progress)
     _legacy_telemetry(ctx, "ResizeSelection",
                       {"action": "resize_selection",
                        "text_length": str(len(original))})
-    if not original.strip():
-        return _t("sel.no_target")
 
     word_count = len(original.split())
     target = max(1, int(round(word_count * ratio)))
@@ -281,50 +298,481 @@ def _run_resize(ctx, shell, ratio, undo_label, tee, cancel_event=None,
         "Conserve le sens, le ton et la MÊME LANGUE que l'original.\n"
         "Produis UNIQUEMENT le texte réécrit, sans introduction ni commentaire."
     )
-    system_prompt = _system(
-        "Tu réécris des textes en ajustant leur longueur sans en changer le "
-        "sens ni la langue. Tu réponds uniquement avec le texte réécrit.")
     llm = _text_client(shell, max(1000, target * 4))
 
     sink = text_sink(ctx, append_mode,
                      "\n\n---début-du-texte-ajusté---\n",
-                     "\n---fin-du-texte-ajusté---\n", tee=tee)
-    ctx.undo_begin(undo_label)
-    try:
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
-        sink.finish(step.text, step.streamed)
-        return _t("preset.resized", target=target)
-    finally:
-        ctx.undo_end()
+                     "\n---fin-du-texte-ajusté---\n", tee=tee,
+                     target=target_range, original=original,
+                     cancel_event=cancel_event, undo_label=undo_label,
+                     question_patterns=patterns_absent_from(
+                         original, EXTEND_QUESTION_PATTERNS))
+    step = llm.step([{"role": "system", "content": _system(_RESIZE_SYSTEM)},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event, progress=progress)
+    if step.error:
+        return Failed(step.error)
+    sink.finish(step.text, step.streamed)
+    return _outcome(sink, _t("preset.resized", target=target))
 
 
 def run_shorten(ctx, shell, user_text, tee, cancel_event=None,
-                dispatcher=None, append_mode=False):
+                dispatcher=None, append_mode=False, progress=None):
     return _run_resize(ctx, shell, 0.65, _t("preset.undo_shorten"), tee, cancel_event,
-                       append_mode=append_mode)
+                       append_mode=append_mode, progress=progress)
 
 
 def run_lengthen(ctx, shell, user_text, tee, cancel_event=None,
-                 dispatcher=None, append_mode=False):
+                 dispatcher=None, append_mode=False, progress=None):
     return _run_resize(ctx, shell, 1.4, _t("preset.undo_lengthen"), tee, cancel_event,
-                       append_mode=append_mode)
+                       append_mode=append_mode, progress=progress)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Rewrite:
+    """Action qui récrit le texte sans en changer le découpage : la sélection
+    à sa place, ou chaque paragraphe du document à la sienne. Une réponse
+    identique au texte n'est pas écrite."""
+    span: str
+    plugin_action: str         # `plugin.action` de sa télémétrie
+    action: str
+    system: str
+    sent_label: str            # titres, dans la consigne, du texte envoyé
+    answer_label: str          # et du texte attendu
+    begin_marker: str          # le texte ajouté à la suite va entre ces marqueurs
+    end_marker: str
+    undo_key: str
+    done_key: str              # bilans : sur la sélection, à la suite ou à sa place
+    done_replaced_key: str
+    done_document_key: str     # sur tout le document, à la suite ou à sa place
+    done_document_replaced_key: str
+    unchanged_key: str
+    edit_by: str = "line"      # grain des remplacements : "word" ou "line"
+    question_patterns: tuple = ()
+
+    def done(self, document, append_mode):
+        """Bilan d'une écriture, sur tout le document ou sur la sélection."""
+        if document:
+            return _t(self.done_document_key if append_mode else self.done_document_replaced_key)
+        return _t(self.done_key if append_mode else self.done_replaced_key)
+
+
+_CORRECT = _Rewrite(
+    span="CorrectSelection", plugin_action="correct", action="correct_selection",
+    system=_system(
+        "Tu es un correcteur professionnel. Tu corriges l'orthographe, la grammaire, "
+        "la conjugaison et la ponctuation, sans jamais reformuler : chaque mot juste "
+        "reste à sa place, et le texte garde sa langue."),
+    sent_label="TEXTE À CORRIGER", answer_label="TEXTE CORRIGÉ",
+    begin_marker="---début-du-texte-corrigé---", end_marker="---fin-du-texte-corrigé---",
+    undo_key="preset.undo_correct",
+    done_key="preset.done_correct", done_replaced_key="preset.done_correct_replaced",
+    done_document_key="preset.done_correct_document",
+    done_document_replaced_key="preset.done_correct_document_replaced",
+    unchanged_key="preset.no_error",
+    edit_by="word", question_patterns=tuple(EXTEND_QUESTION_PATTERNS))
+
+_CORRECT_RULES = (
+    "Corrige uniquement les fautes : orthographe, grammaire, conjugaison, accords, "
+    "ponctuation. Ne reformule pas, ne change ni l'ordre des mots ni le style, "
+    "n'ajoute et ne retire rien. S'il n'y a aucune faute, rends le texte tel quel.")
+
+# Sans motifs de question : traduire « Pouvez-vous préciser… » en donne un.
+_TRANSLATE = _Rewrite(
+    span="TranslateSelection", plugin_action="translate", action="translate_selection",
+    system=TRANSLATION_SYSTEM,
+    sent_label="TEXTE À TRADUIRE", answer_label="TRADUCTION",
+    begin_marker="---début-de-la-traduction---", end_marker="---fin-de-la-traduction---",
+    undo_key="preset.undo_translate",
+    done_key="preset.done_translate", done_replaced_key="preset.done_translate_replaced",
+    done_document_key="preset.done_translate_document",
+    done_document_replaced_key="preset.done_translate_document_replaced",
+    unchanged_key="preset.already_in_language")
+
+# Le nom court des autres actions vient de la coquille (`_ACTION_NAMES`), qui
+# ne grandit plus.
+_PLUGIN_ACTIONS = {rewrite.span: rewrite.plugin_action for rewrite in (_CORRECT, _TRANSLATE)}
+
+# Langue cible par défaut : celle de l'interface, nommée dans la langue des
+# consignes.
+_LANGUAGE_NAMES = {"fr": "français", "en": "anglais", "es": "espagnol",
+                   "pt": "portugais", "zh": "chinois"}
+
+
+def _translate_rules(user_text):
+    """Consigne de traduction vers la langue tapée dans le champ, sinon vers
+    celle de l'interface. Le champ est cité tel quel : « anglais » et « en
+    anglais » y nomment la même langue. Un texte déjà dans cette langue
+    revient tel quel : c'est ce qui permet de demander une autre langue à
+    l'utilisateur."""
+    language = user_text.strip() or _LANGUAGE_NAMES[get_locale()]
+    return (f"Langue cible : {language}. Traduis le texte dans cette langue. Un passage "
+            "déjà dans cette langue est rendu tel quel. Conserve le sens, le ton et les "
+            "noms propres.")
+
+
+def _rewrite_budget(chars):
+    """Jetons accordés à une réponse qui récrit `chars` caractères : un jeton
+    couvre en général au moins un caractère (pas en chinois), et la marge
+    absorbe une réponse plus longue que le texte. Une réponse coupée par ce
+    plafond n'est pas écrite."""
+    return chars + 1000
+
+
+def run_correct(ctx, shell, user_text, tee, cancel_event=None,
+                dispatcher=None, append_mode=False, progress=None):
+    return _run_rewrite(ctx, shell, _CORRECT, _CORRECT_RULES, tee, cancel_event,
+                        append_mode, progress)
+
+
+def run_translate(ctx, shell, user_text, tee, cancel_event=None,
+                  dispatcher=None, append_mode=False, progress=None):
+    return _run_rewrite(ctx, shell, _TRANSLATE, _translate_rules(user_text), tee,
+                        cancel_event, append_mode, progress)
+
+
+def _run_rewrite(ctx, shell, action, rules, tee, cancel_event, append_mode, progress):
+    original, target = _read_target(ctx)
+    refusal = _refusal(target)
+    if refusal:
+        return refusal
+    if target is None:
+        return _rewrite_document(ctx, shell, action, rules, tee, cancel_event,
+                                 append_mode, progress)
+    _legacy_telemetry(ctx, action.span,
+                      {"action": action.action, "text_length": str(len(original))})
+    sink = text_sink(ctx, append_mode,
+                     "\n\n" + action.begin_marker + "\n", "\n" + action.end_marker + "\n",
+                     tee=tee, target=target, original=original,
+                     cancel_event=cancel_event, undo_label=_t(action.undo_key),
+                     question_patterns=patterns_absent_from(original, action.question_patterns),
+                     edit_by=action.edit_by, skip_unchanged=True)
+    prompt = (f"{action.sent_label} :\n{original}\n\n{rules}\n"
+              "Garde les lignes du texte : une ligne rendue par ligne non vide reçue, "
+              "dans le même ordre.\n"
+              "Ne pose AUCUNE question.\n"
+              "Produis UNIQUEMENT le texte demandé, sans introduction ni commentaire.\n\n"
+              f"{action.answer_label} :\n")
+    step = _text_client(shell, _rewrite_budget(len(original))).step(
+        [{"role": "system", "content": action.system},
+         {"role": "user", "content": prompt}],
+        on_text_delta=sink.stream_delta, cancel_event=cancel_event, progress=progress)
+    if step.error:
+        return Failed(step.error)
+    if step.finish_reason == "length":
+        # Le texte manquant deviendrait des suppressions.
+        return Failed("truncated")
+    sink.finish(step.text, step.streamed)
+    if sink.unchanged:
+        return Unchanged(_t(action.unchanged_key))
+    if sink.lines_mismatch:
+        return Failed("paragraphs_mismatch")
+    if sink.objects_kept:
+        return _t("preset.objects_kept")
+    return _outcome(sink, action.done(document=False, append_mode=append_mode))
+
+
+def _rewrite_document(ctx, shell, action, rules, tee, cancel_event, append_mode, progress):
+    snapshot = _read_document(ctx, action.span, action.action)
+    if snapshot.empty:
+        return _empty_message(snapshot)
+    limit = whole_document.max_chars(shell)
+    model = whole_document.Model(
+        _text_client(shell, _rewrite_budget(min(limit, len(snapshot.text)))), action.system,
+        cancel_event=cancel_event, progress=progress,
+        question_patterns=patterns_absent_from(snapshot.text, action.question_patterns))
+    result = whole_document.rewrite_paragraphs(model, snapshot, rules, limit, tee)
+    changed = whole_document.changed(snapshot, result.drafts)
+    if not (result.error or result.question or changed):
+        return Unchanged(_t(action.unchanged_key))
+    kept = []
+    apply = _paragraphs_writer(ctx, snapshot, result.drafts, changed, action, append_mode, kept)
+    message = _write_document(ctx, snapshot, result, apply, _t(action.undo_key), cancel_event,
+                              action.done(document=True, append_mode=append_mode))
+    return _with_kept(message, sum(kept), len(changed))
+
+
+def _paragraphs_writer(ctx, snapshot, drafts, changed, action, append_mode, kept):
+    """L'écriture, à faire sur le thread principal : les paragraphes changés à
+    leur place, par mots ou par lignes selon l'action, ou tout le texte rendu
+    après le document, chaque ligne dans le style de son paragraphe. Le plan
+    des remplacements se calcule ici, dans le worker. `kept` reçoit le nombre
+    de paragraphes laissés tels quels (voir `whole_document.apply_edits`)."""
+    if append_mode:
+        lines = [(draft.paragraphs[0], snapshot.styles[draft.indexes[0]]) for draft in drafts]
+        return lambda: whole_document.append_block(ctx, snapshot, lines, action.begin_marker,
+                                                   action.end_marker)
+    edits = {draft.indexes[0]: word_edits.plan(
+        snapshot.texts[draft.indexes[0]], draft.paragraphs[0], by_word=action.edit_by == "word")
+        for draft in changed}
+    return lambda: kept.append(whole_document.apply_edits(snapshot, edits))
+
+
+def _with_kept(message, kept, changed):
+    """Le bilan, suivi du nombre de paragraphes laissés tels quels ; quand ils
+    le sont tous, rien n'a été écrit."""
+    if not kept:
+        return message
+    note = _t("preset.paragraphs_kept", count=kept)
+    return note if kept == changed else Written(message + " " + note)
+
+
+# Sans sélection, les actions Writer portent sur tout le document : le modèle
+# reçoit chaque section à part, et le résultat n'est écrit qu'une fois la
+# dernière réponse reçue (voir whole_document).
+
+def _read_document(ctx, span, action):
+    """Tout le document, lu sur le thread principal avant l'appel au modèle."""
+    snapshot = ctx.on_main(lambda: whole_document.read(ctx))
+    _legacy_telemetry(ctx, span, {"action": action,
+                                  "text_length": str(len(snapshot.text)),
+                                  "tables": str(len(snapshot.tables))})
+    return snapshot
+
+
+def _empty_message(snapshot):
+    """Un document fait de tableaux n'est pas vide aux yeux de l'utilisateur :
+    le message dit qu'il ne contient que des tableaux, ce qui reste vrai quand
+    leurs cellules, jamais lues, sont vides."""
+    return _t("palette.tables_only") if snapshot.tables else _t("palette.empty_document")
+
+
+def _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
+                    done_message):
+    """Bilan d'une action sur tout le document : `apply` n'écrit que si le
+    modèle a tout rendu, d'un seul passage sur le thread principal."""
+    if result.question:
+        return _t("preset.question_asked")
+    if result.error:
+        return Failed(result.error)
+    outcome = ctx.on_main(lambda: whole_document.write(
+        ctx, snapshot, apply, undo_label, cancel_event))
+    if outcome == "stopped":
+        return error_message("cancelled")
+    if outcome == "changed":
+        return _t("preset.target_changed")
+    return Written(whole_document.with_tables(snapshot, done_message))
+
+
+def _write_rewrite(ctx, snapshot, result, append_mode, undo_label, markers,
+                   cancel_event, done_message):
+    """Écrit les sections réécrites à leur place, ou en un bloc après le
+    dernier paragraphe entre les `markers` (début, fin)."""
+    if not (result.error or result.question or result.drafts):
+        return (_t("palette.headings_and_tables_only") if snapshot.tables
+                else _t("palette.headings_only"))
+
+    def apply():
+        if append_mode:
+            whole_document.append_block(
+                ctx, snapshot, whole_document.rewritten_lines(snapshot, result.drafts),
+                *markers)
+        else:
+            whole_document.replace(ctx, snapshot, result.drafts)
+
+    return _write_document(ctx, snapshot, result, apply, undo_label, cancel_event,
+                           done_message)
+
+
+def _summarize_document(ctx, shell, tee, cancel_event, progress):
+    """Le résumé de tout le document, inséré après son dernier paragraphe,
+    jamais à sa place."""
+    snapshot = _read_document(ctx, "SummarizeSelection", "summarize_selection")
+    if snapshot.empty:
+        return _empty_message(snapshot)
+    model = whole_document.Model(
+        _text_client(shell, int(shell.get_config("summarize_selection_max_tokens", 15000))),
+        _system(_SUMMARY_SYSTEM), cancel_event=cancel_event, progress=progress,
+        question_patterns=patterns_absent_from(snapshot.text, EXTEND_QUESTION_PATTERNS),
+        stop_phrases=STOP_PHRASES)
+    result = whole_document.summarize(model, snapshot, _summary_prompt,
+                                      whole_document.max_chars(shell), tee)
+    lines = [(line.strip(), "") for line in result.text.splitlines() if line.strip()]
+    return _write_document(
+        ctx, snapshot, result,
+        lambda: whole_document.append_block(ctx, snapshot, lines,
+                                            "---début-du-résumé---", "---fin-du-résumé---"),
+        _t("preset.undo_summarize"), cancel_event, _t("preset.done_summarize_document"))
+
+
+_SIMPLIFY_INSTRUCTION = (
+    "Réécris ce texte dans un langage clair et simple compréhensible par tous : "
+    "phrases courtes, mots courants (évite le jargon et les termes techniques), "
+    "voix active, exemples concrets quand c'est possible. Garde la MÊME LANGUE "
+    "que le texte original, ne traduis pas.")
+
+
+def _simplify_document(ctx, shell, tee, cancel_event, append_mode, progress):
+    snapshot = _read_document(ctx, "SimplifySelection", "simplify_selection")
+    if snapshot.empty:
+        return _empty_message(snapshot)
+    limit = whole_document.max_chars(shell)
+    model = whole_document.Model(
+        _text_client(shell, int(shell.get_config("simplify_selection_max_tokens", 15000))),
+        _simplify_system(shell), cancel_event=cancel_event, progress=progress,
+        question_patterns=patterns_absent_from(snapshot.text, SIMPLIFY_QUESTION_PATTERNS),
+        stop_phrases=STOP_PHRASES)
+    result = whole_document.rewrite(model, snapshot, lambda _originals: _SIMPLIFY_INSTRUCTION,
+                                    limit, tee)
+    done = (_t("preset.done_simplify_document") if append_mode
+            else _t("preset.done_simplify_document_replaced"))
+    return _write_rewrite(ctx, snapshot, result, append_mode, _t("preset.undo_simplify"),
+                          ("---reformulation-du-texte---", "---fin-de-reformulation---"),
+                          cancel_event, done)
+
+
+def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mode,
+                     progress):
+    snapshot = _read_document(ctx, "ResizeSelection", "resize_selection")
+    if snapshot.empty:
+        return _empty_message(snapshot)
+    goal = "plus courte" if ratio < 1 else "plus longue"
+
+    def instruction_for(originals):
+        words = max(1, int(round(len(" ".join(originals).split()) * ratio)))
+        return (f"Réécris ce texte en une version {goal} d'environ {words} mots. "
+                "Conserve le sens et le ton.")
+
+    limit = whole_document.max_chars(shell)
+    # Le plus long morceau compte environ un mot pour cinq caractères.
+    model = whole_document.Model(
+        _text_client(shell, max(1000, int(round(limit / 5 * ratio)) * 4)),
+        _system(_RESIZE_SYSTEM), cancel_event=cancel_event, progress=progress,
+        question_patterns=patterns_absent_from(snapshot.text, EXTEND_QUESTION_PATTERNS))
+    result = whole_document.rewrite(model, snapshot, instruction_for, limit, tee)
+    body_words = sum(len(text.split()) for text, style in zip(
+        snapshot.texts, snapshot.styles, strict=True) if not doc_rewrite.is_heading(style))
+    return _write_rewrite(ctx, snapshot, result, append_mode, undo_label,
+                          ("---début-du-texte-ajusté---", "---fin-du-texte-ajusté---"),
+                          cancel_event,
+                          _t("preset.resized", target=max(1, int(round(body_words * ratio)))))
+
+
+# Transformer fait un appel au modèle par ligne (500 lignes : 10 à 15 min), et
+# lit toute la plage d'un seul appel qui fige l'interface (50 000 cellules :
+# environ 1 s).
+TRANSFORM_MAX_ROWS = 500
+TRANSFORM_MAX_CELLS = 50000
+
+
+@dataclasses.dataclass
+class _TransformPlan:
+    """Ce que Transformer lit de la feuille avant le premier appel au modèle."""
+    sheet: object
+    col_range: range
+    row_count: int
+    sources: list        # (ligne, texte source) des lignes non vides
+    out_col: int
+    header: str          # en-tête à poser avec la première écriture, puis ""
+
+    @property
+    def too_large(self):
+        return (self.row_count > TRANSFORM_MAX_ROWS
+                or self.row_count * len(self.col_range) > TRANSFORM_MAX_CELLS)
+
+
+def _read_transform(ctx):
+    """Feuille, lignes sources et colonne de sortie, sans rien lire d'une plage
+    trop grande. Thread principal exclusivement."""
+    sheet = ctx.controller.ActiveSheet
+    col_range, row_range = calc_tools.used_part(
+        sheet, ctx.controller.getSelection().getRangeAddress())
+    plan = _TransformPlan(sheet, col_range, len(row_range), [], col_range.stop, "")
+    if plan.too_large:
+        return plan
+    for row in row_range:
+        source_text = _row_text(sheet, col_range, row)
+        if source_text:
+            plan.sources.append((row, source_text))
+    if plan.sources:
+        plan.out_col, needs_header = calc_tools.find_free_output_column(
+            sheet, col_range, row_range)
+        plan.header = calc_tools.next_result_header(sheet) if needs_header else ""
+    return plan
+
+
+SOURCE_CHANGED = "source modifiée pendant le run"
+
+
+def _row_text(sheet, col_range, row):
+    parts = [sheet.getCellByPosition(col, row).getString() for col in col_range]
+    return " | ".join(p for p in parts if p)
+
+
+def _write_result_row(plan, row, source_text, text):
+    """Écrit le résultat d'une ligne, précédé de l'en-tête à la première
+    écriture du run, et rend la raison d'un refus. Une ligne qui ne porte
+    plus la source lue avant le run n'est pas écrite : le résultat ne lui
+    correspond plus. Thread principal exclusivement."""
+    sheet = plan.sheet
+    if _row_text(sheet, plan.col_range, row) != source_text:
+        return SOURCE_CHANGED
+    if plan.header:
+        try:
+            header_cell = sheet.getCellByPosition(plan.out_col, 0)
+            header_cell.setString(plan.header)
+            calc_tools.apply_dominant_header_style(header_cell, sheet, plan.col_range)
+        except Exception:
+            pass
+        plan.header = ""
+    target_cell = sheet.getCellByPosition(plan.out_col, row)
+    try:
+        target_cell.setPropertyValue("IsTextWrapped", True)
+    except Exception:
+        pass
+    refusal = calc_tools.safe_set_string(target_cell, text)
+    try:
+        row_obj = sheet.getRows().getByIndex(row)
+        row_obj.OptimalHeight = True
+        if row_obj.Height > 2500:
+            row_obj.Height = 2500
+            row_obj.OptimalHeight = False
+    except Exception:
+        pass
+    return refusal
+
+
+def _fit_result_column(plan):
+    """Thread principal exclusivement."""
+    try:
+        col_obj = plan.sheet.getColumns().getByIndex(plan.out_col)
+        col_obj.OptimalWidth = True
+        if col_obj.Width < 8000:
+            col_obj.Width = 8000
+        elif col_obj.Width > 15000:
+            col_obj.Width = 15000
+    except Exception:
+        pass
+
+
+def _transform_message(out_col, transformed, refused, skipped):
+    message = _t("preset.done_transform", count=transformed,
+                 col=calc_tools.col_letter(out_col))
+    if refused:
+        message += " " + _t("preset.refused_transform", count=refused)
+    if skipped:
+        message += " " + _t("preset.skipped_transform", count=skipped)
+    return Written(message) if transformed else message
+
+
+def _no_source_message(plan):
+    if plan.too_large:
+        return _t("preset.transform_too_large", rows=plan.row_count,
+                  cols=len(plan.col_range), max_rows=TRANSFORM_MAX_ROWS,
+                  max_cells=TRANSFORM_MAX_CELLS)
+    return _t("preset.need_transform_values")
 
 
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
-                  dispatcher=None, append_mode=True):
-    sheet = ctx.controller.ActiveSheet
-    area = ctx.controller.getSelection().getRangeAddress()
-    col_range = range(area.StartColumn, area.EndColumn + 1)
-    row_range = range(area.StartRow, area.EndRow + 1)
-    _legacy_telemetry(ctx, "TransformToColumn",
-                      {"context": "calc", "rows": str(len(row_range))})
+                  dispatcher=None, append_mode=True, progress=None):
     if not user_text.strip():
         return _t("preset.need_transform_input")
+    plan = ctx.on_main(lambda: _read_transform(ctx))
+    _legacy_telemetry(ctx, "TransformToColumn",
+                      {"context": "calc", "rows": str(plan.row_count)})
+    if not plan.sources:
+        return _no_source_message(plan)
 
     system_prompt = _system(
         "Tu es un assistant de transformation de données. "
@@ -334,86 +782,117 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
         "(pas de **, *, _, #, `, etc.).")
     llm = _text_client(shell, 2000)
 
-    out_col, needs_header = calc_tools.find_free_output_column(
-        sheet, col_range, row_range)
-    if needs_header:
-        try:
-            header_cell = sheet.getCellByPosition(out_col, 0)
-            header_cell.setString(calc_tools.next_result_header(sheet))
-            calc_tools.apply_dominant_header_style(header_cell, sheet, col_range)
-        except Exception:
-            pass
-
-    transformed = 0
-    ctx.undo_begin(_t("preset.undo_transform"))
+    # Chaque ligne est écrite dès sa réponse complète, dans un seul contexte
+    # d'annulation ouvert à la première écriture : un Ctrl+Z retire le run.
+    transformed = refused = skipped = 0
+    interrupted = ""
     try:
-        for row in row_range:
-            parts = [sheet.getCellByPosition(col, row).getString()
-                     for col in col_range]
-            source_text = " | ".join(p for p in parts if p)
-            if not source_text:
-                continue
-            target_cell = sheet.getCellByPosition(out_col, row)
-            target_cell.setString("")
-            try:
-                target_cell.setPropertyValue("IsTextWrapped", True)
-            except Exception:
-                pass
+        for row, source_text in plan.sources:
             prompt = ("VALEUR SOURCE :\n" + source_text
                       + "\n\nINSTRUCTION : " + user_text + "\n\nRÉSULTAT :")
-            sink = CalcCellSink(target_cell, tee=tee)
+            sink = CalcCellSink(ctx, partial(_write_result_row, plan, row, source_text),
+                                tee=tee)
             step = llm.step([{"role": "system", "content": system_prompt},
                              {"role": "user", "content": prompt}],
                             on_text_delta=sink.stream_delta,
-                            cancel_event=cancel_event)
+                            cancel_event=cancel_event, progress=progress)
             if step.error:
-                target_cell.setString("#ERREUR: " + step.error)
-                return error_message(step.error)
+                interrupted = step.error
+                # Un arrêt n'écrit rien pour la ligne en cours ; une erreur la signale.
+                if step.error != "cancelled":
+                    ctx.undo_begin(_t("preset.undo_transform"))
+                    ctx.on_main(partial(_write_result_row, plan, row, source_text,
+                                        "#ERREUR: " + step.error))
+                break
+            ctx.undo_begin(_t("preset.undo_transform"))
             sink.finish(step.text, step.streamed)
-            transformed += 1
-            try:
-                row_obj = sheet.getRows().getByIndex(row)
-                row_obj.OptimalHeight = True
-                if row_obj.Height > 2500:
-                    row_obj.Height = 2500
-                    row_obj.OptimalHeight = False
-            except Exception:
-                pass
-
-        try:
-            col_obj = sheet.getColumns().getByIndex(out_col)
-            col_obj.OptimalWidth = True
-            if col_obj.Width < 8000:
-                col_obj.Width = 8000
-            elif col_obj.Width > 15000:
-                col_obj.Width = 15000
-        except Exception:
-            pass
-        return _t("preset.done_transform", count=transformed,
-                  col=calc_tools.col_letter(out_col))
+            if sink.written:
+                transformed += 1
+            elif sink.refusal == SOURCE_CHANGED:
+                skipped += 1
+            elif sink.refusal:
+                refused += 1
+        if transformed or refused:
+            ctx.on_main(lambda: _fit_result_column(plan))
     finally:
         ctx.undo_end()
 
+    if interrupted:
+        return Failed(interrupted)
+    return _transform_message(plan.out_col, transformed, refused, skipped)
+
+
+def _read_table(ctx, max_chars):
+    """Feuille, colonnes et lignes utilisées de la sélection, lignes du tableau
+    tant qu'elles tiennent dans `max_chars` (la première toujours) et présence
+    de données. Thread principal exclusivement."""
+    sheet = ctx.controller.ActiveSheet
+    cols, rows = calc_tools.used_part(
+        sheet, ctx.controller.getSelection().getRangeAddress())
+    lines = []
+    has_data = False
+    size = 0
+    for r in rows:
+        cells = [sheet.getCellByPosition(c, r).getString() for c in cols]
+        line = " | ".join(cells)
+        if lines and size + len(line) > max_chars:
+            break
+        size += len(line) + 1
+        has_data = has_data or any(cells)
+        lines.append(line)
+    return sheet, cols, rows, lines, has_data
+
+
+def _table_text(lines, total):
+    text = "\n".join(lines).strip()
+    if len(lines) < total:
+        text += (f"\n[... tableau tronqué : seules les {len(lines)} premières lignes "
+                 f"sur {total} sont fournies ...]")
+    return text
+
+
+def _excerpt_note(read, total):
+    """Première ligne de la cellule d'analyse quand le tableau n'a été envoyé
+    qu'en partie : la cellule le dit encore une fois la palette fermée."""
+    if read < total:
+        return _t("preset.analysis_excerpt", rows=read, total=total) + "\n"
+    return ""
+
+
+def _write_analysis(sheet, cols, rows, note, text):
+    """Écrit l'analyse dans une cellule fusionnée deux lignes sous le tableau,
+    précédée de `note`, et rend la raison d'un refus. Thread principal
+    exclusivement."""
+    out_row = rows.stop + 1
+    target_cell = sheet.getCellByPosition(cols.start, out_row)
+    try:
+        merged = sheet.getCellRangeByPosition(
+            cols.start, out_row, cols.stop - 1, out_row)
+        merged.merge(True)
+    except Exception:
+        pass
+    try:
+        target_cell.setPropertyValue("IsTextWrapped", True)
+    except Exception:
+        pass
+    refusal = calc_tools.safe_set_string(target_cell, note + text)
+    try:
+        sheet.getRows().getByIndex(out_row).OptimalHeight = True
+    except Exception:
+        pass
+    return refusal
+
 
 def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
-                dispatcher=None, append_mode=True):
-    sheet = ctx.controller.ActiveSheet
-    area = ctx.controller.getSelection().getRangeAddress()
+                dispatcher=None, append_mode=True, progress=None):
+    limit = whole_document.max_chars(shell)
+    sheet, cols, rows, lines, has_data = ctx.on_main(lambda: _read_table(ctx, limit))
     _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
-
-    rows = []
-    has_data = False
-    for r in range(area.StartRow, area.EndRow + 1):
-        cells = [sheet.getCellByPosition(c, r).getString()
-                 for c in range(area.StartColumn, area.EndColumn + 1)]
-        has_data = has_data or any(cells)
-        rows.append(" | ".join(cells))
-    table_text = "\n".join(rows).strip()
     if not has_data:
         return _t("preset.need_range")
 
     prompt = (
-        "DONNÉES :\n" + table_text + "\n\n"
+        "DONNÉES :\n" + _table_text(lines, len(rows)) + "\n\n"
         "Analyse ces données : tendances, anomalies, points remarquables.\n"
         "Sois concis et factuel. Réponds dans la même langue que les données.\n"
         + (("Question de l'utilisateur : " + user_text + "\n") if user_text.strip() else "")
@@ -425,35 +904,26 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     max_tokens = int(shell.get_config("analyze_range_max_tokens", 4000))
     llm = _text_client(shell, max_tokens)
 
-    out_row = area.EndRow + 2
-    target_cell = sheet.getCellByPosition(area.StartColumn, out_row)
+    note = _excerpt_note(len(lines), len(rows))
+    sink = CalcCellSink(ctx, partial(_write_analysis, sheet, cols, rows, note), tee=tee)
+    step = llm.step([{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": prompt}],
+                    on_text_delta=sink.stream_delta,
+                    cancel_event=cancel_event, progress=progress)
+    if step.error:
+        return Failed(step.error)
     ctx.undo_begin(_t("preset.undo_analyze"))
     try:
-        try:
-            merged = sheet.getCellRangeByPosition(
-                area.StartColumn, out_row, area.EndColumn, out_row)
-            merged.merge(True)
-        except Exception:
-            pass
-        try:
-            target_cell.setPropertyValue("IsTextWrapped", True)
-        except Exception:
-            pass
-        sink = CalcCellSink(target_cell, tee=tee)
-        step = llm.step([{"role": "system", "content": system_prompt},
-                         {"role": "user", "content": prompt}],
-                        on_text_delta=sink.stream_delta,
-                        cancel_event=cancel_event)
-        if step.error:
-            return error_message(step.error)
         sink.finish(step.text, step.streamed)
-        try:
-            sheet.getRows().getByIndex(out_row).OptimalHeight = True
-        except Exception:
-            pass
-        return _t("preset.done_analyze")
     finally:
         ctx.undo_end()
+    if sink.refusal:
+        return _t("preset.refused_analyze")
+    if not sink.written:
+        return error_message("empty_response")
+    if note:
+        return Written(_t("preset.done_analyze_partial", rows=len(lines), total=len(rows)))
+    return Written(_t("preset.done_analyze"))
 
 
 FORMULA_RULES = (
@@ -498,6 +968,8 @@ def relevant_functions(user_text, limit=8):
     words = set(re.findall(r"[a-zà-ÿ]{3,}", user_text.lower()))
     scored = []
     for name, info in db.items():
+        if formula_refusal(str(info.get("ex", ""))):
+            continue
         haystack = (name + " " + str(info.get("desc", ""))
                     + " " + str(info.get("cat", ""))).lower()
         score = sum(1 for w in words if w in haystack)
@@ -513,10 +985,9 @@ def relevant_functions(user_text, limit=8):
 
 
 def _formula_extra(ctx, shell, user_text):
-    sheet = ctx.controller.ActiveSheet
-    area = ctx.controller.getSelection().getRangeAddress()
-    extra = FORMULA_RULES + "\n\nCONTEXTE DE LA FEUILLE :\n" \
-        + calc_tools.build_schema_context(sheet, area)
+    sheet_context = ctx.on_main(lambda: calc_tools.build_schema_context(
+        ctx.controller.ActiveSheet, ctx.controller.getSelection().getRangeAddress()))
+    extra = FORMULA_RULES + "\n\nCONTEXTE DE LA FEUILLE :\n" + sheet_context
     functions = relevant_functions(user_text)
     if functions:
         extra += "\n\nFONCTIONS PERTINENTES :\n" + functions
@@ -534,6 +1005,10 @@ PRESETS = [
            mode="pipeline", runner=run_shorten),
     Preset(id="lengthen", label_key="preset.lengthen", apps=("writer",),
            mode="pipeline", runner=run_lengthen),
+    Preset(id="correct", label_key="preset.correct", apps=("writer",),
+           mode="pipeline", runner=run_correct),
+    Preset(id="translate", label_key="preset.translate", apps=("writer",),
+           mode="pipeline", runner=run_translate),
     Preset(id="transform", label_key="preset.transform", apps=("calc",),
            mode="pipeline", needs_input=True,
            input_hint_key="preset.transform_hint",

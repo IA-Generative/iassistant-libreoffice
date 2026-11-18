@@ -7,14 +7,20 @@ relais (429/401/403/5xx) avec corrélation X-Request-Id, retry_after, anti-temp�
 No LibreOffice required — UNO modules are stubbed.
 """
 import io
-import time
 import unittest
 import urllib.error
 from email.message import Message
 
+import pytest
+
 from tests.stubs.uno_stubs import install, make_job
 
 install()
+
+from src.mirai.core import sse_pump  # install() doit précéder l'import
+from src.mirai.core.shell_facade import MainJobShell
+
+_RATE_LIMITED = '{"error": {"code": "rate_limit_exceeded"}, "retry_after": 30}'
 
 
 def _http_error(code, body=b"", headers=None):
@@ -84,56 +90,67 @@ class TestSendLlmRelayError(unittest.TestCase):
         self.job._send_llm_relay_error(401, "invalid_api_key")
         self.assertEqual(len(self.sent), 2)
 
-    def test_emits_again_after_window(self):
-        self.job._send_llm_relay_error(429, "rate_limit_exceeded")
-        self.job._llm_error_last_sent["rate_limit_exceeded"] = (
-            time.time() - self.job._LLM_ERROR_DEDUP_SECONDS - 1)
-        self.job._send_llm_relay_error(429, "rate_limit_exceeded")
-        self.assertEqual(len(self.sent), 2)
+
+@pytest.fixture
+def relay_error_codes(monkeypatch):
+    """Codes des LlmRelayError émis, toutes instances de MainJob confondues."""
+    from src.mirai import entrypoint
+    codes = []
+
+    def capture(job, span_name, attributes=None):
+        if span_name == "LlmRelayError":
+            codes.append(attributes["llm.error_code"])
+
+    monkeypatch.setattr(entrypoint, "send_telemetry_trace_async", capture)
+    return codes
 
 
-class TestStreamRequest429(unittest.TestCase):
-    """Le 429 du proxy traverse stream_request : télémétrie + message utilisateur."""
+def _new_action():
+    """LibreOffice crée un MainJob par action : réouverture de la palette,
+    clic sur « Tester le modèle »…"""
+    return MainJobShell(make_job())
 
-    def setUp(self):
-        self.job = make_job()
-        self.sent = []
-        self.messages = []
-        self.job._send_telemetry = lambda name, attrs=None: self.sent.append((name, attrs))
-        self.job._show_message = lambda title, msg: self.messages.append((title, msg))
-        self.job._show_thinking = lambda: None
-        self.job._update_thinking_dots = lambda: None
-        self.job._close_thinking = lambda: None
-        self.job.get_ssl_context = lambda *a, **k: None
 
-    def test_429_emits_telemetry_and_user_message(self):
-        body = (b'{"error": {"message": "Rate limit exceeded", '
-                b'"type": "rate_limit_exceeded", "code": "rate_limit_exceeded"}, '
-                b'"retry_after": 30}')
+def test_dedup_holds_across_mainjob_instances(relay_error_codes, fast_clock):
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    fast_clock.sleep(59)
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    assert relay_error_codes == ["rate_limit_exceeded"]
 
-        def raising_urlopen(request, context=None, timeout=None, use_proxy=True):
-            raise _http_error(429, body, {"X-Request-Id": "trace-429",
-                                          "Retry-After": "30"})
 
-        self.job._urlopen = raising_urlopen
-        request = urllib.request.Request("https://dm.test/llm/v1/chat/completions")
-        chunks = []
-        self.job.stream_request(request, "chat", chunks.append)
+def test_emits_again_once_the_window_is_over(relay_error_codes, fast_clock):
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    fast_clock.sleep(60)
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    assert relay_error_codes == ["rate_limit_exceeded", "rate_limit_exceeded"]
 
-        # Télémétrie LlmRelayError conforme § 8 bis, corrélée au serveur.
-        relay_events = [(n, a) for n, a in self.sent if n == "LlmRelayError"]
-        self.assertEqual(len(relay_events), 1)
-        _, attrs = relay_events[0]
-        self.assertEqual(attrs["llm.status_code"], 429)
-        self.assertEqual(attrs["llm.error_code"], "rate_limit_exceeded")
-        self.assertEqual(attrs["llm.retry_after_s"], 30)
-        self.assertEqual(attrs["llm.request_id"], "trace-429")
-        self.assertFalse(attrs["llm.will_retry"])
-        # UX : retry_after affiché à l'utilisateur, pas de réessai automatique.
-        self.assertEqual(len(self.messages), 1)
-        self.assertIn("30 secondes", self.messages[0][1])
-        # Aucun chunk de contenu n'a été produit.
-        self.assertEqual(chunks, [])
+
+def test_each_error_code_keeps_its_own_window(relay_error_codes):
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    _new_action().report_llm_network_error("timed out")
+    _new_action().report_llm_error(429, _RATE_LIMITED)
+    assert relay_error_codes == ["rate_limit_exceeded", "timeout"]
+
+
+def test_a_429_from_the_relay_is_correlated_with_the_server_audit():
+    """Le 429 du relais, lu par le flux de la palette, émet un LlmRelayError
+    conforme au § 8 bis, corrélé à l'audit serveur par X-Request-Id."""
+    job = make_job()
+    sent = []
+    job._send_telemetry = lambda name, attrs=None: sent.append((name, attrs))
+    shell = MainJobShell(job)
+
+    def refuse(request, timeout=None):
+        raise _http_error(429, _RATE_LIMITED.encode("utf-8"), {"X-Request-Id": "trace-429"})
+
+    shell.urlopen = refuse
+
+    sse_pump.run_stream(shell, object(), lambda event: None)
+
+    assert [(name, attrs["llm.status_code"], attrs["llm.error_code"],
+             attrs["llm.retry_after_s"], attrs["llm.request_id"], attrs["llm.will_retry"])
+            for name, attrs in sent] == [
+        ("LlmRelayError", 429, "rate_limit_exceeded", 30, "trace-429", False)]
 
 
 if __name__ == "__main__":

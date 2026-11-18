@@ -67,31 +67,6 @@ except Exception:
     _XCMDENV_IFACE = None
     _XINTERACTION_IFACE = None
 
-try:
-    from com.sun.star.util import XModifyListener as _XMODIFY_LISTENER_IFACE
-except Exception:
-    _XMODIFY_LISTENER_IFACE = None
-
-if _XMODIFY_LISTENER_IFACE is not None:
-    class MirAIUninstallListener(unohelper.Base, _XMODIFY_LISTENER_IFACE):
-        """Notifié à chaque changement du Gestionnaire des extensions : LibreOffice
-        n'offre aucun crochet de désinstallation, seule cette notification, sans
-        détail, arrive (dans le processus qui désinstalle)."""
-
-        def __init__(self, on_modified):
-            self._on_modified = on_modified
-
-        def modified(self, _event):
-            try:
-                self._on_modified()
-            except Exception as exc:
-                log_to_file(f"[désinstallation] {exc}")
-
-        def disposing(self, _event):
-            return
-else:
-    MirAIUninstallListener = None
-
 if _XCALLBACK_IFACE is not None:
     class _MainThreadCallback(unohelper.Base, _XCALLBACK_IFACE):
         """Exécute un callable sur le thread PRINCIPAL de LibreOffice, planifié via
@@ -166,11 +141,6 @@ except ImportError:
     XMouseListener = _S5
     XTopWindowListener = _S7
     PropertyValue = _S8
-try:
-    from com.sun.star.view import XSelectionChangeListener
-except ImportError:
-    class _S12: pass
-    XSelectionChangeListener = _S12
 import uno
 import os
 import logging
@@ -184,26 +154,20 @@ import threading
 import socket
 import platform
 import shutil
-import subprocess
 import tempfile
-from .formatting import insert_formatted
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import credentials, feed_rewrite, local_config, log_setup
-from .menu_actions.writer import handle_writer_action
-from .menu_actions.calc import handle_calc_action
-from .menu_actions.shared import apply_settings_result
 from .i18n import t as _t
 from .i18n import (
     get_locale as _i18n_get_locale,
-    resolve_locale as _i18n_resolve_locale,
     set_locale as _i18n_set_locale,
 )
-from .security_flow import (
-    SecureBootstrapFlow,
-    FileJsonStore,
-    FileQueueStore,
-    default_vault,
-    Ed25519Provider,
-)
+from .shell import config_fetch, dm_bases
+from .shell import runtime as _shell_runtime
+from .shell.open_url import open_url
+from .shell.settings_result import apply_settings_result
+from .shell.ui_locale import extension_locale as _extension_locale
+from .shell.uninstall import UninstallWatch
 
 
 PLUGIN_NAME = "MIrAI-LibreOffice"
@@ -235,17 +199,13 @@ _UI = {
     "bg":              0xFFFFFF,   # white background
     "bg_section":      0xF6F6F6,   # light-grey section background
     "bg_input":        0xFCFCFC,   # very light input background
-    "bg_header":      0x000091,   # Bleu France (DSFR primary)
-    "bg_accent":       0xF5F5FE,   # light blue accent
     "text":            0x161616,   # almost-black text
     "text_secondary":  0x666666,   # secondary grey text
     "text_light":      0x929292,   # light hint text
-    "text_on_dark":    0xFFFFFF,   # white text on dark backgrounds
     "border":          0xDDDDDD,   # subtle border grey
     "primary":         0x000091,   # Bleu France
     "primary_hover":   0x1212FF,   # lighter blue
     "success":         0x18753C,   # DSFR success green
-    "warning":         0xB34000,   # DSFR warning orange
     "error":           0xCE0500,   # DSFR error red
     "info":            0x0063CB,   # DSFR info blue
     "status_ok":       0x18753C,   # connected
@@ -285,12 +245,6 @@ def _redact_header_value(name, value):
     if key in ("authorization", "x-api-key", "api-key", "proxy-authorization", "x-relay-key"):
         return "<redacted>"
     return value
-
-def _redacted_headers(headers):
-    safe = {}
-    for key, value in (headers or {}).items():
-        safe[key] = _redact_header_value(key, value)
-    return safe
 
 def _curl_headers_for_log(headers):
     parts = []
@@ -384,7 +338,7 @@ def send_telemetry_trace_async(config, span_name, attributes=None):
 
     Args:
         config: Configuration object with telemetry settings
-        span_name: Name of the span (e.g., "ExtendSelection", "EditSelection")
+        span_name: Name of the span (e.g., "SummarizeSelection", "AnalyzeRange")
         attributes: Optional dictionary of additional attributes
     """
     thread = threading.Thread(
@@ -403,7 +357,7 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
 
     Args:
         config: MainJob object with get_config() method
-        span_name: Name of the span (e.g., "ExtendSelection", "EditSelection")
+        span_name: Name of the span (e.g., "SummarizeSelection", "AnalyzeRange")
         attributes: Optional dictionary of additional attributes
     """
     endpoint = "unknown"  # Initialize endpoint for error handling
@@ -479,14 +433,6 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
             ]
         }
 
-        # Preferred secure telemetry pipeline (bootstrap/enroll/token rotation + offline queue).
-        try:
-            handled = bool(config._secure_send_telemetry_payload(payload, span_name))
-            if handled:
-                return
-        except Exception as e:
-            log_to_file(f"Secure telemetry pipeline unavailable, fallback legacy sender: {str(e)}")
-
         if log_json:
             log_to_file("=== Telemetry Request ===")
             log_to_file(f"URL: {endpoint}")
@@ -555,6 +501,12 @@ def _send_telemetry_trace_impl(config, span_name, attributes=None):
         log_to_file("=== End Telemetry Exception ===")
 
 
+class _CallbackServer(ThreadingHTTPServer):
+    # Sous Windows, SO_REUSEADDR laisse un autre processus écouter sur le même port
+    # et recevoir le callback à notre place : le bind doit échouer.
+    allow_reuse_address = platform.system() != "Windows"
+
+
 def _render_callback_page():
     """Page shown in the browser once the OAuth redirect has reached the extension."""
     def text(key):
@@ -587,47 +539,28 @@ def _render_callback_page():
 
 
 class MainJob(unohelper.Base, XJobExecutor, XJob):
-    _uninstall_listener_cls = None
-    _self_update_in_flight_cls = False
-    _wiped_cls = False
-    _UNINSTALL_CHECK_DELAY_SECONDS = 3.0
-    _DEPLOYMENT_REPOSITORIES = ("user", "shared", "bundled")
+    # Méthodes par lesquelles __init__ lance un thread ou un timer ; la relance
+    # de /config part d'un getter (_ensure_extension_uuid → get_config).
+    STARTUP_TASKS = (
+        "_schedule_config_refresh",
+        "_send_telemetry",
+        "_ensure_device_management_state_async",
+        "_schedule_update_reconciliation",
+        "_schedule_native_feed_check",
+        "_schedule_feed_rewrite",
+        "_schedule_enrollment_check",
+    )
+    runtime = property(lambda self: _shell_runtime.get())
     _EXTENSION_MANAGER = "/singletons/com.sun.star.deployment.ExtensionManager"
     # Caches dérivés d'une version, d'un modèle ou d'un DM : jamais conservés
     # d'une installation à l'autre.
     _DERIVED_CACHE_KEYS = ("assistant_model_capabilities", "llm_tool_mode_detected",
-                           "calc_transform_suggestions_cache", "last_bootstrap_url")
+                           "calc_transform_suggestions_cache")
     # Émis par un DM précis : sans valeur pour un autre environnement.
     _ENVIRONMENT_BOUND_KEYS = ("enrolled", "relay_client_id", "relay_client_key",
-                               "relay_key_expires_at", "refresh_token",
-                               "access_token", "access_token_expires_at")
-    # Class-level flags shared across all instances to prevent duplicate wizards/updates
-    _enrollment_dismissed_cls = False
-    _enrollment_wizard_active_cls = False
-    _enrollment_wizard_lock_cls = threading.Lock()
-    _update_in_progress_cls = False
-    # Target versions whose install-script launch was blocked by the workstation
-    # policy (e.g. WinError 5 from AppLocker / Defender ASR). Recorded so we stop
-    # re-downloading / re-prompting the same update in a loop.
-    _update_launch_blocked_cls = set()
-    _update_lock_cls = threading.Lock()
-    # Réconciliation post-redémarrage de la MAJ précédente : une seule fois par
-    # process (voir _schedule_update_reconciliation / _reconcile_update_state).
-    _update_reconcile_started_cls = False
-    # Diagnostic passif du feed natif : une seule fois par process
-    # (voir _schedule_native_feed_check / _check_native_feed).
-    _feed_check_started_cls = False
-    # Réécriture de l'adresse du feed dans description.xml : planifiée une fois
-    # par process au démarrage ; verrou partagé avec les réécritures déclenchées
-    # par /config.
-    _feed_rewrite_started_cls = False
-    _feed_rewrite_lock_cls = threading.Lock()
-    # Préparation du stockage local (journal, migration, empreinte) : une fois
-    # par processus.
-    _storage_ready_cls = False
-    _storage_lock_cls = threading.Lock()
-    _feed_rewrite_last_cls = None           # dernière version inscrite avec succès
-    _feed_rewrite_last_result_cls = None    # (résultat, version) du dernier appel
+                               "relay_key_expires_at", "relay_dm_base", "refresh_token",
+                               "access_token", "access_token_expires_at",
+                               "dm_bootstrap_urls", "last_bootstrap_url")
 
     def __init__(self, ctx):
         log_to_file("=== MainJob.__init__ called ===")
@@ -659,31 +592,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self._relay_recovery_last_at = 0
         self._llm_auth_recovery_lock = threading.Lock()
         self._llm_auth_recovery_last_at = 0
-        self._edit_dialog = None
-        self._resize_dialog = None
-        self._formula_dialog = None
-        self._formula_dialog_state = None
-        self._secure_flow = None
-        self._secure_flow_lock = threading.RLock()
-        self._secure_flow_init_error = None
-        self._secure_legacy_fallback_logged = False
         self._trigger_source = "auto"
         self._last_loaded_ca_bundle = None
         self._last_ca_bundle_error = None
         self._last_logged_ca_bundle_error = None
         # Update & feature toggling (schema_version 2)
         self._features_cache = {}
-        # handling different situations (inside LibreOffice or other process)
-        try:
-            self.sm = ctx.getServiceManager()
-            self.desktop = XSCRIPTCONTEXT.getDesktop()
-            self.document = XSCRIPTCONTEXT.getDocument()
-            log_to_file("MainJob initialized with XSCRIPTCONTEXT")
-        except NameError:
-            self.sm = ctx.ServiceManager
-            self.desktop = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.frame.Desktop", self.ctx)
-            log_to_file("MainJob initialized without XSCRIPTCONTEXT")
+        self.sm = ctx.ServiceManager
+        self.desktop = self.ctx.getServiceManager().createInstanceWithContext(
+            "com.sun.star.frame.Desktop", self.ctx)
 
         try:
             self._prepare_local_storage()
@@ -693,7 +610,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         # The extension speaks LibreOffice's own UI language, like its menu
         # entries (oxt/Addons.xcu), and English when it does not offer it.
         try:
-            resolved_language = _i18n_set_locale(_i18n_resolve_locale(self.ctx))
+            resolved_language = _i18n_set_locale(_extension_locale(self.ctx))
             log_to_file(f"UI language set to: {resolved_language}")
         except Exception as e:
             log_to_file(f"Failed to resolve UI language: {str(e)}")
@@ -709,7 +626,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         try:
             self._ensure_extension_uuid()
             self._ensure_plugin_uuid()
-            self._warmup_secure_flow_async()
             self._send_telemetry("ExtensionLoaded", {
                 "event.type": "extension_loaded",
                 "extension.context": "libreoffice_writer",
@@ -769,53 +685,19 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "FeedRewrite": "update",
         "UpdateNativeDialogShown": "update",
         "UpdateCloseDeferred": "update",
-        "ExtendSelection": "extend",
-        "EditSelection": "edit",
         "ResizeSelection": "resize",
         "SummarizeSelection": "summarize",
         "SimplifySelection": "simplify",
         "TransformToColumn": "transform",
-        "GenerateFormula": "formula",
         "AnalyzeRange": "analyze",
-        "OpenmiraiWebsite": "website",
         "OpenDocumentation": "docs",
         "OpenSettings": "settings",
         "AboutDialog": "about",
         "EnrollSuccess": "enroll.ok",
         "EnrollFailed": "enroll.fail",
-        "BootstrapConfig": "bootstrap",
         "LlmRelayError": "llm.error",
         "ConfigWaitAtTrigger": "config.wait",
         "ActionUnhandled": "dispatch.unhandled",
-    }
-
-    # Une action non gérée signalée une fois par nom et par session : un
-    # utilisateur qui reclique sur une entrée de menu morte ne doit pas
-    # produire une rafale de traces.
-    _unhandled_reported_cls = set()
-
-    # Spans émis AVANT que le poste ne soit lié à un utilisateur. Les autres
-    # sont jetés tant que l'identité télémétrie n'est pas "user" — ceux-ci
-    # décrivent le poste, pas la personne, et sont justement ceux dont on a
-    # besoin quand rien ne fonctionne encore.
-    _TECHNICAL_EVENTS = {
-        "ExtensionLoaded",
-        "OpenSettings",
-        "OpenmiraiWebsite",
-        "ConfigWaitAtTrigger",
-        "ActionUnhandled",
-        # Flux de mise à jour : télémétrie technique de flotte,
-        # envoyée même avant la liaison utilisateur.
-        "UpdateStaged",
-        "UpdateAccepted",
-        "UpdatePostponed",
-        "UpdateInstalledPendingRestart",
-        "UpdateInstallFailed",
-        "UpdateNativeDialogShown",
-        "UpdateCloseDeferred",
-        "ExtensionUpdated",
-        "NativeFeedCheck",
-        "FeedRewrite",
     }
 
     def _send_telemetry(self, span_name, attributes=None):
@@ -869,12 +751,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """
         try:
             now = time.time()
-            if not hasattr(self, "_llm_error_last_sent"):
-                self._llm_error_last_sent = {}
             key = str(error_code or "unknown")
-            if now - self._llm_error_last_sent.get(key, 0) < self._LLM_ERROR_DEDUP_SECONDS:
+            if now - self.runtime.llm_error_last_sent.get(key, 0) < self._LLM_ERROR_DEDUP_SECONDS:
                 return
-            self._llm_error_last_sent[key] = now
+            self.runtime.llm_error_last_sent[key] = now
             attrs = {
                 "llm.status_code": int(status_code or 0),
                 "llm.error_code": key,
@@ -916,9 +796,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _report_unhandled_action(self, action, model):
         """Émet ActionUnhandled une fois par nom d'action et par session."""
         try:
-            if action in MainJob._unhandled_reported_cls:
+            if action in self.runtime.unhandled_reported:
                 return
-            MainJob._unhandled_reported_cls.add(action)
+            self.runtime.unhandled_reported.add(action)
             self._send_telemetry("ActionUnhandled", {
                 "action": str(action),
                 "document": type(model).__name__,
@@ -953,105 +833,26 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         base = self._data_dir()
         return os.path.join(base, "pending_update") if base else ""
 
-    def _prompt_log_path(self):
-        base = "" if local_config.is_frozen() else self._data_dir()
-        return os.path.join(base, "prompt.txt") if base else ""
-
     def _prepare_local_storage(self):
-        """Une fois par processus : journal, migration du dossier legacy,
-        secrets hors de settings.json, empreinte d'installation, écoute de
-        désinstallation."""
-        with MainJob._storage_lock_cls:
-            if MainJob._storage_ready_cls:
-                return
-            MainJob._storage_ready_cls = True
-        data_dir = self._data_dir()
-        if data_dir:
-            log_setup.install(data_dir)
-            for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
-                log_to_file(f"[stockage] {action}")
-            self._move_secrets_out_of_settings()
-            self._apply_install_changes(self._local_config().record_install(
-                self._get_extension_version(), self._package_root_dir() or ""))
-            try:
-                self._register_uninstall_listener()
-            except Exception as exc:
-                log_to_file(f"[désinstallation] écoute impossible : {exc}")
-
-    def _register_uninstall_listener(self):
-        if MainJob._uninstall_listener_cls is not None:
-            return
-        if MirAIUninstallListener is None:
-            log_to_file("[désinstallation] écoute non branchée : XModifyListener indisponible")
-            return
-        manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
-        if manager is None:
-            log_to_file("[désinstallation] écoute non branchée : "
-                        "gestionnaire des extensions introuvable")
-            return
-        listener = MirAIUninstallListener(self._schedule_uninstall_check)
-        manager.addModifyListener(listener)
-        MainJob._uninstall_listener_cls = listener
-
-    def _schedule_uninstall_check(self):
-        # Différé : la base des extensions doit être stabilisée (remplacement en
-        # cours, mise à jour native) avant de conclure à une désinstallation.
-        timer = threading.Timer(self._UNINSTALL_CHECK_DELAY_SECONDS, self._check_uninstalled)
-        timer.daemon = True
-        timer.start()
-
-    def _extension_still_deployed(self):
-        """True si l'extension figure encore dans un dépôt ; True aussi dans le
-        doute (API en échec) : on n'efface jamais sur une absence d'information.
-        Une extension désactivée reste listée."""
+        """Une fois par processus, retentée par le MainJob suivant tant qu'elle
+        échoue : journal, migration du dossier legacy, secrets hors de
+        settings.json, empreinte d'installation, écoute de désinstallation."""
+        with self.runtime.storage_lock:
+            data_dir = self._data_dir()
+            if data_dir and not self.runtime.storage_ready:
+                log_setup.install(data_dir)
+                for action in self._local_config().migrate_legacy(local_config.legacy_home_dir()):
+                    log_to_file(f"[stockage] {action}")
+                self._move_secrets_out_of_settings()
+                self._local_config().record_install(
+                    self._get_extension_version(), self._package_root_dir() or "",
+                    self._apply_install_changes)
+                self.runtime.storage_ready = True
         try:
-            manager = self.ctx.getValueByName(self._EXTENSION_MANAGER)
-            for repository in self._DEPLOYMENT_REPOSITORIES:
-                packages = manager.getDeployedExtensions(
-                    repository, manager.createAbortChannel(), None)
-                for package in packages or ():
-                    identifier = package.getIdentifier()
-                    if getattr(identifier, "Value", identifier) == _EXTENSION_IDENTIFIER:
-                        return True
+            UninstallWatch(self.ctx, self.runtime, _EXTENSION_IDENTIFIER,
+                           self._local_config().user_config_dir).register(self.desktop)
         except Exception as exc:
-            log_to_file(f"[désinstallation] état du déploiement illisible : {exc}")
-            return True
-        return False
-
-    def _check_uninstalled(self):
-        try:
-            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
-                return
-            if self._extension_still_deployed():
-                return
-            # Un remplacement (addPackage) efface l'ancienne entrée avant d'insérer
-            # la nouvelle : une seule absence ne prouve rien.
-            timer = threading.Timer(
-                self._UNINSTALL_CHECK_DELAY_SECONDS, self._confirm_uninstalled)
-            timer.daemon = True
-            timer.start()
-        except Exception as exc:
-            log_to_file(f"[désinstallation] contrôle impossible : {exc}")
-
-    def _confirm_uninstalled(self):
-        try:
-            if MainJob._self_update_in_flight_cls or MainJob._wiped_cls:
-                return
-            if self._extension_still_deployed():
-                return
-            self._wipe_all_data("désinstallation depuis le Gestionnaire des extensions")
-        except Exception as exc:
-            log_to_file(f"[désinstallation] effacement impossible : {exc}")
-
-    def _wipe_all_data(self, reason):
-        MainJob._wiped_cls = True
-        log_to_file(f"[désinstallation] {reason} : effacement des données de l'extension")
-        credentials.freeze()
-        local_config.freeze()
-        log_setup.uninstall()
-        log_setup.freeze()
-        credentials.wipe()
-        local_config.wipe(self._local_config().user_config_dir)
+            log_to_file(f"[désinstallation] écoute impossible : {exc}")
 
     def _credential_scope(self):
         return self._local_config().transport_scope()
@@ -1073,7 +874,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         Un secret n'y revient que par un écrivain plus récent (version antérieure
         après un retour arrière, reprise par la migration) : il remplace donc
-        celui du coffre."""
+        celui du coffre, une seule fois par processus."""
         cfg = self._local_config()
         settings = cfg.settings()
         scope = self._credential_scope()
@@ -1081,12 +882,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         refused = []
         for key in credentials.STORED_KEYS:
             value = settings.get(key)
-            if value in (None, ""):
+            if value in (None, "") or self.runtime.secrets_copied:
                 continue
             if self._store_secret(key, value, scope):
                 stored.append(key)
             else:
                 refused.append(key)
+        self.runtime.secrets_copied = True
         stale = [key for key in settings
                  if key in credentials.STORED_KEYS or key in credentials.MEMORY_KEYS
                  or key in local_config.SECRET_DM_KEYS or key == "llmTokenExpiresAt"]
@@ -1138,116 +940,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         self.set_config("plugin_uuid", extension_uuid)
         return extension_uuid
 
-    def _secure_http_call(self, method, url, headers=None, body=None, timeout=10, use_proxy=True):
-        request = urllib.request.Request(url, data=body, headers=_with_user_agent(headers or {}),
-                                         method=str(method or "GET").upper())
-        try:
-            with self._urlopen(request, context=self.get_ssl_context(), timeout=timeout, use_proxy=use_proxy) as response:
-                payload = response.read()
-                status = int(getattr(response, "status", 0) or 0)
-                response_headers = dict(response.headers.items()) if hasattr(response, "headers") else {}
-                return status, response_headers, payload
-        except urllib.error.HTTPError as exc:
-            try:
-                payload = exc.read()
-            except Exception:
-                payload = b""
-            response_headers = dict(exc.headers.items()) if hasattr(exc, "headers") and exc.headers else {}
-            return int(exc.code), response_headers, payload
-
-    def _get_secure_flow(self):
-        with self._secure_flow_lock:
-            if self._secure_flow is not None:
-                return self._secure_flow
-            if self._secure_flow_init_error:
-                return None
-            bootstrap_url = str(self._active_bootstrap_url() or "").strip()
-            if not bootstrap_url:
-                return None
-            plugin_uuid = self._ensure_plugin_uuid()
-            device_name = str(self._get_config_from_file("device_name", "mirai-libreoffice") or "").strip() or "mirai-libreoffice"
-            user_config_dir = self._data_dir()
-            if not user_config_dir:
-                # Pas de dossier de config exploitable -> flux sécurisé
-                # indisponible (évite d'écrire l'état dans un chemin fantôme).
-                return None
-            state_path = os.path.join(user_config_dir, "secure_bootstrap_state.json")
-            queue_path = os.path.join(user_config_dir, "telemetry_queue.json")
-            try:
-                flow = SecureBootstrapFlow(
-                    bootstrap_base_url=bootstrap_url.rstrip("/"),
-                    plugin_uuid=plugin_uuid,
-                    device_name=device_name,
-                    http_call=self._secure_http_call,
-                    log_func=log_to_file,
-                    state_store=FileJsonStore(state_path),
-                    queue_store=FileQueueStore(queue_path),
-                    vault=default_vault(),
-                    signer=Ed25519Provider(),
-                )
-            except Exception as exc:
-                log_to_file(f"Secure flow init failed: {str(exc)}")
-                self._secure_flow_init_error = str(exc)
-                return None
-            self._secure_flow = flow
-            return flow
-
-    def _warmup_secure_flow_async(self):
-        def _worker():
-            try:
-                flow = self._get_secure_flow()
-                if not flow:
-                    return
-                flow.ensure_identity()
-                try:
-                    flow.fetch_bootstrap_config()
-                    self._send_telemetry("BootstrapConfig", {"status": "ok"})
-                except Exception as exc:
-                    log_to_file(f"Secure flow bootstrap fetch failed: {str(exc)}")
-                    self._send_telemetry("BootstrapConfig", {"status": "error", "error": str(exc)[:120]})
-            except Exception as exc:
-                log_to_file(f"Secure flow warmup failed: {str(exc)}")
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-    def _secure_send_telemetry_payload(self, payload, _span_name=None):
-        flow = self._get_secure_flow()
-        if not flow:
-            if str(self._active_bootstrap_url() or "").strip() and not self._secure_legacy_fallback_logged:
-                self._secure_legacy_fallback_logged = True
-                log_to_file("Secure telemetry unavailable; fallback to legacy sender")
-            return False
-        try:
-            current_kind = flow.telemetry_kind()
-            access_token = str(self._get_config_from_file("access_token", "") or "").strip()
-            has_valid_login = bool(access_token) and (not self._token_is_expired(access_token))
-            if current_kind != "user":
-                if not has_valid_login:
-                    return True
-                if _span_name and _span_name not in self._TECHNICAL_EVENTS:
-                    return True
-            handled = bool(flow.send_trace(payload))
-            if flow.rebind_required():
-                if access_token and not self._token_is_expired(access_token):
-                    self._secure_bind_identity(access_token)
-                else:
-                    log_to_file("Secure telemetry requires user rebind/login")
-            return handled
-        except Exception as exc:
-            log_to_file(f"Secure telemetry pipeline failure: {str(exc)}")
-            return True
-
-    def _secure_bind_identity(self, access_token):
-        flow = self._get_secure_flow()
-        if not flow:
-            return ""
-        try:
-            return flow.bind_identity(access_token)
-        except Exception as exc:
-            log_to_file(f"Secure identity bind failed: {str(exc)}")
-            return ""
-
     def _get_telemetry_defaults(self):
         """Return default values for telemetry configuration."""
         return {
@@ -1298,96 +990,32 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return True
 
     def _bootstrap_urls(self):
-        """Ordered list of DM bootstrap base URLs (failover).
-
-        Reads the `bootstrap_urls` list when present; otherwise falls back to the
-        legacy single `bootstrap_url` string. Empty entries are dropped.
-        """
-        result = []
-        urls = self._get_config_from_file("bootstrap_urls", None)
-        if isinstance(urls, (list, tuple)):
-            for item in urls:
-                value = str(item or "").strip()
-                if value and value not in result:
-                    result.append(value)
-        if not result:
-            legacy = str(self._get_config_from_file("bootstrap_url", "") or "").strip()
-            if legacy:
-                result.append(legacy)
-        return result
+        """Ordered list of DM bootstrap base URLs (failover)."""
+        return dm_bases.baked_list(self._get_config_from_file("bootstrap_urls", None),
+                                   self._get_config_from_file("bootstrap_url", ""))
 
     def _failover_ordered_urls(self):
-        """Bootstrap URLs with the DM that last answered tried first.
-
-        Perf: avoids re-hitting a dead earlier URL (e.g. an unreachable DGX from
-        an OCP-only host) and paying its full timeout on every config fetch. The
-        winner is remembered in-memory (_resolved_bootstrap_url) and persisted
-        (last_bootstrap_url) so it survives the per-action re-instantiation of
-        MainJob.
-        """
-        urls = self._bootstrap_urls()
-        if len(urls) < 2:
-            return urls
-        preferred = str(
-            self._resolved_bootstrap_url
-            or self._get_config_from_file("last_bootstrap_url", "")
-            or ""
-        ).strip().rstrip("/")
-        if not preferred:
-            return urls
-        front = [u for u in urls if u.rstrip("/") == preferred]
-        if not front:
-            return urls
-        return front + [u for u in urls if u.rstrip("/") != preferred]
+        """Candidats DM : liste annoncée par le DM, puis celle de l'OXT, puis le dernier
+        gagnant en simple repli ; les bases que le processus a vues échouer en queue."""
+        return dm_bases.candidate_order(
+            self._get_config_from_file("dm_bootstrap_urls", None), self._bootstrap_urls(),
+            self._resolved_bootstrap_url or self._get_config_from_file("last_bootstrap_url", ""),
+            self.runtime.unreachable_dm_bases)
 
     def _active_bootstrap_url(self):
         """The DM base URL that last answered (failover winner), else the last-good
-        persisted one, else the first configured. Telemetry / enroll / update must
+        persisted one, else the first candidate. Telemetry / enroll / update must
         target the same DM that served the config, so they read this rather than the
-        raw key — otherwise a fresh MainJob (or a config read from cache) would fall
-        back to `urls[0]`, which may be an internal-only DM unreachable from here.
+        raw key.
         """
-        resolved = str(self._resolved_bootstrap_url or "").strip()
-        if resolved:
-            return resolved
-        persisted = str(self._get_config_from_file("last_bootstrap_url", "") or "").strip()
-        urls = self._bootstrap_urls()
-        if persisted and persisted.rstrip("/") in {url.rstrip("/") for url in urls}:
-            return persisted
-        return urls[0] if urls else ""
+        return dm_bases.active_base(self._resolved_bootstrap_url,
+                                    self._get_config_from_file("last_bootstrap_url", ""),
+                                    self._failover_ordered_urls())
 
     def _is_insecure_bootstrap_url(self, url):
-        """True when `url`'s host is declared in `bootstrap_insecure_urls`.
-
-        This is the per-URL `-k` allowlist: an internal cluster route (e.g. an
-        OCP bootstrap behind a private CA) can skip cert verification while the
-        public DMs stay verified. Matching is by hostname so it holds whether we
-        pass a bare base URL or a full request URL (base + config_path).
-        """
-        patterns = self._get_config_from_file("bootstrap_insecure_urls", None)
-        if not isinstance(patterns, (list, tuple)):
-            return False
-        try:
-            target_host = (urllib.parse.urlsplit(str(url or "").strip()).hostname or "").lower()
-        except Exception:
-            target_host = ""
-        if not target_host:
-            return False
-        for item in patterns:
-            value = str(item or "").strip()
-            if not value:
-                continue
-            host = ""
-            try:
-                host = urllib.parse.urlsplit(value).hostname or ""
-            except Exception:
-                host = ""
-            if not host:
-                # Tolerate bare host entries written without a scheme.
-                host = value.split("/")[0]
-            if host and host.lower() == target_host:
-                return True
-        return False
+        """True when `url`'s host is declared in `bootstrap_insecure_urls`."""
+        return dm_bases.is_insecure_url(
+            url, self._get_config_from_file("bootstrap_insecure_urls", None))
 
     def _fetch_config(self, force=False):
         if not force and not self._device_management_enabled():
@@ -1422,7 +1050,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             fetch_timeout = 4
         if fetch_timeout <= 0:
             fetch_timeout = 4
-        log_to_file(f"DM bootstrap URLs (failover order): {base_urls}")
+        log_to_file(f"DM bootstrap URLs (candidate order): {base_urls}")
 
         self._fetching_config = True
         try:
@@ -1433,98 +1061,93 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             else:
                 log_to_file("DM config fetch: proxy disabled, skipping proxy retry")
 
-            last_error = "unknown"
-            combos = [
-                (base, mode, use_proxy)
-                for base in base_urls
-                for (mode, use_proxy) in attempts
-            ]
-            for base_url, mode, use_proxy in combos:
-                url = base_url.rstrip("/") + "/" + config_path.lstrip("/")
-                try:
-                    log_to_file(f"DM config fetch attempt: mode={mode} url={url}")
-                    headers = {"Accept": "application/json"}
-                    headers.update(self._relay_headers())
-                    # Enrich headers for schema_version=2 support
-                    plugin_version = self._get_extension_version()
-                    headers["X-Plugin-Version"] = plugin_version or "unknown"
-                    headers["X-Platform-Type"] = "libreoffice"
-                    lo_version = self._get_lo_version()
-                    if lo_version:
-                        headers["X-Platform-Version"] = lo_version
-                    client_uuid = str(self._ensure_plugin_uuid() or "")
-                    if client_uuid:
-                        headers["X-Client-UUID"] = client_uuid
-                    request = urllib.request.Request(url, headers=_with_user_agent(headers))
-                    _relay_present = "X-Relay-Client" in headers
-                    log_to_file(f"DM config fetch headers: relay={'yes' if _relay_present else 'no'} keys={list(headers.keys())}")
-                    with self._urlopen(request, context=self.get_ssl_context(base_url), timeout=fetch_timeout, use_proxy=use_proxy) as response:
-                        payload = response.read().decode("utf-8")
-                    log_to_file(f"DM bootstrap response ({mode}): {len(payload)} octets")
-                    config_data = json.loads(payload)
-                    if isinstance(config_data, dict):
-                        # Handle EnrichedConfigResponse (schema_version=2)
-                        meta = config_data.get("meta") if isinstance(config_data.get("meta"), dict) else {}
-                        if meta.get("schema_version") == 2:
-                            features = config_data.get("features")
-                            if isinstance(features, dict):
-                                self._features_cache = features
-                                log_to_file(f"Feature flags updated: {list(features.keys())}")
-                            update_directive = config_data.get("update")
-                            # Feed natif : avant toute décision (y compris « déjà
-                            # à la cible » et les reports), l'adresse doit refléter
-                            # la cible de CE poste, sinon LibreOffice verrait la
-                            # version générale au prochain « Vérifier ».
-                            self._rewrite_feed_for_directive(update_directive)
-                            if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
-                                target_ver = str(update_directive.get("target_version", "")).strip()
-                                current_ver = str(self._get_extension_version() or "").strip()
-                                if target_ver and current_ver and target_ver == current_ver:
-                                    log_to_file(f"Update skipped: already at target version {target_ver}")
-                                else:
-                                    self._schedule_update(update_directive)
-                            else:
-                                log_to_file("No update directive in EnrichedConfigResponse")
-                        self.config_cache = config_data
-                        self.config_loaded_at = now
-                        self._config_last_failure_at = 0
-                        self._resolved_bootstrap_url = base_url
-                        try:
-                            if self._get_config_from_file("last_bootstrap_url", "") != base_url:
-                                self.set_config("last_bootstrap_url", base_url)
-                        except Exception:
-                            pass
-                        self._persist_bootstrap_config(config_data)
-                        self._persist_config_cache(config_data)
-                        # Le DM signale ici une auth relais manquante/refusée.
-                        # Réagir tout de suite évite de découvrir le problème
-                        # seulement au premier 401 sur /llm/v1.
-                        try:
-                            self._check_relay_auth_notice(config_data)
-                        except Exception as exc:
-                            log_to_file(f"[ENROLL] auth notice check failed: {str(exc)}")
-                        return config_data
-                    last_error = f"Invalid JSON root type: {type(config_data).__name__}"
-                    log_to_file(f"Failed to fetch device management config ({mode}): {last_error}")
-                except urllib.error.HTTPError as e:
-                    try:
-                        body = e.read().decode("utf-8")
-                    except Exception:
-                        body = ""
-                    last_error = f"HTTP {e.code} {e.reason}"
-                    log_to_file(
-                        f"Failed to fetch device management config ({mode}): "
-                        f"HTTP {e.code} {e.reason} body_len={len(body)}"
-                    )
-                except urllib.error.URLError as e:
-                    last_error = f"URL error {e.reason}"
-                    log_to_file(f"Failed to fetch device management config ({mode}): URL error {e.reason}")
-                except Exception as e:
-                    last_error = str(e)
-                    log_to_file(f"Failed to fetch device management config ({mode}): {str(e)}")
+            headers = {"Accept": "application/json",
+                       "X-Plugin-Version": self._get_extension_version() or "unknown",
+                       "X-Platform-Type": "libreoffice"}
+            lo_version = self._get_lo_version()
+            if lo_version:
+                headers["X-Platform-Version"] = lo_version
+            client_uuid = str(self._ensure_plugin_uuid() or "")
+            if client_uuid:
+                headers["X-Client-UUID"] = client_uuid
+            headers = _with_user_agent(headers)
 
-            self._config_last_failure_at = now
-            log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")
+            def fetch_from(base):
+                return config_fetch.attempt(
+                    base, config_path, attempts, {**headers, **self._relay_headers(base)},
+                    lambda request, use_proxy: self._urlopen(
+                        request, context=self.get_ssl_context(base), timeout=fetch_timeout,
+                        use_proxy=use_proxy))
+
+            winner, last_error = config_fetch.first_answer(
+                base_urls, fetch_from, self.runtime.unreachable_dm_bases, self._bootstrap_urls())
+            if winner is None:
+                self._config_last_failure_at = now
+                log_to_file(f"Failed to fetch device management config: all attempts failed ({last_error})")
+            else:
+                base_url, (config_data, relay_present) = winner
+                # Handle EnrichedConfigResponse (schema_version=2)
+                meta = config_data.get("meta") if isinstance(config_data.get("meta"), dict) else {}
+                if meta.get("schema_version") == 2:
+                    features = config_data.get("features")
+                    if isinstance(features, dict):
+                        self._features_cache = features
+                        log_to_file(f"Feature flags updated: {list(features.keys())}")
+                    update_directive = config_data.get("update")
+                    # Feed natif : avant toute décision (y compris « déjà
+                    # à la cible » et les reports), l'adresse doit refléter
+                    # la cible de CE poste, sinon LibreOffice verrait la
+                    # version générale au prochain « Vérifier ».
+                    self._rewrite_feed_for_directive(update_directive)
+                    if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
+                        target_ver = str(update_directive.get("target_version", "")).strip()
+                        current_ver = str(self._get_extension_version() or "").strip()
+                        if target_ver and current_ver and target_ver == current_ver:
+                            log_to_file(f"Update skipped: already at target version {target_ver}")
+                        else:
+                            self._schedule_update(update_directive)
+                    else:
+                        log_to_file("No update directive in EnrichedConfigResponse")
+                self.config_cache = config_data
+                self.config_loaded_at = now
+                self._config_last_failure_at = 0
+                previous = str(self._get_config_from_file("last_bootstrap_url", "") or "").strip()
+                switched = dm_bases.is_switch(previous, base_url)
+                if switched:
+                    # Les DM ne partagent pas leur base relais : ce que l'ancien a
+                    # émis ne vaut rien ici, le poste se ré-enrôle auprès du nouveau.
+                    credentials.drop_dm_issued()
+                    self.set_config("enrolled", False)
+                    log_to_file(f"DM switched: {previous} -> {base_url}; relay pair and llmToken "
+                                "dropped, re-enrollment scheduled")
+                self._resolved_bootstrap_url = base_url
+                try:
+                    if self._get_config_from_file("last_bootstrap_url", "") != base_url:
+                        self.set_config("last_bootstrap_url", base_url)
+                except Exception:
+                    pass
+                self._persist_bootstrap_config(config_data)
+                self._persist_config_cache(config_data)
+                announced = dm_bases.announced_list(config_data, self._bootstrap_urls())
+                if announced is not None and announced != self._get_config_from_file("dm_bootstrap_urls", None):
+                    self.set_config("dm_bootstrap_urls", announced)
+                # Une paire antérieure à l'émetteur enregistré : le DM qui l'accepte
+                # (il mint un llmToken) est celui qui l'a émise.
+                minted = str((local_config.select_settings(config_data) or {}).get("llmToken", "") or "").strip()
+                if (relay_present and minted and not switched
+                        and not self._get_config_from_file("relay_dm_base", "")):
+                    self.set_config("relay_dm_base", base_url)
+                if switched:
+                    self._schedule_relay_recovery(min_interval_seconds=0, prompt_if_unenrolled=True)
+                else:
+                    # Le DM signale ici une auth relais manquante/refusée.
+                    # Réagir tout de suite évite de découvrir le problème
+                    # seulement au premier 401 sur /llm/v1.
+                    try:
+                        self._check_relay_auth_notice(config_data)
+                    except Exception as exc:
+                        log_to_file(f"[ENROLL] auth notice check failed: {str(exc)}")
+                return config_data
         finally:
             self._fetching_config = False
         if self.config_cache:
@@ -1638,7 +1261,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         target_version = str(directive.get("target_version") or "").strip()
 
-        if target_version and target_version in MainJob._update_launch_blocked_cls:
+        if target_version and target_version in self.runtime.update_launch_blocked:
             log_to_file(
                 f"Update skipped: install of {target_version} was blocked by the "
                 "workstation policy earlier — manual install required, not re-prompting"
@@ -1660,11 +1283,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 )
                 return
 
-        with MainJob._update_lock_cls:
-            if MainJob._update_in_progress_cls:
+        with self.runtime.update_lock:
+            if self.runtime.update_in_progress:
                 log_to_file("Update already in progress, skipping duplicate schedule")
                 return
-            MainJob._update_in_progress_cls = True
+            self.runtime.update_in_progress = True
 
         if urgency == "deferred":
             log_to_file(f"Deferred update scheduled: target={directive.get('target_version')} — download only, install on next restart")
@@ -1695,8 +1318,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         return
                 self._perform_update(directive)
             finally:
-                with MainJob._update_lock_cls:
-                    MainJob._update_in_progress_cls = False
+                with self.runtime.update_lock:
+                    self.runtime.update_in_progress = False
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
@@ -1717,7 +1340,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return
 
         # Resolve a RELATIVE artifact_url against every bootstrap base in failover
-        # order (last-good first). Otherwise the download is pinned to a single base
+        # order (announced order, then the OXT's). Otherwise the download is pinned to a single base
         # — often urls[0], an internal-only DGX — and a host that can't reach it
         # (e.g. off-network) fails the whole update instead of falling over to a DM
         # that does answer. An absolute artifact_url is used as-is.
@@ -1807,7 +1430,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             stable_oxt = os.path.join(stable_dir, "mirai_update.oxt")
             shutil.copy2(tmp_path, stable_oxt)
             self._pending_install_oxt = stable_oxt
-            self._pending_install_script = ""
             log_to_file(f"_perform_update: OXT copied to {stable_oxt}")
             # Persiste l'état de campagne : la réconciliation au prochain
             # démarrage rapporte l'issue RÉELLE au DM (_reconcile_update_state).
@@ -1818,134 +1440,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 "campaign_id": str(campaign_id) if campaign_id is not None else "",
                 "urgency": urgency,
             })
-
-            # Script d'installation de secours (.bat/.sh) : spawne un processus
-            # enfant → refusé sur postes durcis (WinError 5, AppLocker / Defender
-            # ASR), et son cycle unopkg remove/add est un vecteur de corruption du
-            # registre. DÉSACTIVÉ par défaut ; réactivable explicitement
-            # via MIRAI_UPDATE_ALLOW_SCRIPT=1 (postes non durcis, diagnostic).
-            if os.environ.get("MIRAI_UPDATE_ALLOW_SCRIPT") == "1":
-                try:
-                    sys_name = platform.system()  # Darwin, Windows, Linux
-
-                    # Find unopkg
-                    unopkg = None
-                    if sys_name == "Darwin":
-                        for candidate in [
-                            "/Applications/LibreOffice.app/Contents/MacOS/unopkg",
-                            os.path.expanduser("~/Applications/LibreOffice.app/Contents/MacOS/unopkg"),
-                        ]:
-                            if os.path.isfile(candidate):
-                                unopkg = candidate
-                                break
-                    elif sys_name == "Windows":
-                        for candidate in [
-                            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "LibreOffice", "program", "unopkg.com"),
-                            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"), "LibreOffice", "program", "unopkg.com"),
-                        ]:
-                            if os.path.isfile(candidate):
-                                unopkg = candidate
-                                break
-                    else:  # Linux
-                        for candidate in ["/usr/bin/unopkg", "/usr/lib/libreoffice/program/unopkg"]:
-                            if os.path.isfile(candidate):
-                                unopkg = candidate
-                                break
-                    if not unopkg:
-                        # Generic fallback: look relative to extension install
-                        fallback = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                            os.path.dirname(os.path.abspath(__file__))))), "program", "unopkg")
-                        if os.path.isfile(fallback):
-                            unopkg = fallback
-                    if not unopkg:
-                        raise FileNotFoundError("unopkg not found")
-                    log_to_file(f"_perform_update: unopkg={unopkg} platform={sys_name}")
-
-                    # Stage the update: quit LO → wait → remove old → install new → relaunch
-                    log_path = log_setup.path() or os.path.join(self._data_dir(), log_setup.LOG_FILE)
-                    _ts = 'date "+%Y-%m-%d %H:%M:%S"'
-
-                    if sys_name == "Windows":
-                        soffice_path = os.path.join(os.path.dirname(unopkg), "soffice.exe")
-                        install_script = os.path.join(stable_dir, "mirai_update.bat")
-                        # Windows: use %TIME% for timestamp
-                        with open(install_script, "w") as sf:
-                            sf.write("@echo off\r\n")
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] script started >> "{log_path}"\r\n')
-                            sf.write(":wait_lo\r\n")
-                            sf.write("tasklist /FI \"IMAGENAME eq soffice.bin\" 2>nul | find /I \"soffice.bin\" >nul\r\n")
-                            sf.write("if not errorlevel 1 (\r\n")
-                            sf.write("  timeout /t 2 /nobreak >nul\r\n")
-                            sf.write("  goto wait_lo\r\n")
-                            sf.write(")\r\n")
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] LO quit detected >> "{log_path}"\r\n')
-                            sf.write(f'"{unopkg}" remove fr.gouv.interieur.mirai 2>nul\r\n')
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] old extension removed >> "{log_path}"\r\n')
-                            sf.write(f'"{unopkg}" add --force --suppress-license "{stable_oxt}"\r\n')
-                            sf.write('if errorlevel 1 (\r\n')
-                            sf.write(f'  echo %DATE% %TIME% - [UPDATE] unopkg add FAILED >> "{log_path}"\r\n')
-                            sf.write(') else (\r\n')
-                            sf.write(f'  echo %DATE% %TIME% - [UPDATE] extension installed OK >> "{log_path}"\r\n')
-                            sf.write(')\r\n')
-                            sf.write(f'echo %DATE% %TIME% - [UPDATE] launching LibreOffice >> "{log_path}"\r\n')
-                            sf.write(f'start "" "{soffice_path}"\r\n')
-                            sf.write(f'del "{stable_oxt}" 2>nul\r\n')
-                            sf.write(f'del "{install_script}" 2>nul\r\n')
-                        self._pending_install_script = install_script
-                    else:
-                        # macOS / Linux
-                        # Capture current document path to reopen after update
-                        _doc_path = ""
-                        try:
-                            _desktop = self.ctx.getServiceManager().createInstanceWithContext(
-                                "com.sun.star.frame.Desktop", self.ctx
-                            )
-                            _doc = _desktop.getCurrentComponent() if _desktop else None
-                            if _doc and hasattr(_doc, "getURL") and _doc.getURL():
-                                _parsed = urllib.parse.urlparse(_doc.getURL())
-                                if _parsed.scheme == "file":
-                                    _doc_path = urllib.parse.unquote(_parsed.path)
-                        except Exception:
-                            pass
-                        soffice_bin = os.path.join(os.path.dirname(unopkg), "soffice")
-                        if sys_name == "Darwin":
-                            if _doc_path:
-                                relaunch_cmd = f'"{soffice_bin}" "{_doc_path}" &'
-                            else:
-                                relaunch_cmd = f'"{soffice_bin}" --writer &'
-                            wait_cmd = "while pgrep -x soffice >/dev/null 2>&1 || pgrep -x oosplash >/dev/null 2>&1; do sleep 1; done"
-                        else:
-                            relaunch_cmd = f'"{soffice_bin}" &' if os.path.isfile(soffice_bin) else "libreoffice &"
-                            if _doc_path:
-                                relaunch_cmd = f'"{soffice_bin}" "{_doc_path}" &' if os.path.isfile(soffice_bin) else f'libreoffice "{_doc_path}" &'
-                            wait_cmd = "while pgrep -x soffice >/dev/null 2>&1; do sleep 1; done"
-                        install_script = os.path.join(stable_dir, "mirai_update.sh")
-                        with open(install_script, "w") as sf:
-                            sf.write("#!/bin/bash\n")
-                            sf.write(f'LOG="{log_path}"\n')
-                            sf.write(f'echo "$({_ts}) - [UPDATE] script started" >> "$LOG"\n')
-                            sf.write(f'{wait_cmd}\n')
-                            sf.write(f'echo "$({_ts}) - [UPDATE] LO quit detected" >> "$LOG"\n')
-                            sf.write("sleep 5\n")
-                            sf.write(f'"{unopkg}" remove fr.gouv.interieur.mirai 2>/dev/null || true\n')
-                            sf.write(f'echo "$({_ts}) - [UPDATE] old extension removed" >> "$LOG"\n')
-                            sf.write(f'"{unopkg}" add --force --suppress-license "{stable_oxt}"\n')
-                            sf.write('RC=$?\n')
-                            sf.write('if [ "$RC" -eq 0 ]; then\n')
-                            sf.write(f'  echo "$({_ts}) - [UPDATE] extension installed OK" >> "$LOG"\n')
-                            sf.write('else\n')
-                            sf.write(f'  echo "$({_ts}) - [UPDATE] unopkg add FAILED rc=$RC" >> "$LOG"\n')
-                            sf.write('fi\n')
-                            sf.write("sync\n")
-                            sf.write("sleep 3\n")
-                            sf.write(f'echo "$({_ts}) - [UPDATE] launching LibreOffice" >> "$LOG"\n')
-                            sf.write(f'{relaunch_cmd}\n')
-                            sf.write(f'rm -f "{stable_oxt}" "{install_script}"\n')
-                        os.chmod(install_script, 0o755)
-                        self._pending_install_script = install_script
-                    log_to_file("_perform_update: fallback install script staged (opt-in)")
-                except Exception as pkg_err:
-                    log_to_file(f"_perform_update: script staging failed (non-fatal): {pkg_err}")
 
             log_to_file(f"_perform_update: install staged for version={target_version}")
             # « deferred » = artefact prêt, installation à suivre (acceptation
@@ -1958,7 +1452,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._wait_before_prompting()
             log_to_file("_perform_update: showing update dialog to user")
 
-            # Ask user BEFORE launching the install script
+            # Ask the user before installing and restarting
             user_wants_restart = False
             try:
                 desktop = self.ctx.getServiceManager().createInstanceWithContext(
@@ -1994,7 +1488,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "route": "directed",
                 })
                 # In-process (ExtensionManager sur le main thread) : la seule voie
-                # automatique par défaut — aucun processus enfant (WinError 5-immune).
+                # automatique — aucun processus enfant (WinError 5-immune).
                 if self._install_and_restart_in_process(
                         self._pending_install_oxt, target_version, campaign_id):
                     log_to_file("_perform_update: installed in-process, closing for restart")
@@ -2018,32 +1512,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         "issue tranchée à la réconciliation")
                     self._save_update_state(directive, "installed_inprocess", route="directed")
                     return
-                # Script de secours : uniquement si explicitement réactivé
-                # (MIRAI_UPDATE_ALLOW_SCRIPT=1). Sinon, dégradation directe vers
-                # le message manuel validé GPO (bouton « Ouvrir le dossier »).
-                install_script = self._pending_install_script
-                if install_script and os.path.isfile(install_script):
-                    log_to_file("_perform_update: in-process install failed, using opt-in install script")
-                    try:
-                        if platform.system() == "Windows":
-                            try:
-                                subprocess.Popen(["cmd", "/c", "start", "/min", "", install_script], close_fds=True)
-                            except Exception:
-                                subprocess.Popen(["cmd", "/c", install_script])
-                        else:
-                            subprocess.Popen(["bash", install_script], start_new_session=True)
-                        # Pas de desktop.terminate() depuis ce thread sous macOS/Linux :
-                        # SIGTERM, voir _terminate_on_main_thread
-                        self._terminate_on_main_thread()
-                        return
-                    except Exception as launch_err:
-                        # WinError 5 (AppLocker / Defender ASR "block child
-                        # process") atterrit ici — on continue vers le manuel.
-                        log_to_file(f"_perform_update: failed to launch install script: {launch_err}")
                 # L'install auto n'a pas abouti : anti-boucle (ne pas re-prompter
                 # ce target), rapport DM, puis message manuel (voie validée).
                 if target_version:
-                    MainJob._update_launch_blocked_cls.add(target_version)
+                    self.runtime.update_launch_blocked.add(target_version)
                 try:
                     self._report_update_status(
                         campaign_id, "failed", version_before, target_version,
@@ -2057,7 +1529,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     "fallback": "manual",
                     "route": "directed",
                 })
-                self._notify_update_blocked(target_version, install_script)
+                self._notify_update_blocked(target_version)
             else:
                 log_to_file("_perform_update: user postponed restart")
                 self._save_update_state(directive, "postponed", route="directed",
@@ -2080,23 +1552,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 except Exception:
                     pass
 
-    def _notify_update_blocked(self, target_version, install_script):
-        """Inform the user once that the automatic update could not be launched.
+    def _notify_update_blocked(self, target_version, oxt_path=""):
+        """Inform the user once that the automatic update could not be installed.
 
-        On a locked-down workstation an AppLocker / Defender-ASR policy can deny
-        spawning the install script (WinError 5). We stop the re-prompt loop and
-        point to the ready-to-install package so an admin can finish manually.
+        We stop the re-prompt loop and point to the ready-to-install package so
+        an admin can finish manually: `oxt_path` when given, the pending_update
+        folder otherwise.
         Uses the same message-box path as the update prompt (known to work from
         this worker thread).
         """
         try:
-            oxt = ""
-            try:
-                base = os.path.dirname(install_script or "")
-                if base:
-                    oxt = os.path.join(base, "mirai_update.oxt")
-            except Exception:
-                oxt = ""
+            oxt = oxt_path
             # Dossier à proposer à l'ouverture : celui du .oxt téléchargé, sinon
             # le dossier pending_update du profil. Sert au bouton « Ouvrir le
             # dossier » (ouverture native, sans cmd.exe — cf. _open_folder_native).
@@ -2298,17 +1764,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         inside the soffice process — then close LibreOffice cleanly.
 
         This is the key path for locked-down postes: it spawns **no** child
-        process (no cmd.exe / soffice.exe), so it is not affected by the
-        AppLocker / Defender-ASR policy that denies the install script (WinError
+        process (no cmd.exe / soffice.exe), so it is not affected by an
+        AppLocker / Defender-ASR policy that denies child processes (WinError
         5). L'installation passe par ExtensionManager.addExtension sur le MAIN
         thread (voie du Gestionnaire des extensions — remplace proprement, pas
         de corruption du registre).
 
         Returns True on success; any failure returns False so the caller falls
-        back to the manual-install message (ou au script si explicitement
-        réactivé). UNO usage is lazy so the module imports under test stubs.
+        back to the manual-install message. UNO usage is lazy so the module
+        imports under test stubs.
         """
-        MainJob._self_update_in_flight_cls = True
+        self.runtime.self_update_in_flight = True
         try:
             if not oxt_path or not os.path.isfile(oxt_path):
                 return False
@@ -2341,7 +1807,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file(f"_perform_update: in-process install failed, falling back: {exc}")
             return False
         finally:
-            MainJob._self_update_in_flight_cls = False
+            self.runtime.self_update_in_flight = False
 
     def _has_modified_documents(self):
         """Vrai si au moins un document ouvert porte des modifications non
@@ -2631,8 +2097,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """Clôt la mise à jour précédente de façon idempotente.
 
         - version active == target → rapport « installed » au DM + télémétrie,
-          purge de pending_update (OXT stagé, scripts, état), retrait du target
-          de l'anti-boucle _update_launch_blocked_cls ;
+          purge de pending_update (OXT stagé, état), retrait du target
+          de l'anti-boucle runtime.update_launch_blocked ;
         - `at_startup` et étape installed_* dont la cible n'est pas active,
           confirmé par deux lectures espacées du registre → l'installation a
           été annulée (rollback de LibreOffice) : rapport
@@ -2682,7 +2148,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 })
             except Exception:
                 pass
-            MainJob._update_launch_blocked_cls.discard(target)
+            self.runtime.update_launch_blocked.discard(target)
             self._purge_pending_update_dir()
         elif at_startup and pending_restart and target and current:
             log_to_file(
@@ -2712,9 +2178,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _schedule_update_reconciliation(self):
         """Lance la réconciliation en fond, une fois par process (réseau possible)."""
-        if MainJob._update_reconcile_started_cls:
+        if self.runtime.update_reconcile_started:
             return
-        MainJob._update_reconcile_started_cls = True
+        self.runtime.update_reconcile_started = True
 
         def _safe_reconcile():
             try:
@@ -2810,8 +2276,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
     def _wait_wizard_closed(self, deadline):
         while time.time() < deadline:
-            with MainJob._enrollment_wizard_lock_cls:
-                if not MainJob._enrollment_wizard_active_cls:
+            with self.runtime.enrollment_wizard_lock:
+                if not self.runtime.enrollment_wizard_active:
                     return
             time.sleep(_PROMPT_POLL_SECONDS)
 
@@ -3000,7 +2466,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         ]
         # Seulement si la réécriture a réussi : sinon (offline, installation non
         # inscriptible) LibreOffice lit l'adresse nue, le diagnostic aussi.
-        version = str(MainJob._feed_rewrite_last_cls or "").strip()
+        version = str(self.runtime.feed_rewrite_last or "").strip()
         return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
 
     # Réécriture de l'adresse du feed natif : le DM ne sert sur l'adresse nue que
@@ -3050,16 +2516,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             log_to_file("_rewrite_feed_url: description.xml introuvable")
             return feed_rewrite.ERROR
         path = os.path.join(root, "description.xml")
-        with MainJob._feed_rewrite_lock_cls:
-            if unless_already_set and MainJob._feed_rewrite_last_result_cls is not None:
+        with self.runtime.feed_rewrite_lock:
+            if unless_already_set and self.runtime.feed_rewrite_last_result is not None:
                 return None
             result, detail = feed_rewrite.rewrite_description_file(path, version)
             # Journal et télémétrie une fois par changement d'état, pas à chaque
             # lecture de /config.
-            changed = (result, version) != MainJob._feed_rewrite_last_result_cls
-            MainJob._feed_rewrite_last_result_cls = (result, version)
+            changed = (result, version) != self.runtime.feed_rewrite_last_result
+            self.runtime.feed_rewrite_last_result = (result, version)
             if result in (feed_rewrite.WRITTEN, feed_rewrite.UNCHANGED):
-                MainJob._feed_rewrite_last_cls = version
+                self.runtime.feed_rewrite_last = version
         if changed and result != feed_rewrite.UNCHANGED:
             log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
             self._send_telemetry("FeedRewrite", {
@@ -3072,9 +2538,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _schedule_feed_rewrite(self):
         """Réécriture au démarrage, une fois par process, avant le diagnostic
         du feed (45 s) et avant toute directive : cible = version installée."""
-        if MainJob._feed_rewrite_started_cls:
+        if self.runtime.feed_rewrite_started:
             return
-        MainJob._feed_rewrite_started_cls = True
+        self.runtime.feed_rewrite_started = True
 
         def _safe_rewrite():
             try:
@@ -3154,9 +2620,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _schedule_native_feed_check(self):
         """Lance le diagnostic du feed en fond, une fois par process, après que
         l'enrollment/config a eu le temps de se poser (réseau via la pile de LO)."""
-        if MainJob._feed_check_started_cls:
+        if self.runtime.feed_check_started:
             return
-        MainJob._feed_check_started_cls = True
+        self.runtime.feed_check_started = True
 
         def _safe_check():
             try:
@@ -3248,9 +2714,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
             endpoint = self.get_config("llm_base_urls", "http://127.0.0.1:5000")
             api_key = self.get_config("llm_api_tokens", "")
-            is_openwebui = True
 
-            models = self._get_cached_models(str(endpoint), str(api_key), is_openwebui)
+            models = self._get_cached_models(str(endpoint), str(api_key))
 
             if local_model:
                 if not models or local_model in models:
@@ -3320,123 +2785,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if not isinstance(exp, (int, float)):
             return False
         return time.time() >= (exp - skew_seconds)
-
-    _thinking_widget = None
-    _thinking_dots_count = 0
-
-    def _show_thinking(self):
-        """Show a small floating window with the plume icon
-        and an animated 'MIrAI réfléchit...' label.
-        Minimal chrome: no close button, not sizeable, empty title."""
-        try:
-            self._close_thinking()
-            from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-            ctx = uno.getComponentContext()
-            sm = ctx.getServiceManager()
-            def _cr(n):
-                return sm.createInstanceWithContext(n, ctx)
-
-            W, H = 180, 64
-            dlg = _cr("com.sun.star.awt.UnoControlDialog")
-            dlg_m = _cr("com.sun.star.awt.UnoControlDialogModel")
-            dlg.setModel(dlg_m)
-            dlg.setVisible(False)
-            dlg.setTitle("")
-            dlg.setPosSize(0, 0, W, H, SIZE)
-            try:
-                dlg_m.BackgroundColor = 0xFFFFFF
-                dlg_m.Closeable = False
-                dlg_m.Sizeable = False
-                dlg_m.Moveable = True
-            except Exception:
-                pass
-
-            def _add(name, ctrl_type, x, y, w, h, props):
-                m = dlg_m.createInstance(
-                    "com.sun.star.awt.UnoControl" + ctrl_type + "Model")
-                dlg_m.insertByName(name, m)
-                c = dlg.getControl(name)
-                c.setPosSize(x, y, w, h, POSSIZE)
-                for k, v in props.items():
-                    try:
-                        setattr(m, k, v)
-                    except Exception:
-                        pass
-                return c
-
-            # Icon
-            plume_path = os.path.join(
-                os.path.dirname(__file__), "icons", "plume.png")
-            plume_url = ""
-            if os.path.exists(plume_path):
-                plume_url = uno.systemPathToFileUrl(plume_path)
-            _add("img_plume", "ImageControl", 6, 6, 48, 48, {
-                "ImageURL": plume_url,
-                "BackgroundColor": 0xFFFFFF,
-                "Border": 0,
-                "ScaleImage": True,
-            })
-
-            # Label "MIrAI"
-            from com.sun.star.awt.FontWeight import BOLD
-            _add("lbl_thinking", "FixedText", 60, 10, W - 68, 20, {
-                "Label": "MIrAI",
-                "FontHeight": 11,
-                "FontWeight": BOLD,
-                "TextColor": _UI["primary"],
-                "BackgroundColor": 0xFFFFFF,
-            })
-
-            # Sub-label "réfléchit..."
-            from com.sun.star.awt.FontSlant import ITALIC
-            _add("lbl_dots", "FixedText", 60, 32, W - 68, 18, {
-                "Label": "réfléchit...",
-                "FontHeight": 9,
-                "FontSlant": ITALIC,
-                "TextColor": _UI["text_secondary"],
-                "BackgroundColor": 0xFFFFFF,
-            })
-
-            # Position: centered horizontally, 2/3 down the document window
-            frame = _cr("com.sun.star.frame.Desktop").getCurrentFrame()
-            window = frame.getContainerWindow() if frame else None
-            toolkit = _cr("com.sun.star.awt.Toolkit")
-            dlg.createPeer(toolkit, window)
-            if window:
-                ps = window.getPosSize()
-                _x = ps.X + (ps.Width - W) // 2
-                _y = ps.Y + int(ps.Height * 2 / 3) - H // 2
-                dlg.setPosSize(_x, _y, 0, 0, POS)
-            dlg.setVisible(True)
-            self._thinking_widget = dlg
-            self._thinking_dots_count = 0
-
-            pump_events(toolkit)
-        except Exception:
-            pass
-
-    def _update_thinking_dots(self):
-        """Animate the dots on the thinking widget (call from main loop)."""
-        if not self._thinking_widget:
-            return
-        try:
-            self._thinking_dots_count = (self._thinking_dots_count + 1) % 4
-            dots = "." * (self._thinking_dots_count + 1)
-            lbl = self._thinking_widget.getControl("lbl_dots")
-            if lbl:
-                lbl.getModel().Label = f"réfléchit{dots}"
-        except Exception:
-            pass
-
-    def _close_thinking(self):
-        """Close the thinking widget if open."""
-        try:
-            if self._thinking_widget:
-                self._thinking_widget.setVisible(False)
-                self._thinking_widget.dispose()
-        except Exception:
-            pass
-        self._thinking_widget = None
 
     def _show_message(self, title, message):
         try:
@@ -3775,43 +3123,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             )
             return proceed, None, None, None, None
 
-    def _show_message_and_open_settings(self, title, message):
-        try:
-            toolkit = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.awt.Toolkit", self.ctx
-            )
-            frame = self.desktop.getCurrentFrame() if self.desktop else None
-            window = frame.getContainerWindow() if frame else None
-            if not window:
-                return
-            from com.sun.star.awt.MessageBoxType import MESSAGEBOX
-            try:
-                box = toolkit.createMessageBox(
-                    window,
-                    uno.createUnoStruct("com.sun.star.awt.Rectangle"),
-                    MESSAGEBOX,
-                    MSG_BUTTONS.BUTTONS_OK_CANCEL,
-                    str(title),
-                    str(message)
-                )
-            except Exception:
-                box = toolkit.createMessageBox(
-                    window,
-                    MESSAGEBOX,
-                    MSG_BUTTONS.BUTTONS_OK_CANCEL,
-                    str(title),
-                    str(message)
-                )
-            result = box.execute()
-            box.dispose()
-            if result == 1:
-                try:
-                    self.settings_box("Settings")
-                except Exception:
-                    pass
-        except Exception as e:
-            log_to_file(f"Failed to show message box: {str(e)}")
-
     def _keycloak_config(self, config_data):
         if not isinstance(config_data, dict):
             return {}
@@ -4054,7 +3365,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         digest = hashlib.sha256(verifier.encode("utf-8")).digest()
         return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
-    def _wait_for_auth_code(self, redirect_uri, timeout_seconds=120, tick=None, cancel_event=None):
+    def _wait_for_auth_code(self, redirect_uri, expected_state, timeout_seconds=120, tick=None, cancel_event=None, on_listening=None):
         try:
             parsed = urllib.parse.urlparse(redirect_uri)
             if parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1"):
@@ -4070,8 +3381,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         done_event = threading.Event()
         result = {"code": None, "error": None}
 
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
                 return
@@ -4080,12 +3389,18 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 parsed_path = urllib.parse.urlparse(self.path)
                 request_path = parsed_path.path or "/"
                 expected_path = path or "/"
-                log_to_file(f"PKCE callback received: path={request_path} query={parsed_path.query}")
+                log_to_file(f"PKCE callback received: path={request_path}")
                 if request_path.rstrip("/") != expected_path.rstrip("/"):
                     self.send_response(404)
                     self.end_headers()
                     return
                 params = urllib.parse.parse_qs(parsed_path.query)
+                # Sans le state de cette autorisation, le callback est forgé (CSRF).
+                if params.get("state", [None])[0] != expected_state:
+                    log_to_file("PKCE callback refused: state mismatch")
+                    self.send_response(400)
+                    self.end_headers()
+                    return
                 code = params.get("code", [None])[0]
                 error = params.get("error", [None])[0]
                 log_to_file(f"PKCE callback parsed: code={'set' if code else 'none'} error={error or 'none'}")
@@ -4098,14 +3413,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self.end_headers()
                 self.wfile.write(_render_callback_page().encode("utf-8"))
 
-        # Écoute sur toutes les interfaces ; redirect_uri est déjà garanti local par le contrôle en tête.
-        bind_host = ""
+        # Boucle locale seulement : le callback porte le code d'autorisation.
+        bind_host = "127.0.0.1"
         try:
-            httpd = ThreadingHTTPServer((bind_host, port), Handler)
+            httpd = _CallbackServer((bind_host, port), Handler)
         except Exception as e:
             log_to_file(f"Failed to start local callback server: {str(e)}")
             return None, "callback_server_error"
-        log_to_file(f"Local callback server listening on http://{bind_host or '0.0.0.0'}:{port}{path}")
+        log_to_file(f"Local callback server listening on http://{bind_host}:{port}{path}")
 
         server_thread = threading.Thread(
             target=httpd.serve_forever,
@@ -4114,8 +3429,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         )
         server_thread.start()
 
-        start = time.time()
         try:
+            if on_listening and not on_listening():
+                return None, "browser_unavailable"
+            start = time.time()
             while (
                 time.time() - start < timeout_seconds
                 and not done_event.is_set()
@@ -4252,23 +3569,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         auth_url = f"{auth_endpoint}?{query}"
         log_to_file(
             "Keycloak auth URL built: "
-            f"auth_endpoint={auth_endpoint} client_id={client_id} redirect_uri={redirect_uri} "
-            f"code_challenge={code_challenge} state={state} url={auth_url}"
+            f"auth_endpoint={auth_endpoint} client_id={client_id} redirect_uri={redirect_uri}"
         )
-        try:
-            import webbrowser
-            webbrowser.open(auth_url)
-        except Exception:
-            try:
-                from com.sun.star.system import XSystemShellExecute
-                shell = self.ctx.getServiceManager().createInstanceWithContext(
-                    "com.sun.star.system.SystemShellExecute", self.ctx
-                )
-                if isinstance(shell, XSystemShellExecute):
-                    shell.execute(auth_url, "", 0)
-            except Exception as e:
-                log_to_file(f"Failed to open browser: {str(e)}")
-
         auth_cancel_event = threading.Event()
 
         # Étape 4/5 : attente du callback Keycloak
@@ -4383,11 +3685,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if auth_timeout_seconds < 60:
             auth_timeout_seconds = 60
 
+        # Ouvert une fois le serveur de callback à l'écoute : avec une session SSO
+        # déjà ouverte, Keycloak redirige aussitôt vers le callback.
         code, error = self._wait_for_auth_code(
-            redirect_uri,
+            redirect_uri, state,
             timeout_seconds=auth_timeout_seconds,
             tick=_tick,
-            cancel_event=auth_cancel_event
+            cancel_event=auth_cancel_event,
+            on_listening=lambda: open_url(self.ctx, auth_url),
         )
 
         if wait_dialog:
@@ -4425,21 +3730,22 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return None
         if not code:
             log_to_file(f"Authorization code flow failed: {error}")
+            err_txt = (
+                _t("enroll.timeout_text")
+                if error == "timeout"
+                else _t("msg.no_browser")
+                if error == "browser_unavailable"
+                else _t("enroll.error_config_text", error=error or _t("enroll.unknown_error"))
+            )
             if wiz_dialog:
-                err_txt = (
-                    _t("enroll.timeout_text")
-                    if error == "timeout"
-                    else _t(
-                        "enroll.error_config_text",
-                        error=error or _t("enroll.unknown_error"),
-                    )
-                )
                 _wiz_show_error_and_wait(_t("enroll.failed_conn_title"), err_txt)
             elif error == "timeout":
                 self._show_message(
                     _t("msg.kc_expired_title"),
                     _t("msg.kc_expired_body", redirect_uri=redirect_uri),
                 )
+            else:
+                self._show_message(_t("enroll.failed_conn_title"), err_txt)
             return None
         log_to_file("Authorization code received, exchanging for token")
 
@@ -4455,10 +3761,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             self._store_tokens(token_response)
             access_token = token_response.get("access_token")
             try:
-                self._secure_bind_identity(access_token)
-            except Exception as exc:
-                log_to_file(f"Post-SSO identity bind failed: {str(exc)}")
-            try:
                 if wiz_dialog and wiz_update and wiz_toolkit and wiz_state:
                     wiz_update(
                         _t("enroll.enrolling_title"),
@@ -4471,9 +3773,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     def _enroll_worker():
                         try:
                             self._ensure_device_management_state()
-                            enroll_result["success"] = self._as_bool(
-                                self._get_config_from_file("enrolled", False)
-                            )
+                            enroll_result["success"] = self._relay_credentials_valid()
                             if not enroll_result["success"]:
                                 enroll_result["error"] = _t("enroll.not_confirmed")
                         except Exception as exc:
@@ -4607,158 +3907,167 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """
         if not self._device_management_enabled():
             return
+        generation_seen = self.runtime.enrollment_generation
         config_data = self._fetch_config()
         if not config_data:
             return
 
-        access_token = self._ensure_access_token(config_data, interactive=False)
-        keycloak = self._keycloak_config(config_data)
-        userinfo_endpoint = self._keycloak_endpoint(
-            keycloak,
-            "userinfo_endpoint",
-            "userinfoEndpoint",
-            "user_info_endpoint",
-            "userInfoEndpoint",
-            "userinfo"
-        )
-        email = self._token_email(access_token, userinfo_endpoint) if access_token else None
-        if not email:
-            log_to_file("Device management token email verification failed")
-            return
+        with self.runtime.enrollment_lock:
+            if self.runtime.enrollment_generation != generation_seen and self._relay_credentials_valid():
+                log_to_file("[ENROLL] an enrollment succeeded meanwhile: nothing to do")
+                return
+            access_token = self._ensure_access_token(config_data, interactive=False)
+            keycloak = self._keycloak_config(config_data)
+            userinfo_endpoint = self._keycloak_endpoint(
+                keycloak,
+                "userinfo_endpoint",
+                "userinfoEndpoint",
+                "user_info_endpoint",
+                "userInfoEndpoint",
+                "userinfo"
+            )
+            email = self._token_email(access_token, userinfo_endpoint) if access_token else None
+            if not email:
+                log_to_file("Device management token email verification failed")
+                return
 
-        bootstrap_url = str(self._active_bootstrap_url() or "").strip().rstrip("/")
-        settings = local_config.select_settings(config_data) if isinstance(config_data, dict) else {}
+            bootstrap_url = str(self._active_bootstrap_url() or "").strip().rstrip("/")
+            settings = local_config.select_settings(config_data) if isinstance(config_data, dict) else {}
 
-        enroll_endpoint = ""
-        sources = []
-        if isinstance(settings, dict):
-            sources.append(settings)
-        if isinstance(config_data, dict):
-            sources.append(config_data)
+            enroll_endpoint = ""
+            sources = []
+            if isinstance(settings, dict):
+                sources.append(settings)
+            if isinstance(config_data, dict):
+                sources.append(config_data)
 
-        for source in sources:
-            endpoints = source.get("endpoints", {})
-            if isinstance(endpoints, dict):
+            for source in sources:
+                endpoints = source.get("endpoints", {})
+                if isinstance(endpoints, dict):
+                    enroll_endpoint = str(
+                        endpoints.get("enroll")
+                        or endpoints.get("enroll_endpoint")
+                        or endpoints.get("enrollEndpoint")
+                        or ""
+                    ).strip()
+                if enroll_endpoint:
+                    break
                 enroll_endpoint = str(
-                    endpoints.get("enroll")
-                    or endpoints.get("enroll_endpoint")
-                    or endpoints.get("enrollEndpoint")
+                    source.get("enroll")
+                    or source.get("enroll_endpoint")
+                    or source.get("enrollEndpoint")
                     or ""
                 ).strip()
-            if enroll_endpoint:
-                break
-            enroll_endpoint = str(
-                source.get("enroll")
-                or source.get("enroll_endpoint")
-                or source.get("enrollEndpoint")
-                or ""
-            ).strip()
-            if enroll_endpoint:
-                break
+                if enroll_endpoint:
+                    break
 
-        if enroll_endpoint.startswith("/") and bootstrap_url:
-            enroll_endpoint = bootstrap_url + enroll_endpoint
-        if not enroll_endpoint and bootstrap_url:
-            enroll_endpoint = bootstrap_url + "/enroll"
-            log_to_file(f"Device management enroll endpoint fallback applied: {enroll_endpoint}")
+            if enroll_endpoint.startswith("/") and bootstrap_url:
+                enroll_endpoint = bootstrap_url + enroll_endpoint
+            if not enroll_endpoint and bootstrap_url:
+                enroll_endpoint = bootstrap_url + "/enroll"
+                log_to_file(f"Device management enroll endpoint fallback applied: {enroll_endpoint}")
 
-        if not enroll_endpoint:
-            return
+            if not enroll_endpoint:
+                return
 
-        # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`.
-        # `enrolled=True` ne prouve que « /enroll a répondu 200 » : un poste
-        # marqué enrôlé mais sans creds relay est dans un état absorbant — le DM
-        # ne minte alors jamais de llmToken et tout /llm/v1 tombe en 401, sans
-        # aucun chemin de sortie. On re-tente donc l'enrôlement (POST /enroll est
-        # idempotent côté DM : il ré-émet une paire).
-        if self._relay_credentials_valid() and not force_enroll:
-            return
-        if self._as_bool(self._get_config_from_file("enrolled", False)):
-            log_to_file(
-                "[ENROLL] enrolled=True mais creds relay absents/expirés"
-                f"{' (ré-enrôlement forcé)' if force_enroll else ''} — nouvel enrôlement"
+            # Court-circuit sur les CREDS RELAY, pas sur le drapeau `enrolled`, que
+            # les versions précédentes posaient sans creds relay : un poste marqué
+            # enrôlé mais sans creds relay est dans un état absorbant — le DM
+            # ne minte alors jamais de llmToken et tout /llm/v1 tombe en 401, sans
+            # aucun chemin de sortie. On re-tente donc l'enrôlement (POST /enroll est
+            # idempotent côté DM : il ré-émet une paire).
+            if self._relay_credentials_valid() and not force_enroll:
+                if not self._as_bool(self._get_config_from_file("enrolled", False)):
+                    self.set_config("enrolled", True)
+                return
+            if self._as_bool(self._get_config_from_file("enrolled", False)):
+                log_to_file(
+                    "[ENROLL] enrolled=True mais creds relay absents/expirés"
+                    f"{' (ré-enrôlement forcé)' if force_enroll else ''} — nouvel enrôlement"
+                )
+
+            inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
+            device_name = (
+                config_data.get("device_name")
+                or config_data.get("deviceName")
+                or inner.get("device_name")
+                or inner.get("deviceName")
+                or self._get_config_from_file("device_name", "")
             )
+            plugin_uuid = self._ensure_extension_uuid()
 
-        inner = config_data.get("config", {}) if isinstance(config_data, dict) else {}
-        device_name = (
-            config_data.get("device_name")
-            or config_data.get("deviceName")
-            or inner.get("device_name")
-            or inner.get("deviceName")
-            or self._get_config_from_file("device_name", "")
-        )
-        plugin_uuid = self._ensure_extension_uuid()
-
-        enroll_payload = {
-            "device_name": device_name,
-            "plugin_uuid": plugin_uuid,
-            "email": email
-        }
-        log_to_file(f"Device management enroll payload: device_name={device_name} plugin_uuid={plugin_uuid} email={email} has_token={bool(access_token)} endpoint={enroll_endpoint}")
-        try:
-            json_data = json.dumps(enroll_payload).encode("utf-8")
-            headers = {"Content-Type": "application/json"}
-            if access_token:
-                headers["Authorization"] = f"Bearer {access_token}"
-            request = urllib.request.Request(enroll_endpoint, data=json_data, headers=_with_user_agent(headers))
-            with self._urlopen(request, context=self.get_ssl_context(), timeout=10) as response:
-                raw = response.read().decode("utf-8", errors="ignore")
-            relay_client_id = ""
-            relay_client_key = ""
-            relay_expires_at = 0
+            enroll_payload = {
+                "device_name": device_name,
+                "plugin_uuid": plugin_uuid,
+                "email": email
+            }
+            log_to_file(f"Device management enroll payload: device_name={device_name} plugin_uuid={plugin_uuid} has_email={bool(email)} has_token={bool(access_token)} endpoint={enroll_endpoint}")
             try:
-                payload = json.loads(raw) if raw else {}
-                if isinstance(payload, dict):
-                    relay = payload.get("relay") if isinstance(payload.get("relay"), dict) else {}
-                    relay_client_id = str(
-                        payload.get("relayClientId")
-                        or relay.get("client_id")
-                        or ""
-                    ).strip()
-                    relay_client_key = str(
-                        payload.get("relayClientKey")
-                        or relay.get("client_key")
-                        or ""
-                    ).strip()
-                    relay_expires = payload.get("relayKeyExpiresAt") or relay.get("expires_at") or 0
-                    try:
-                        relay_expires_at = int(relay_expires)
-                    except Exception:
-                        relay_expires_at = 0
-            except Exception:
-                pass
-            if relay_client_id and relay_client_key:
-                self.set_config("relay_client_id", relay_client_id)
-                self.set_config("relay_client_key", relay_client_key)
-                if relay_expires_at > 0:
-                    self.set_config("relay_key_expires_at", relay_expires_at)
-                log_to_file("Device management enroll succeeded with relay credentials")
-                # Immediately fetch config with new relay creds to sync LLM token
+                json_data = json.dumps(enroll_payload).encode("utf-8")
+                headers = {"Content-Type": "application/json"}
+                if access_token:
+                    headers["Authorization"] = f"Bearer {access_token}"
+                request = urllib.request.Request(enroll_endpoint, data=json_data, headers=_with_user_agent(headers))
+                with self._urlopen(request, context=self.get_ssl_context(), timeout=10) as response:
+                    raw = response.read().decode("utf-8", errors="ignore")
+                relay_client_id = ""
+                relay_client_key = ""
+                relay_expires_at = 0
                 try:
-                    self._fetch_config(force=True)
-                except Exception as _e:
-                    log_to_file(f"Post-enroll config refresh failed: {_e}")
-                token_after = str(self.get_config("llm_api_tokens", "") or "").strip()
-                log_to_file(
-                    f"[ENROLL] post-enroll llmToken={'obtenu' if token_after else 'TOUJOURS ABSENT'}"
-                )
-            else:
-                # Enrôlement à moitié : accepté par le DM mais sans creds relay ;
-                # tracé explicitement, le DM ne mintera aucun llmToken tant qu'il dure.
-                log_to_file(
-                    "Device management enroll succeeded WITHOUT relay credentials — "
-                    "le DM ne pourra minter aucun llmToken (relais désactivé côté "
-                    "serveur ?) ; l'enrôlement sera re-tenté"
-                )
-            self.set_config("enrolled", True)
-        except Exception as e:
-            error_body = ""
-            if hasattr(e, "read"):
-                try:
-                    error_body = e.read().decode("utf-8", errors="ignore")
+                    payload = json.loads(raw) if raw else {}
+                    if isinstance(payload, dict):
+                        relay = payload.get("relay") if isinstance(payload.get("relay"), dict) else {}
+                        relay_client_id = str(
+                            payload.get("relayClientId")
+                            or relay.get("client_id")
+                            or ""
+                        ).strip()
+                        relay_client_key = str(
+                            payload.get("relayClientKey")
+                            or relay.get("client_key")
+                            or ""
+                        ).strip()
+                        relay_expires = payload.get("relayKeyExpiresAt") or relay.get("expires_at") or 0
+                        try:
+                            relay_expires_at = int(relay_expires)
+                        except Exception:
+                            relay_expires_at = 0
                 except Exception:
                     pass
-            log_to_file(f"Device management enroll failed: {str(e)} body_len={len(error_body)}")
+                if relay_client_id and relay_client_key:
+                    self.set_config("relay_client_id", relay_client_id)
+                    self.set_config("relay_client_key", relay_client_key)
+                    self.set_config("relay_dm_base", bootstrap_url)
+                    if relay_expires_at > 0:
+                        self.set_config("relay_key_expires_at", relay_expires_at)
+                    self.set_config("enrolled", True)
+                    self.runtime.enrollment_generation += 1
+                    log_to_file("Device management enroll succeeded with relay credentials")
+                    # Immediately fetch config with new relay creds to sync LLM token
+                    try:
+                        self._fetch_config(force=True)
+                    except Exception as _e:
+                        log_to_file(f"Post-enroll config refresh failed: {_e}")
+                    token_after = str(self.get_config("llm_api_tokens", "") or "").strip()
+                    log_to_file(
+                        f"[ENROLL] post-enroll llmToken={'obtenu' if token_after else 'TOUJOURS ABSENT'}"
+                    )
+                else:
+                    # Enrôlement à moitié : accepté par le DM mais sans creds relay ;
+                    # tracé explicitement, le DM ne mintera aucun llmToken tant qu'il dure.
+                    log_to_file(
+                        "Device management enroll succeeded WITHOUT relay credentials — "
+                        "le DM ne pourra minter aucun llmToken (relais désactivé côté "
+                        "serveur ?) ; l'enrôlement sera re-tenté"
+                    )
+            except Exception as e:
+                error_body = ""
+                if hasattr(e, "read"):
+                    try:
+                        error_body = e.read().decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+                log_to_file(f"Device management enroll failed: {str(e)} body_len={len(error_body)}")
 
     def _get_openwebui_access_token(self):
         if not self._device_management_enabled():
@@ -4822,17 +4131,22 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         bootstrap = str(self._active_bootstrap_url() or "").strip().rstrip("/")
         return bool(bootstrap) and endpoint.startswith(bootstrap)
 
-    def _relay_credentials_valid(self, skew_seconds=300):
-        """True si le poste a des credentials relay exploitables.
+    def _relay_credentials_valid(self, skew_seconds=300, base=None):
+        """True si le poste a des credentials relay exploitables pour `base` (le DM
+        actif par défaut).
 
         C'est LA source de vérité de l'enrôlement effectif : le drapeau
-        `enrolled` ne dit que « un POST /enroll a répondu 200 ». Sans ces creds,
+        `enrolled` n'est posé qu'avec eux. Sans ces creds,
         /config repart sans X-Relay-*, le DM ne mint aucun llmToken, et tous les
-        appels /llm/v1 finissent en 401.
+        appels /llm/v1 finissent en 401. Une paire émise par un autre DM ne vaut
+        rien pour celui-ci : les DM ne partagent pas leur base relais.
         """
         client_id = str(self._get_config_from_file("relay_client_id", "") or "").strip()
         client_key = str(self._get_config_from_file("relay_client_key", "") or "").strip()
         if not client_id or not client_key:
+            return False
+        if dm_bases.issued_by_another(self._get_config_from_file("relay_dm_base", ""),
+                                      self._active_bootstrap_url() if base is None else base):
             return False
         return not self._token_expired_at(
             self._get_config_from_file("relay_key_expires_at", 0), skew_seconds
@@ -4923,12 +4237,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             )
         return self._schedule_relay_recovery()
 
-    def _schedule_relay_recovery(self, min_interval_seconds=900):
+    def _schedule_relay_recovery(self, min_interval_seconds=900, prompt_if_unenrolled=False):
         """Relance un enrôlement en tâche de fond pour récupérer des creds relay.
 
         Jamais sur le thread appelant (/config tourne déjà dans un worker, et le
         POST /enroll est bloquant). Backoff long : un DM délibérément sans relais
-        renverra toujours le même signal, on ne le matraque pas.
+        renverra toujours le même signal, on ne le matraque pas. Après une bascule
+        de DM (`prompt_if_unenrolled`), une tentative qui laisse le poste sans
+        session ni paire ouvre l'assistant d'enrôlement tout de suite, par le
+        chemin du démarrage.
         """
         now = time.time()
         with self._relay_recovery_lock:
@@ -4942,7 +4259,16 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         def _worker():
             try:
+                # Le /config qui a planifié cette récupération tient encore son
+                # garde-fou : un enrôlement lancé avant sa levée n'aurait pas de config.
+                deadline = time.time() + 15
+                while self._fetching_config and time.time() < deadline:
+                    time.sleep(0.1)
                 self._ensure_device_management_state(force_enroll=True)
+                if prompt_if_unenrolled and self._needs_first_enrollment():
+                    log_to_file("[ENROLL] switch re-enrollment left the device without "
+                                "session nor pair: wizard now")
+                    self._schedule_enrollment_check()
             except Exception as exc:
                 log_to_file(f"[ENROLL] relay recovery échouée: {str(exc)}")
             finally:
@@ -4997,11 +4323,17 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             prefix = prefix + " "
         return name, prefix
 
-    def _relay_headers(self):
+    def _relay_headers(self, base=None):
+        """En-têtes de la paire relais ; aucun pour un DM qui ne l'a pas émise (`base`,
+        le DM actif par défaut)."""
         relay_client_id = str(self._get_config_from_file("relay_client_id", "") or "").strip()
         relay_client_key = str(self._get_config_from_file("relay_client_key", "") or "").strip()
         if not relay_client_id or not relay_client_key:
             log_to_file(f"[RELAY] no relay creds: id={'yes' if relay_client_id else 'no'} key={'yes' if relay_client_key else 'no'}")
+            return {}
+        if dm_bases.issued_by_another(self._get_config_from_file("relay_dm_base", ""),
+                                      self._active_bootstrap_url() if base is None else base):
+            log_to_file("[RELAY] relay creds issued by another DM: not sent")
             return {}
         if self._token_expired_at(self._get_config_from_file("relay_key_expires_at", 0)):
             # On envoie quand même : le serveur reste l'autorité sur la validité.
@@ -5016,14 +4348,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
     def _as_bool(self, value):
         return local_config.truthy(value)
 
-    def _get_proxy_config(self, with_credentials=False):
-        """`with_credentials` : le dialogue proxy doit afficher (et réenregistrer)
-        identifiant et mot de passe même proxy coupé. Sinon, pas de lecture du
-        coffre de l'OS à chaque requête HTTP quand le proxy est désactivé."""
+    def _get_proxy_config(self):
+        """Proxy coupé, identifiant et mot de passe ne sont pas lus : pas de
+        lecture du coffre de l'OS à chaque requête HTTP."""
         enabled = self._as_bool(self._get_config_from_file("proxy_enabled", False))
         proxy_url = str(self._get_config_from_file("proxy_url", "")).strip()
         username = password = ""
-        if enabled or with_credentials:
+        if enabled:
             username = str(self._get_config_from_file("proxy_username", "")).strip()
             password = str(self._get_config_from_file("proxy_password", ""))
         allow_insecure = self._as_bool(self._get_config_from_file("proxy_allow_insecure_ssl", False))
@@ -5133,80 +4464,29 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return opener.open(request)
         return opener.open(request, timeout=timeout)
 
-    def _test_proxy_connection(self, proxy_cfg):
-        test_url = "https://example.com"
-        try:
-            log_to_file(f"[PROXY][TEST] start url={test_url}")
-            request = urllib.request.Request(test_url, headers=_with_user_agent({"Accept": "application/json"}))
-            context = self.get_ssl_context() if proxy_cfg.get("allow_insecure_ssl") else ssl.create_default_context()
-            opener = self._build_proxy_opener(proxy_cfg, context=context)
-            log_to_file(f"[PROXY][TEST] connect allow_insecure_ssl={bool(proxy_cfg.get('allow_insecure_ssl'))}")
-            with opener.open(request, timeout=8) as response:
-                log_to_file(f"[PROXY][TEST] success status={response.status} url={test_url}")
-                return True, f"Connexion OK ({response.status}) - URL: {test_url}"
-        except Exception as e:
-            log_to_file(f"[PROXY][TEST] error url={test_url} err={str(e)}")
-            return False, f"Erreur: {str(e)} - URL: {test_url}"
-
-    def _lo_proxy_settings(self):
-        settings = {
-            "enabled": False,
-            "host": "",
-            "port": "",
-            "username": "",
-            "password": "",
-            "type": 0,
-        }
-        try:
-            provider = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.configuration.ConfigurationProvider", self.ctx
-            )
-            node = PropertyValue()
-            node.Name = "nodepath"
-            node.Value = "/org.openoffice.Inet/Settings"
-            access = provider.createInstanceWithArguments(
-                "com.sun.star.configuration.ConfigurationAccess", (node,)
-            )
-            proxy_type = getattr(access, "ooInetProxyType", 0)
-            settings["type"] = int(proxy_type) if proxy_type is not None else 0
-            settings["enabled"] = settings["type"] == 1
-            http_host = getattr(access, "ooInetProxyHTTPName", "") or ""
-            http_port = getattr(access, "ooInetProxyHTTPPort", "") or ""
-            https_host = getattr(access, "ooInetProxyHTTPSName", "") or ""
-            https_port = getattr(access, "ooInetProxyHTTPSPort", "") or ""
-            host = http_host or https_host or ""
-            port = http_port or https_port or ""
-            settings["host"] = str(host)
-            settings["port"] = str(port)
-            settings["username"] = str(getattr(access, "ooInetProxyUser", "") or "")
-            settings["password"] = str(getattr(access, "ooInetProxyPassword", "") or "")
-        except Exception as e:
-            log_to_file(f"Failed to read LibreOffice proxy settings: {str(e)}")
-        return settings
-
     def _schedule_enrollment_check(self):
         """Deferred enrollment check — fires ~3s after init to let UI start."""
         def _deferred_enrollment():
             try:
-                if MainJob._enrollment_dismissed_cls:
+                if self.runtime.enrollment_dismissed:
                     return
                 if not self._needs_first_enrollment():
                     log_to_file("[ENROLL] Auto-check: already enrolled, skipping wizard")
                     return
-                with MainJob._enrollment_wizard_lock_cls:
-                    if MainJob._enrollment_wizard_active_cls:
+                with self.runtime.enrollment_wizard_lock:
+                    if self.runtime.enrollment_wizard_active:
                         log_to_file("[ENROLL] Auto-check: wizard already running, skipping")
                         return
-                    MainJob._enrollment_wizard_active_cls = True
+                    self.runtime.enrollment_wizard_active = True
                 try:
                     log_to_file("[ENROLL] Auto-check: first enrollment needed, launching wizard")
                     if not self._run_first_enrollment():
-                        MainJob._enrollment_dismissed_cls = True
+                        self.runtime.enrollment_dismissed = True
                         log_to_file("[ENROLL] Auto-check: wizard cancelled by user")
                     else:
                         log_to_file("[ENROLL] Auto-check: enrollment succeeded")
                 finally:
-                    MainJob._enrollment_wizard_active_cls = False
+                    self.runtime.enrollment_wizard_active = False
             except Exception as e:
                 log_to_file(f"[ENROLL] Auto-check failed: {str(e)}")
 
@@ -5214,255 +4494,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
-    def proxy_settings_box(self, title=None, x=None, y=None):
-        WIDTH = 640
-        HORI_MARGIN = 16
-        VERT_MARGIN = 12
-        LABEL_HEIGHT = 20
-        EDIT_HEIGHT = 28
-        BUTTON_WIDTH = 140
-        BUTTON_HEIGHT = 30
-        HORI_SEP = 10
-        VERT_SEP = 8
-        from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-        from com.sun.star.awt.PushButtonType import OK, CANCEL
-        from com.sun.star.util.MeasureUnit import TWIP
-        ctx = uno.getComponentContext()
-        def create(name):
-            return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-        dialog = create("com.sun.star.awt.UnoControlDialog")
-        dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-        dialog.setModel(dialog_model)
-        dialog.setVisible(False)
-        dialog.setTitle(title or _t("proxy.title"))
-
-        def add(name, type, x_, y_, width_, height_, props):
-            try:
-                model = dialog_model.createInstance("com.sun.star.awt.UnoControl" + type + "Model")
-            except Exception as e:
-                log_to_file(f"Dialog control type unsupported: name={name} type={type} error={str(e)}")
-                return None
-            try:
-                dialog_model.insertByName(name, model)
-            except Exception as e:
-                log_to_file(f"Dialog insert failed: name={name} type={type} error={str(e)}")
-                return None
-            control = dialog.getControl(name)
-            try:
-                control.setPosSize(x_, y_, width_, height_, POSSIZE)
-            except Exception as e:
-                log_to_file(f"Dialog size failed: name={name} type={type} error={str(e)}")
-            for key, value in props.items():
-                try:
-                    setattr(model, key, value)
-                except Exception as e:
-                    log_to_file(f"Dialog prop unsupported: control={name} type={type} prop={key} error={str(e)}")
-            return control
-
-        cfg = self._get_proxy_config(with_credentials=True)
-        lo = self._lo_proxy_settings()
-        proxy_url_value = cfg["proxy_url"]
-        if not proxy_url_value and lo["host"]:
-            proxy_url_value = f"{lo['host']}:{lo['port']}" if lo["port"] else lo["host"]
-
-        HEIGHT = VERT_MARGIN * 2 + (LABEL_HEIGHT + EDIT_HEIGHT + VERT_SEP) * 5 + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + 20
-        dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-
-        current_y = VERT_MARGIN
-        # Section header
-        add("label_proxy", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": _t("proxy.section"), "NoLabel": True,
-            "FontHeight": _UI["font_section"],
-            "TextColor": _UI["primary"],
-            "FontWeight": 150,
-        })
-        current_y += LABEL_HEIGHT + VERT_SEP
-
-        add("label_enabled", "FixedText", HORI_MARGIN, current_y, 200, LABEL_HEIGHT, {
-            "Label": _t("proxy.enabled"), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text"],
-        })
-        chk_enabled = add("chk_enabled", "CheckBox", HORI_MARGIN + 210, current_y, 50, LABEL_HEIGHT,
-            {"State": 1 if cfg["enabled"] else 0})
-        current_y += LABEL_HEIGHT + VERT_SEP
-
-        add("label_url", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": _t("proxy.url"), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text"],
-        })
-        current_y += LABEL_HEIGHT + VERT_SEP
-        edit_url = add("edit_url", "Edit", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-            "Text": proxy_url_value, "BackgroundColor": _UI["bg_input"],
-        })
-        current_y += EDIT_HEIGHT + VERT_SEP * 2
-
-        add("label_user", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": _t("proxy.username"), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text_secondary"],
-        })
-        current_y += LABEL_HEIGHT + VERT_SEP
-        edit_user = add("edit_user", "Edit", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-            "Text": cfg["username"], "BackgroundColor": _UI["bg_input"],
-        })
-        current_y += EDIT_HEIGHT + VERT_SEP * 2
-
-        add("label_pass", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": _t("proxy.password"), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text_secondary"],
-        })
-        current_y += LABEL_HEIGHT + VERT_SEP
-        edit_pass = add("edit_pass", "Edit", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-            "Text": cfg["password"], "EchoChar": ord("*"),
-            "BackgroundColor": _UI["bg_input"],
-        })
-        current_y += EDIT_HEIGHT + VERT_SEP * 2
-
-        add("label_insecure", "FixedText", HORI_MARGIN, current_y, 260, LABEL_HEIGHT, {
-            "Label": _t("proxy.insecure"), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text"],
-        })
-        chk_insecure = add("chk_insecure", "CheckBox", HORI_MARGIN + 270, current_y, 50, LABEL_HEIGHT,
-            {"State": 1 if cfg["allow_insecure_ssl"] else 0})
-        current_y += LABEL_HEIGHT + VERT_SEP * 2
-
-        # Separator
-        add("line_lo_info", "FixedLine", HORI_MARGIN, current_y,
-            WIDTH - HORI_MARGIN * 2, 2, {})
-        current_y += VERT_SEP
-
-        lo_text = _t("proxy.lo_prefix")
-        if lo["enabled"] and lo["host"]:
-            lo_text += f"{lo['host']}:{lo['port']}" if lo["port"] else lo["host"]
-        else:
-            lo_text += _t("proxy.lo_disabled")
-        add("label_lo", "FixedText", HORI_MARGIN, current_y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": lo_text, "NoLabel": True,
-            "FontHeight": _UI["font_small"],
-            "TextColor": _UI["text_light"],
-        })
-        current_y += LABEL_HEIGHT + VERT_SEP * 2
-
-        btn_test = add("btn_test", "Button", HORI_MARGIN, current_y, BUTTON_WIDTH + 20, BUTTON_HEIGHT, {
-            "Label": _t("proxy.test_button"), "Name": "test_proxy",
-            "FontHeight": _UI["font_small"],
-        })
-        btn_copy = add("btn_copy", "Button", HORI_MARGIN + BUTTON_WIDTH + 30, current_y, BUTTON_WIDTH + 40, BUTTON_HEIGHT, {
-            "Label": _t("proxy.copy_lo"), "Name": "copy_lo",
-            "FontHeight": _UI["font_small"],
-        })
-        current_y += BUTTON_HEIGHT + VERT_SEP * 2
-
-        # Separator
-        add("line_before_proxy_btns", "FixedLine", HORI_MARGIN, current_y,
-            WIDTH - HORI_MARGIN * 2, 2, {})
-        current_y += VERT_SEP
-
-        add("btn_ok", "Button", WIDTH - HORI_MARGIN - BUTTON_WIDTH * 2 - HORI_SEP, current_y,
-            BUTTON_WIDTH, BUTTON_HEIGHT, {
-                "PushButtonType": OK, "DefaultButton": True, "Label": _t("common.save"),
-                "FontHeight": _UI["font_label"],
-            })
-        add("btn_cancel", "Button", WIDTH - HORI_MARGIN - BUTTON_WIDTH, current_y,
-            BUTTON_WIDTH, BUTTON_HEIGHT, {
-                "PushButtonType": CANCEL, "Label": _t("common.cancel"),
-                "FontHeight": _UI["font_label"],
-            })
-
-        frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dialog.createPeer(create("com.sun.star.awt.Toolkit"), window)
-        if not x is None and not y is None:
-            ps = dialog.convertSizeToPixel(uno.createUnoStruct("com.sun.star.awt.Size", x, y), TWIP)
-            _x, _y = ps.Width, ps.Height
-        elif window:
-            ps = window.getPosSize()
-            _x = ps.Width / 2 - WIDTH / 2
-            _y = ps.Height / 2 - HEIGHT / 2
-        dialog.setPosSize(_x, _y, 0, 0, POS)
-
-        class ProxyActionListener(unohelper.Base, XActionListener):
-            def __init__(self, outer):
-                self.outer = outer
-            def actionPerformed(self, event):
-                try:
-                    command = getattr(event, "ActionCommand", "") or ""
-                except Exception:
-                    command = ""
-                if not command:
-                    try:
-                        source = getattr(event, "Source", None)
-                        command = getattr(source.getModel(), "Name", "") if source else ""
-                    except Exception:
-                        command = ""
-                if command == "copy_lo":
-                    try:
-                        if lo["enabled"] and lo["host"]:
-                            url = f"{lo['host']}:{lo['port']}" if lo["port"] else lo["host"]
-                            edit_url.getModel().Text = url
-                            chk_enabled.getModel().State = 1
-                        else:
-                            chk_enabled.getModel().State = 0
-                    except Exception:
-                        pass
-                elif command == "test_proxy":
-                    try:
-                        proxy_cfg = {
-                            "enabled": bool(chk_enabled.getModel().State),
-                            "proxy_url": str(edit_url.getModel().Text).strip(),
-                            "username": str(edit_user.getModel().Text).strip(),
-                            "password": str(edit_pass.getModel().Text),
-                            "allow_insecure_ssl": bool(chk_insecure.getModel().State),
-                        }
-                        ok, message = self.outer._test_proxy_connection(proxy_cfg)
-                        self.outer._show_message(_t("proxy.test_title"), message if ok else _t("proxy.test_failed", detail=message))
-                    except Exception as e:
-                        self.outer._show_message(_t("proxy.test_title"), _t("proxy.test_failed", detail=str(e)))
-            def disposing(self, event):
-                return
-
-        listener = ProxyActionListener(self)
-        if btn_test:
-            try:
-                btn_test.addActionListener(listener)
-                btn_test.getModel().ActionCommand = "test_proxy"
-            except Exception:
-                pass
-        if btn_copy:
-            try:
-                btn_copy.addActionListener(listener)
-                btn_copy.getModel().ActionCommand = "copy_lo"
-            except Exception:
-                pass
-
-        result = {}
-        if dialog.execute():
-            try:
-                result["proxy_enabled"] = bool(chk_enabled.getModel().State)
-                result["proxy_url"] = str(edit_url.getModel().Text).strip()
-                result["proxy_username"] = str(edit_user.getModel().Text).strip()
-                result["proxy_password"] = str(edit_pass.getModel().Text)
-                result["proxy_allow_insecure_ssl"] = bool(chk_insecure.getModel().State)
-                self.set_config("proxy_enabled", result["proxy_enabled"])
-                self.set_config("proxy_url", result["proxy_url"])
-                self.set_config("proxy_username", result["proxy_username"])
-                self.set_config("proxy_password", result["proxy_password"])
-                self.set_config("proxy_allow_insecure_ssl", result["proxy_allow_insecure_ssl"])
-            except Exception:
-                pass
-        dialog.dispose()
-        return result
-
-    def _split_endpoint_api_path(self, endpoint, is_openwebui):
+    def _split_endpoint_api_path(self, endpoint):
         endpoint = (endpoint or "").rstrip("/")
         if endpoint.endswith("/api") or endpoint.endswith("/v1"):
             return endpoint, ""
-        api_path = "/api" if is_openwebui else "/v1"
-        return endpoint, api_path
+        return endpoint, "/api"
 
     def _build_auth_headers(self, api_key):
         """Build standard JSON + auth headers for API calls."""
@@ -5472,14 +4508,14 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             headers[header_name] = f"{header_prefix}{api_key}"
         return headers
 
-    def _fetch_models(self, endpoint, api_key, is_openwebui, include_info=False):
+    def _fetch_models(self, endpoint, api_key, include_info=False):
         """
         Fetch models from the API endpoint.
 
         Returns a list of model IDs when include_info=False,
         or a (list, dict) tuple of (model_ids, descriptions) when include_info=True.
         """
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
+        endpoint, api_path = self._split_endpoint_api_path(endpoint)
         api_key = self._effective_api_token(api_key)
         url = endpoint + api_path + "/models" if api_path else endpoint + "/models"
         headers = self._build_auth_headers(api_key)
@@ -5730,13 +4766,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return {key: str(value).strip() for key, value in keycloak_map.items()
                 if value is not None and str(value).strip()}
 
-    def _get_cached_models(self, endpoint, api_key, is_openwebui):
-        key = (endpoint, api_key, bool(is_openwebui))
+    def _get_cached_models(self, endpoint, api_key):
+        key = (endpoint, api_key)
         now = time.time()
         if self._models_cache and self._models_cache_key == key:
             if (now - self._models_cache_loaded_at) < self._models_cache_ttl:
                 return self._models_cache
-        models = self._fetch_models(endpoint, api_key, is_openwebui)
+        models = self._fetch_models(endpoint, api_key)
         self._models_cache = models
         self._models_cache_key = key
         self._models_cache_loaded_at = now
@@ -5768,15 +4804,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as e:
             return False, {"url": url, "status": None, "error": str(e)}
 
-    def _endpoint_connectivity_status(self, endpoint, is_openwebui):
+    def _endpoint_connectivity_status(self, endpoint):
         headers = {"Content-Type": "application/json"}
-        endpoint_base, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
-        checks = []
-        if is_openwebui:
-            checks.append("/health")
+        endpoint_base, api_path = self._split_endpoint_api_path(endpoint)
         models_path = (api_path + "/models") if api_path else "/models"
-        checks.append(models_path)
-        checks.append("/")
+        checks = ["/health", models_path, "/"]
         last_detail = {"url": endpoint_base, "status": None, "error": "unknown"}
         for path in checks:
             ok, detail = self._api_probe(endpoint_base, headers, path)
@@ -5785,15 +4817,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             last_detail = detail
         return False, last_detail
 
-    def _api_status(self, endpoint, api_key, is_openwebui):
-        anon_ok, _ = self._endpoint_connectivity_status(endpoint, is_openwebui)
+    def _api_status(self, endpoint, api_key):
+        anon_ok, _ = self._endpoint_connectivity_status(endpoint)
 
         api_key = self._effective_api_token(api_key)
         auth_headers = self._build_auth_headers(api_key)
 
         auth_ok = False
         if api_key:
-            endpoint_base, api_path = self._split_endpoint_api_path(endpoint, is_openwebui)
+            endpoint_base, api_path = self._split_endpoint_api_path(endpoint)
             models_path = (api_path + "/models") if api_path else "/models"
             _, detail = self._api_probe(endpoint_base, auth_headers, models_path)
             status = detail.get("status")
@@ -5809,120 +4841,11 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         return anon_ok, auth_ok
 
-    def make_api_request(self, prompt, system_prompt="", max_tokens=15000, api_type=None,
-                         answer_in_ui_language=False):
-        """
-        Build a streaming chat/completions request for OpenAI-compatible endpoints.
-        The api_type parameter is accepted for backwards compatibility but ignored
-        — all requests use the chat/completions format.
+    def make_chat_request(self, messages, max_tokens=2000):
+        """Construit une requête de chat en flux à partir d'un messages[] complet.
 
-        The answer keeps the language of the provided text, since it is written
-        into the document. Pass answer_in_ui_language=True when the answer is
-        read by the user instead (suggestions): it then follows the UI language.
-        """
-        try:
-            max_tokens = int(max_tokens)
-        except (TypeError, ValueError):
-            max_tokens = 15000
-
-        endpoint = str(self.get_config("llm_base_urls", "http://127.0.0.1:5000")).rstrip("/")
-        api_key = self._effective_api_token(self.get_config("llm_api_tokens", ""))
-        api_type = "chat"
-        model = str(self.get_config("llm_default_models", ""))
-
-        if answer_in_ui_language:
-            language_rule = _t("llm.answer_language")
-        else:
-            language_rule = (
-                "RÈGLE ABSOLUE : tu DOIS répondre dans la MÊME LANGUE que le texte "
-                "fourni par l'utilisateur. Si le texte est en français, réponds en "
-                "français. Si le texte est en anglais, réponds en anglais. Ne change "
-                "jamais la langue."
-            )
-
-        # Default system prompt: ask for structured Markdown (converted to native
-        # Writer formatting on insertion — see src/mirai/formatting) and set the
-        # answer language. /no_thinking prefix minimises reasoning tokens
-        # on Qwen3-style models.
-        default_system_prompt = (
-            "/no_thinking\n"
-            "Mets en forme ta réponse en Markdown standard : **gras**, *italique*, "
-            "titres avec #, listes avec - ou 1., citations avec >, liens en "
-            "[texte](url), tableaux avec des barres verticales. N'utilise JAMAIS de "
-            "balises HTML, sauf pour un alignement explicitement demandé "
-            "(centré, justifié, à droite), à indiquer uniquement avec "
-            "<p style=\"text-align:center\">...texte...</p> (ou right/justify) "
-            "autour du paragraphe concerné. "
-            + language_rule
-        )
-        if system_prompt:
-            system_prompt = default_system_prompt + " " + system_prompt
-        else:
-            system_prompt = default_system_prompt
-
-        log_to_file("=== API Request Debug ===")
-        log_to_file(f"Endpoint: {endpoint}")
-        log_to_file(f"API Type: {api_type}")
-        log_to_file(f"Model: {model}")
-        log_to_file(f"Max Tokens: {max_tokens}")
-
-        headers = self._build_auth_headers(api_key)
-
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, True)
-        log_to_file(f"[llm-auth] {self._llm_auth_debug()}")
-
-        url = endpoint + api_path + "/chat/completions"
-        log_to_file(f"Full URL: {url}")
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        data = {
-            'messages': messages,
-            'max_tokens': max_tokens,
-            'temperature': 1,
-            'top_p': 0.9,
-            'stream': True
-        }
-
-        if model:
-            data["model"] = model
-            try:
-                model_lower = model.lower()
-                from .core.shell_facade import MODEL_TOKEN_LIMITS as model_limits
-                limit = None
-                for key, value in model_limits.items():
-                    if key in model_lower:
-                        limit = value
-                        break
-                if limit:
-                    if max_tokens > limit:
-                        max_tokens = limit
-                        data["max_tokens"] = limit
-                    data["max_completion_tokens"] = min(int(data.get("max_tokens", limit)), limit)
-                    log_to_file(f"Max tokens clamped for {model}: {data['max_completion_tokens']}")
-            except Exception:
-                pass
-
-        json_data = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        # Jamais le corps : il contient le texte du document.
-        log_to_file(
-            f"Request: model={data.get('model', '')} max_tokens={data.get('max_tokens')} "
-            f"messages={len(messages)} body={len(json_data)} octets"
-        )
-        log_to_file(f"Headers: {_redacted_headers(headers)}")
-
-        # Note: method='POST' is implicit when data is provided
-        request = urllib.request.Request(url, data=json_data, headers=_with_user_agent(headers))
-        return request
-
-    def make_chat_request(self, messages, max_tokens=2000, api_type=None):
-        """Build a streaming chat request from a full messages[] array.
-
-        Unlike make_api_request, the messages list is forwarded as-is
-        (no default system-prompt prepended).  Useful for multi-turn
-        conversations where the caller manages the history.
-        The api_type parameter is accepted for backwards compatibility but ignored.
+        La liste part telle quelle : l'appelant gère le prompt système et
+        l'historique.
         """
         try:
             max_tokens = int(max_tokens)
@@ -5934,7 +4857,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         model = str(self.get_config("llm_default_models", ""))
 
         headers = self._build_auth_headers(api_key)
-        endpoint, api_path = self._split_endpoint_api_path(endpoint, True)
+        endpoint, api_path = self._split_endpoint_api_path(endpoint)
         log_to_file(f"[llm-auth] {self._llm_auth_debug()}")
 
         url = endpoint + api_path + "/chat/completions"
@@ -5950,17 +4873,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         json_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(url, data=json_data, headers=_with_user_agent(headers))
         return request
-
-    def extract_content_from_response(self, chunk, api_type="chat"):
-        """Extract text content from an OpenAI chat/completions SSE chunk.
-
-        The api_type parameter is accepted for backwards compatibility but ignored
-        — always uses the chat format (delta.content).
-        """
-        if "choices" in chunk and len(chunk["choices"]) > 0:
-            delta = chunk["choices"][0].get("delta", {})
-            return delta.get("content", ""), chunk["choices"][0].get("finish_reason")
-        return "", None
 
     def get_ssl_context(self, target_url=None):
         """
@@ -6034,945 +4946,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         return ssl_context
 
-    def stream_request(self, request, api_type, append_callback):
-        """
-        Stream a completion/chat response and append incremental chunks via
-        the provided callback.  The HTTP I/O runs in a background thread so
-        the LibreOffice UI stays responsive (processEventsToIdle pumped on
-        the main thread).
-        """
-        import queue as _queue
-
-        toolkit = self.ctx.getServiceManager().createInstanceWithContext(
-            "com.sun.star.awt.Toolkit", self.ctx
-        )
-        ssl_context = self.get_ssl_context()
-        try:
-            request_timeout = int(self.get_config("llm_request_timeout_seconds", 45))
-        except Exception:
-            request_timeout = 45
-        if request_timeout < 5:
-            request_timeout = 5
-
-        log_to_file("=== Starting stream request ===")
-        log_to_file(f"Request URL: {request.full_url}")
-        log_to_file(f"Request timeout: {request_timeout}s")
-
-        _DONE = object()          # sentinel
-        _ERROR_401 = object()     # sentinel for auth error
-        _ERROR_403 = object()     # sentinel for permission error (token not yet synced)
-        _ERROR_429 = object()     # sentinel for quota exceeded (paired with retry_after)
-        chunk_queue = _queue.Queue()
-
-        def _network_thread():
-            """Runs in background – reads HTTP stream, pushes chunks."""
-            try:
-                with self._urlopen(request, context=ssl_context,
-                                   timeout=request_timeout) as response:
-                    log_to_file(f"Response status: {response.status}")
-                    _line_count = 0
-                    _data_count = 0
-                    for line in response:
-                        _line_count += 1
-                        try:
-                            if line.strip() and line.startswith(b"data: "):
-                                _data_count += 1
-                                payload = line[len(b"data: "):].decode("utf-8").strip()
-                                if payload == "[DONE]":
-                                    log_to_file(f"[stream] [DONE] after {_line_count} lines, {_data_count} data")
-                                    break
-                                chunk = json.loads(payload)
-                                content, finish_reason = \
-                                    self.extract_content_from_response(chunk, api_type)
-                                if _data_count <= 2:
-                                    log_to_file(f"[stream] sample chunk keys={list(chunk.keys())} content_len={len(content)} finish={finish_reason}")
-                                if content:
-                                    chunk_queue.put(content)
-                                if finish_reason:
-                                    log_to_file(f"[stream] finish_reason={finish_reason} after {_data_count} data chunks")
-                                    break
-                        except Exception as e:
-                            log_to_file(f"Error processing line: {str(e)}")
-                            chunk_queue.put(str(e))
-                    else:
-                        log_to_file(f"[stream] stream ended: {_line_count} lines, {_data_count} data chunks")
-            except urllib.error.HTTPError as e:
-                try:
-                    body = e.read().decode("utf-8")
-                except Exception:
-                    body = ""
-                error_code, retry_after = self._parse_llm_error(e.code, body, e.headers)
-                request_id = ""
-                try:
-                    if e.headers:
-                        request_id = str(e.headers.get("X-Request-Id", "") or "")
-                except Exception:
-                    pass
-                if e.code == 429:
-                    chunk_queue.put((_ERROR_429, retry_after))
-                elif e.code == 401 or ("\"401\"" in body or "status\":401" in body
-                                       or "code\":401" in body):
-                    chunk_queue.put(_ERROR_401)
-                elif e.code == 403:
-                    chunk_queue.put(_ERROR_403)
-                # Vue « parc côté client » : journalisation fonctionnelle de
-                # l'erreur relais (429/401/403/5xx), corrélée à l'audit serveur
-                # par X-Request-Id — jamais de contenu (protocole DM § 8 bis).
-                self._send_llm_relay_error(
-                    e.code, error_code, retry_after=retry_after,
-                    request_id=request_id, will_retry=(e.code == 403))
-                log_to_file(
-                    f"ERROR in stream_request: HTTP {e.code} {e.reason} "
-                    f"request_id={request_id} body_len={len(body)}")
-            except Exception as e:
-                reason = str(e)
-                self._send_llm_relay_error(
-                    0, "timeout" if "timed out" in reason.lower() else "network_error")
-                log_to_file(f"ERROR in stream_request: {reason}")
-            finally:
-                chunk_queue.put(_DONE)
-
-        t = threading.Thread(target=_network_thread, daemon=True)
-        t.start()
-
-        # Show the thinking widget (plume icon + animated dots)
-        self._show_thinking()
-        _dots_tick = 0
-        _got_first_chunk = False
-
-        # Main-thread loop: drain queue, call callback, keep UI alive
-        try:
-            while True:
-                try:
-                    item = chunk_queue.get(timeout=0.05)
-                except _queue.Empty:
-                    # No data yet — animate dots and pump UI events
-                    _dots_tick += 1
-                    if _dots_tick % 6 == 0:  # ~every 300ms
-                        self._update_thinking_dots()
-                    pump_events(toolkit)
-                    continue
-
-                if item is _DONE:
-                    break
-                if item is _ERROR_401:
-                    try:
-                        self._show_message_and_open_settings(
-                            _t("msg.token_invalid_title"),
-                            _t("msg.token_invalid_body")
-                        )
-                    except Exception:
-                        pass
-                    continue
-                if item is _ERROR_403:
-                    log_to_file("[stream] 403 received — caller should retry after config refresh")
-                    continue
-                if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR_429:
-                    # Quota atteint : respecter retry_after (pas de réessai
-                    # automatique) et l'afficher à l'utilisateur.
-                    try:
-                        delay = (
-                            _t("msg.delay_seconds", seconds=int(item[1]))
-                            if item[1]
-                            else _t("msg.delay_moment")
-                        )
-                    except (TypeError, ValueError):
-                        delay = _t("msg.delay_moment")
-                    try:
-                        self._show_message(
-                            _t("msg.quota_title"),
-                            _t("msg.quota_body", delay=delay))
-                    except Exception:
-                        pass
-                    continue
-
-                # Close thinking widget on first real chunk
-                if not _got_first_chunk:
-                    _got_first_chunk = True
-                    self._close_thinking()
-
-                append_callback(item)
-                pump_events(toolkit)
-        finally:
-            self._close_thinking()
-
     #retrieved from https://wiki.documentfoundation.org/Macros/General/IO_to_Screen
     #License: Creative Commons Attribution-ShareAlike 3.0 Unported License,
     #License: The Document Foundation  https://creativecommons.org/licenses/by-sa/3.0/
     #begin sharealike section
-    def input_box(self,message, title="", default="", x=None, y=None, ok_label=None, cancel_label=None, always_on_top=False):
-        """ Shows dialog with input box.
-            @param message message to show on the dialog
-            @param title window title
-            @param default default value
-            @param x optional dialog position in twips
-            @param y optional dialog position in twips
-            @return string if OK button pushed, otherwise zero length string
-        """
-        ok_label = ok_label or _t("common.send")
-        cancel_label = cancel_label or _t("common.cancel")
-        WIDTH = 720
-        HORI_MARGIN = VERT_MARGIN = 8
-        BUTTON_WIDTH = 100
-        BUTTON_HEIGHT = 30
-        VERT_SEP = 8
-        LABEL_HEIGHT = 26
-        EDIT_HEIGHT = 80
-        HEIGHT = VERT_MARGIN * 2 + LABEL_HEIGHT + VERT_SEP + EDIT_HEIGHT + VERT_SEP + BUTTON_HEIGHT + VERT_MARGIN
-        from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-        from com.sun.star.awt.PushButtonType import OK
-        from com.sun.star.util.MeasureUnit import TWIP
-        ctx = uno.getComponentContext()
-        def create(name):
-            return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-        dialog = create("com.sun.star.awt.UnoControlDialog")
-        dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-        dialog.setModel(dialog_model)
-        if always_on_top:
-            try:
-                dialog_model.AlwaysOnTop = True
-            except Exception:
-                pass
-            try:
-                dialog_model.Closeable = True
-            except Exception:
-                pass
-        dialog.setVisible(False)
-        dialog.setTitle(title)
-        dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-        try:
-            dialog.getModel().Sizeable = True
-        except Exception:
-            pass
-        def add(name, type, x_, y_, width_, height_, props):
-            try:
-                model = dialog_model.createInstance("com.sun.star.awt.UnoControl" + type + "Model")
-            except Exception as e:
-                log_to_file(f"Dialog control type unsupported: name={name} type={type} error={str(e)}")
-                return None
-            try:
-                dialog_model.insertByName(name, model)
-            except Exception as e:
-                log_to_file(f"Dialog insert failed: name={name} type={type} error={str(e)}")
-                return None
-            control = dialog.getControl(name)
-            try:
-                control.setPosSize(x_, y_, width_, height_, POSSIZE)
-            except Exception as e:
-                log_to_file(f"Dialog size failed: name={name} type={type} error={str(e)}")
-            for key, value in props.items():
-                try:
-                    setattr(model, key, value)
-                except Exception as e:
-                    log_to_file(f"Dialog prop unsupported: control={name} type={type} prop={key} error={str(e)}")
-            return control
-
-        edit_y = VERT_MARGIN + LABEL_HEIGHT + VERT_SEP
-        btn_y = edit_y + EDIT_HEIGHT + VERT_SEP
-        try:
-            dialog_model.BackgroundColor = _UI["bg"]
-        except Exception:
-            pass
-        add("label", "FixedText", HORI_MARGIN, VERT_MARGIN, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": str(message), "NoLabel": True,
-            "FontHeight": _UI["font_label"],
-            "TextColor": _UI["text"],
-        })
-        add("edit", "Edit", HORI_MARGIN, edit_y, WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-            "Text": str(default), "MultiLine": True,
-            "BackgroundColor": _UI["bg_input"],
-        })
-        add("btn_ok", "Button", WIDTH - HORI_MARGIN - BUTTON_WIDTH, btn_y,
-                BUTTON_WIDTH, BUTTON_HEIGHT, {"PushButtonType": OK, "DefaultButton": True, "Label": ok_label})
-        frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dialog.createPeer(create("com.sun.star.awt.Toolkit"), window)
-        if x is not None and y is not None:
-            ps = dialog.convertSizeToPixel(uno.createUnoStruct("com.sun.star.awt.Size", x, y), TWIP)
-            _x, _y = ps.Width, ps.Height
-        elif window:
-            ps = window.getPosSize()
-            _x = ps.Width / 2 - WIDTH / 2
-            _y = ps.Height / 2 - HEIGHT / 2
-        dialog.setPosSize(_x, _y, 0, 0, POS)
-        edit = dialog.getControl("edit")
-        edit.setSelection(uno.createUnoStruct("com.sun.star.awt.Selection", 0, len(str(default))))
-        edit.setFocus()
-        ret = edit.getModel().Text if dialog.execute() else ""
-        dialog.dispose()
-        return ret
-
-    def _chunk_doc_paragraphs(self, doc):
-        """Enumerate paragraphs and group into smart chunks for LLM processing.
-
-        Break points (priority): page break > style change > empty paragraph >
-        end-of-sentence punctuation > any paragraph boundary when over limit.
-        """
-        chunk_max = int(self.get_config("edit_chunk_max_chars", 3000))
-        paragraphs = []
-        enum = doc.Text.createEnumeration()
-        while enum.hasMoreElements():
-            para = enum.nextElement()
-            if not para.supportsService("com.sun.star.text.Paragraph"):
-                continue
-            p_text = para.getString()
-            p_style = ""
-            p_break = False
-            try:
-                p_style = para.getPropertyValue("ParaStyleName")
-            except Exception:
-                pass
-            try:
-                bt = para.getPropertyValue("BreakType")
-                # PAGE_BEFORE=4, PAGE_AFTER=5, PAGE_BOTH=6
-                if hasattr(bt, 'value'):
-                    p_break = bt.value in ("PAGE_BEFORE", "PAGE_AFTER", "PAGE_BOTH")
-                else:
-                    p_break = bt in (4, 5, 6)
-            except Exception:
-                pass
-            paragraphs.append({
-                "text": p_text, "style": p_style,
-                "page_break": p_break, "obj": para,
-            })
-
-        if not paragraphs:
-            return []
-
-        chunks = []
-        current_chunk = []
-        current_len = 0
-        prev_style = paragraphs[0]["style"]
-
-        for p in paragraphs:
-            p_len = len(p["text"]) + 1  # +1 for separator
-
-            should_break = False
-            if current_len > 0:
-                if p["page_break"]:
-                    should_break = True
-                elif current_len + p_len > chunk_max:
-                    should_break = True
-                elif current_len > chunk_max * 0.6:
-                    if p["style"] != prev_style:
-                        should_break = True
-                    elif p["text"].strip() == "":
-                        should_break = True
-                    elif current_chunk and current_chunk[-1]["text"].rstrip().endswith(
-                            (".", "!", "?", "\u2026", ";")):
-                        should_break = True
-
-            if should_break and current_chunk:
-                chunks.append(current_chunk)
-                current_chunk = []
-                current_len = 0
-
-            current_chunk.append(p)
-            current_len += p_len
-            prev_style = p["style"]
-
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        return chunks
-
-    @staticmethod
-    def _parse_find_replace(text):
-        """Parse <<<FIND>>>...<<<REPLACE>>>...<<<END>>> blocks from LLM output.
-
-        Handles multiline FIND blocks by splitting them into per-line pairs
-        (UNO's findFirst cannot match across paragraph boundaries).
-        Also strips [Pn] markers the LLM may echo back from the prompt.
-        """
-        raw_blocks = re.findall(
-            r'<<<FIND>>>\s*\n?(.*?)<<<REPLACE>>>\s*\n?(.*?)<<<END>>>',
-            text, re.DOTALL,
-        )
-        # Strip [Pn] markers that may be echoed by the LLM
-        _strip_pn = re.compile(r'^\[P\d+\]\s*', re.MULTILINE)
-        result = []
-        for f_raw, r_raw in raw_blocks:
-            f_clean = _strip_pn.sub('', f_raw).strip()
-            r_clean = _strip_pn.sub('', r_raw).strip()
-            if not f_clean:
-                continue
-            # If FIND spans multiple lines, split into per-line pairs
-            f_lines = f_clean.split('\n')
-            r_lines = r_clean.split('\n')
-            if len(f_lines) > 1:
-                # Pair each FIND line with corresponding REPLACE line
-                for i, fl in enumerate(f_lines):
-                    fl = fl.strip()
-                    if not fl:
-                        continue
-                    rl = r_lines[i].strip() if i < len(r_lines) else fl
-                    result.append((fl, rl))
-            else:
-                result.append((f_clean, r_clean))
-        return result
-
-    def _run_whole_doc_edit(self, doc, user_input):
-        """Edit the whole document chunk-by-chunk with surgical FIND/REPLACE."""
-        chunks = self._chunk_doc_paragraphs(doc)
-        if not chunks:
-            self._show_message(_t("msg.edit_title"), _t("msg.document_empty"))
-            return
-
-        log_to_file(f"WholeDocEdit: {len(chunks)} chunk(s)")
-
-        system_prompt = (
-            "Tu es un éditeur de texte professionnel. "
-            "Tu appliques les instructions sans poser de question. "
-            "Les remplacements conservent la langue du texte remplacé. "
-            "Tu réponds UNIQUEMENT avec des blocs <<<FIND>>>...<<<REPLACE>>>...<<<END>>>. "
-            "Si aucune modification n'est nécessaire, réponds uniquement : <<<NOCHANGE>>>"
-        )
-        api_type = str(self.get_config("api_type", "completions")).lower()
-
-        wait_dialog = {"dialog": None, "bg": None, "label": None, "toolkit": None}
-        cancelled = {"value": False}
-
-        def _show_progress(chunk_idx, total):
-            try:
-                from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-                WIDTH, HEIGHT = 420, 160
-                ctx = uno.getComponentContext()
-                def _cr(n):
-                    return ctx.getServiceManager().createInstanceWithContext(n, ctx)
-                if not wait_dialog["dialog"]:
-                    dlg = _cr("com.sun.star.awt.UnoControlDialog")
-                    dlg_m = _cr("com.sun.star.awt.UnoControlDialogModel")
-                    dlg.setModel(dlg_m)
-                    dlg.setVisible(False)
-                    dlg.setTitle(_t("msg.edit_doc_title"))
-                    dlg.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-                    try:
-                        dlg_m.BackgroundColor = _UI["bg_accent"]
-                    except Exception:
-                        pass
-                    def _add(name, typ, x, y, w, h, props):
-                        m = dlg_m.createInstance("com.sun.star.awt.UnoControl" + typ + "Model")
-                        dlg_m.insertByName(name, m)
-                        c = dlg.getControl(name)
-                        c.setPosSize(x, y, w, h, POSSIZE)
-                        for k, v in props.items():
-                            try:
-                                setattr(m, k, v)
-                            except Exception:
-                                pass
-                        return c
-                    lbl = _add("lbl_progress", "FixedText", 8, 8, WIDTH - 16, 20, {
-                        "Label": f"Bloc {chunk_idx + 1} / {total}...",
-                        "FontHeight": _UI["font_label"],
-                        "TextColor": _UI["primary"],
-                    })
-                    bg = _add("edit_stream", "Edit", 8, 34, WIDTH - 16, 80, {
-                        "Text": "", "MultiLine": True, "ReadOnly": True,
-                        "BackgroundColor": _UI["bg_accent"],
-                        "TextColor": _UI["primary"],
-                        "FontHeight": 7, "Border": 0,
-                    })
-                    btn = _add("btn_cancel", "Button", WIDTH // 2 - 50, 122, 100, 26, {
-                        "Label": "Annuler",
-                    })
-                    class _CL(unohelper.Base, XActionListener):
-                        def actionPerformed(self, ev):
-                            cancelled["value"] = True
-                        def disposing(self, ev):
-                            pass
-                    btn.addActionListener(_CL())
-                    frame = _cr("com.sun.star.frame.Desktop").getCurrentFrame()
-                    window = frame.getContainerWindow() if frame else None
-                    toolkit = _cr("com.sun.star.awt.Toolkit")
-                    dlg.createPeer(toolkit, window)
-                    if window:
-                        ps = window.getPosSize()
-                        dlg.setPosSize(ps.Width // 2 - WIDTH // 2 + int(ps.Width * 0.15),
-                                       ps.Height // 2 - HEIGHT // 2, 0, 0, POS)
-                    dlg.setVisible(True)
-                    wait_dialog["dialog"] = dlg
-                    wait_dialog["bg"] = bg
-                    wait_dialog["label"] = lbl
-                    wait_dialog["toolkit"] = toolkit
-                else:
-                    wait_dialog["label"].getModel().Label = f"Bloc {chunk_idx + 1} / {total}..."
-                    wait_dialog["bg"].getModel().Text = ""
-                if wait_dialog["toolkit"]:
-                    pump_events(wait_dialog["toolkit"])
-            except Exception:
-                pass
-
-        stream_buf = {"text": ""}
-
-        def _update_stream(chunk_text):
-            if cancelled["value"]:
-                return
-            stream_buf["text"] += chunk_text
-            if len(stream_buf["text"]) > 1200:
-                stream_buf["text"] = stream_buf["text"][-1200:]
-            try:
-                if wait_dialog["bg"]:
-                    wait_dialog["bg"].getModel().Text = stream_buf["text"]
-                    # Auto-scroll to bottom
-                    try:
-                        end_pos = len(stream_buf["text"])
-                        sel = uno.createUnoStruct("com.sun.star.awt.Selection", end_pos, end_pos)
-                        wait_dialog["bg"].setSelection(sel)
-                    except Exception:
-                        pass
-                if wait_dialog["toolkit"]:
-                    pump_events(wait_dialog["toolkit"])
-            except Exception:
-                pass
-
-        def _close_progress():
-            try:
-                if wait_dialog["dialog"]:
-                    wait_dialog["dialog"].setVisible(False)
-                    wait_dialog["dialog"].dispose()
-            except Exception:
-                pass
-
-        total_replacements = 0
-        total_chunks = len(chunks)
-
-        try:
-            for chunk_idx, chunk in enumerate(chunks):
-                if cancelled["value"]:
-                    break
-                # Build numbered paragraph list (skip empty paragraphs)
-                numbered_lines = []
-                for pi, p in enumerate(chunk):
-                    if p["text"].strip():
-                        numbered_lines.append(f"[P{pi + 1}] {p['text']}")
-                if not numbered_lines:
-                    continue
-                chunk_text = "\n".join(numbered_lines)
-
-                _show_progress(chunk_idx, total_chunks)
-                stream_buf["text"] = ""
-
-                prompt = (
-                    f"TEXTE À MODIFIER (bloc {chunk_idx + 1}/{total_chunks}) :\n"
-                    f"{chunk_text}\n\n"
-                    f"INSTRUCTIONS : {user_input}\n\n"
-                    "RÈGLES STRICTES :\n"
-                    "- Chaque [Pn] est un paragraphe SÉPARÉ\n"
-                    "- Produis UN bloc <<<FIND>>>...<<<REPLACE>>>...<<<END>>> PAR PARAGRAPHE modifié\n"
-                    "- Dans <<<FIND>>>, mets le texte EXACT et COMPLET du paragraphe (sans le [Pn])\n"
-                    "- Dans <<<REPLACE>>>, mets le texte de remplacement\n"
-                    "- Ne fusionne JAMAIS plusieurs paragraphes dans un seul bloc FIND\n"
-                    "- Ne pose AUCUNE question, n'ajoute AUCUN commentaire\n"
-                    "- Si aucune modification nécessaire : <<<NOCHANGE>>>\n"
-                )
-
-                accumulated = ""
-                def _append(t):
-                    nonlocal accumulated
-                    accumulated += t
-                    _update_stream(t)
-
-                max_tokens = len(chunk_text) + int(
-                    self.get_config("edit_selection_max_new_tokens", 15000))
-                request = self.make_api_request(
-                    prompt, system_prompt, max_tokens, api_type=api_type)
-                self.stream_request(request, api_type, _append)
-
-                if cancelled["value"]:
-                    break
-
-                if "<<<NOCHANGE>>>" in accumulated:
-                    log_to_file(f"WholeDocEdit: chunk {chunk_idx + 1} – no changes")
-                    continue
-
-                replacements = self._parse_find_replace(accumulated)
-                log_to_file(
-                    f"WholeDocEdit: chunk {chunk_idx + 1} → "
-                    f"{len(replacements)} replacement(s)")
-
-                for find_text, replace_text in replacements:
-                    try:
-                        search = doc.createSearchDescriptor()
-                        search.SearchRegularExpression = False
-                        search.SearchString = find_text
-                        found = doc.findFirst(search)
-                        if found:
-                            found.setString(replace_text)
-                            total_replacements += 1
-                        else:
-                            log_to_file(
-                                f"WholeDocEdit: not found: "
-                                f"{find_text[:60]}...")
-                    except Exception as e:
-                        log_to_file(f"WholeDocEdit: replace error: {e}")
-        finally:
-            _close_progress()
-
-        log_to_file(f"WholeDocEdit: done – {total_replacements} replacement(s)")
-        if cancelled["value"]:
-            return
-        if total_replacements == 0:
-            self._show_message(
-                _t("msg.edit_title"),
-                _t("msg.no_change"))
-
-    def _run_edit_selection(self, text, text_range, user_input):
-        original_text = text_range.getString()
-        if len(original_text.strip()) == 0:
-            # No selection → whole-document chunked edit (preserves styles)
-            try:
-                desktop = self.ctx.ServiceManager.createInstanceWithContext(
-                    "com.sun.star.frame.Desktop", self.ctx)
-                doc = desktop.getCurrentComponent()
-                if doc and hasattr(doc, "Text"):
-                    log_to_file("EditSelection: no selection → whole-doc edit mode")
-                    self._run_whole_doc_edit(doc, user_input)
-                    return
-            except Exception as e:
-                log_to_file(f"EditSelection: whole-doc edit failed, fallback: {e}")
-
-        wait_dialog = {"dialog": None, "bg": None, "toolkit": None}
-        wait_buffer = {"text": "Contacte MIrAI..."}
-        cancelled = {"value": False}
-        def _show_wait():
-            try:
-                from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-                WIDTH = 420
-                BUTTON_HEIGHT = 26
-                HORI_MARGIN = VERT_MARGIN = 8
-                LABEL_HEIGHT = 18
-                VERT_SEP = 8
-                BG_HEIGHT = 96
-                HEIGHT = VERT_MARGIN * 2 + LABEL_HEIGHT + VERT_SEP + BG_HEIGHT + VERT_SEP + BUTTON_HEIGHT
-                ctx = uno.getComponentContext()
-                def create(name):
-                    return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-                dialog = create("com.sun.star.awt.UnoControlDialog")
-                dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-                dialog.setModel(dialog_model)
-                dialog.setVisible(False)
-                dialog.setTitle("MIrAI")
-                dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-                try:
-                    dialog_model.BackgroundColor = _UI["bg_accent"]
-                except Exception:
-                    pass
-                def add(name, type, x_, y_, width_, height_, props):
-                    try:
-                        model = dialog_model.createInstance("com.sun.star.awt.UnoControl" + type + "Model")
-                        dialog_model.insertByName(name, model)
-                        control = dialog.getControl(name)
-                        control.setPosSize(x_, y_, width_, height_, POSSIZE)
-                        for key, value in props.items():
-                            try:
-                                setattr(model, key, value)
-                            except Exception:
-                                pass
-                        return control
-                    except Exception:
-                        return None
-                add("label_wait", "FixedText", HORI_MARGIN, VERT_MARGIN,
-                    WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT,
-                    {"Label": "MIrAI réfléchit...", "NoLabel": True,
-                     "FontHeight": _UI["font_label"],
-                     "TextColor": _UI["primary"],
-                    })
-                bg_y = VERT_MARGIN + LABEL_HEIGHT + VERT_SEP
-                bg = add("edit_wait_bg", "Edit", HORI_MARGIN, bg_y,
-                    WIDTH - HORI_MARGIN * 2, BG_HEIGHT,
-                    {"Text": wait_buffer["text"], "MultiLine": True, "ReadOnly": True})
-                if bg:
-                    try:
-                        bg.getModel().BackgroundColor = _UI["bg_accent"]
-                        bg.getModel().TextColor = _UI["primary"]
-                        bg.getModel().FontHeight = 7
-                        bg.getModel().Border = 0
-                    except Exception:
-                        pass
-                btn_cancel_y = bg_y + BG_HEIGHT + VERT_SEP
-                CANCEL_BTN_WIDTH = 100
-                btn_cancel_wait = add(
-                    "btn_cancel_wait", "Button",
-                    WIDTH // 2 - CANCEL_BTN_WIDTH // 2, btn_cancel_y,
-                    CANCEL_BTN_WIDTH, BUTTON_HEIGHT,
-                    {"Label": "Annuler"}
-                )
-
-                class CancelWaitListener(unohelper.Base, XActionListener):
-                    def actionPerformed(self, event):
-                        cancelled["value"] = True
-                    def disposing(self, event):
-                        return
-
-                if btn_cancel_wait:
-                    try:
-                        btn_cancel_wait.addActionListener(CancelWaitListener())
-                    except Exception:
-                        pass
-
-                frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-                window = frame.getContainerWindow() if frame else None
-                toolkit = create("com.sun.star.awt.Toolkit")
-                dialog.createPeer(toolkit, window)
-                if window:
-                    ps = window.getPosSize()
-                    _x = ps.Width / 2 - WIDTH / 2 + int(ps.Width * 0.15)
-                    _y = ps.Height / 2 - HEIGHT / 2
-                    dialog.setPosSize(_x, _y, 0, 0, POS)
-                dialog.setVisible(True)
-                wait_dialog["dialog"] = dialog
-                wait_dialog["bg"] = bg
-                wait_dialog["toolkit"] = toolkit
-                if bg:
-                    try:
-                        bg.getModel().Text = wait_buffer["text"]
-                    except Exception:
-                        pass
-                pump_events(toolkit)
-                time.sleep(0.05)
-            except Exception:
-                pass
-
-        def _update_wait(chunk_text):
-            if not wait_dialog["bg"]:
-                return
-            try:
-                wait_buffer["text"] += chunk_text
-                if len(wait_buffer["text"]) > 1200:
-                    wait_buffer["text"] = wait_buffer["text"][-1200:]
-                wait_dialog["bg"].getModel().Text = wait_buffer["text"]
-                # Auto-scroll to bottom
-                try:
-                    end_pos = len(wait_buffer["text"])
-                    sel = uno.createUnoStruct("com.sun.star.awt.Selection", end_pos, end_pos)
-                    wait_dialog["bg"].setSelection(sel)
-                except Exception:
-                    pass
-                if wait_dialog.get("toolkit"):
-                    pump_events(wait_dialog["toolkit"])
-                time.sleep(0.01)
-            except Exception:
-                pass
-
-        def _close_wait():
-            try:
-                if wait_dialog["dialog"]:
-                    wait_dialog["dialog"].setVisible(False)
-                    wait_dialog["dialog"].dispose()
-            except Exception:
-                pass
-
-        try:
-            prompt_log_path = self._prompt_log_path()
-            if prompt_log_path:
-                with open(prompt_log_path, "a", encoding="utf-8") as f:
-                    f.write(user_input.strip() + "\n")
-                    f.write("-" * 40 + "\n")
-        except Exception:
-            pass
-
-        system_prompt = self.get_config(
-            "edit_selection_system_prompt",
-            "Tu es un éditeur de texte. Tu dois appliquer les instructions sans poser de questions. Interdiction totale de poser une question, de demander des précisions ou de commenter. Tu dois produire uniquement le texte modifié, sans préambule, sans explication et sans guillemets. Ne répète pas les instructions."
-        )
-        api_type = str(self.get_config("api_type", "completions")).lower()
-
-        # If selection is empty, insert at the current cursor position
-        try:
-            if text_range.getString() == "":
-                model = self.ctx.ServiceManager.createInstanceWithContext(
-                    "com.sun.star.frame.Desktop", self.ctx
-                ).getCurrentComponent()
-                controller = model.getCurrentController() if model else None
-                view_cursor = controller.getViewCursor() if controller else None
-                if view_cursor:
-                    text_range = view_cursor
-        except Exception:
-            pass
-
-        accumulated_text = ""
-        stop_phrases = [
-            "end of document",
-            "end of the document",
-            "[END]",
-            "---END---"
-        ]
-        question_patterns = [
-            "would you like",
-            "do you want",
-            "should i",
-            "can i help",
-            "what would you prefer",
-            "could you clarify",
-            "please specify",
-            "here is",
-            "here's",
-            "i've made",
-            "i have made",
-            "voulez-vous",
-            "souhaitez-vous",
-            "aimeriez-vous",
-            "préférez-vous",
-            "dois-je",
-            "devrais-je",
-            "puis-je",
-            "est-ce que vous",
-            "pouvez-vous préciser",
-            "pourriez-vous clarifier",
-            "veuillez préciser",
-            "voici",
-            "voilà",
-            "j'ai modifié",
-            "j'ai changé",
-            "j'ai fait",
-            "que souhaitez",
-            "quelle version",
-            "quel style"
-        ]
-
-        aborted = {"value": False}
-
-        def append_text(chunk_text):
-            nonlocal accumulated_text
-            if cancelled["value"]:
-                return
-            accumulated_text += chunk_text
-            _update_wait(chunk_text)
-            lower_text = accumulated_text.lower()
-            for pattern in question_patterns:
-                if pattern in lower_text:
-                    aborted["value"] = True
-                    return
-            for stop_phrase in stop_phrases:
-                if stop_phrase.lower() in accumulated_text.lower():
-                    pos = accumulated_text.lower().find(stop_phrase.lower())
-                    accumulated_text = accumulated_text[:pos].rstrip()
-                    return
-
-        def _edit_segment(segment_text):
-            prompt = """ORIGINAL VERSION:
-""" + segment_text + """
-
-INSTRUCTIONS: """ + user_input + """
-
-IMPORTANT RULES:
-- Do NOT ask any questions
-- Do NOT add explanations or comments
-- Do NOT include phrases like "Here is..." or "I've made..."
-- Output ONLY the edited text directly
-- Start immediately with the edited content
-- Edit ONLY the ORIGINAL VERSION. Do not add any extra text.
-
-EDITED VERSION:
-"""
-            max_tokens = len(segment_text) + self.get_config("edit_selection_max_new_tokens", 15000)
-            request = self.make_api_request(prompt, system_prompt, max_tokens, api_type=api_type)
-            return request
-
-        try:
-            text_obj = text_range.getText()
-            start = text_range.getStart()
-            end = text_range.getEnd()
-            old_len = len(original_text)
-            base_char_style = ""
-            base_para_style = ""
-            try:
-                base_char_style = text_range.getPropertyValue("CharStyleName")
-            except Exception:
-                pass
-            try:
-                base_para_style = text_range.getPropertyValue("ParaStyleName")
-            except Exception:
-                pass
-
-            # Edit selection as a single block (no segmentation)
-            # Retry once on empty result (handles 403 after fresh enrollment —
-            # first attempt fails, we force a blocking config refresh to sync
-            # the LLM token from the relay, then retry).
-            _show_wait()
-            for _attempt in range(2):
-                accumulated_text = ""
-                aborted["value"] = False
-                request = _edit_segment(original_text)
-                self.stream_request(request, api_type, append_text)
-                if accumulated_text.strip() or cancelled["value"] or aborted["value"]:
-                    break
-                if _attempt == 0:
-                    log_to_file("[edit] empty result on first attempt, forcing config refresh")
-                    try:
-                        self._fetch_config(force=True)
-                    except Exception:
-                        pass
-                    # Verify token is now available
-                    token_check = str(self.get_config("llm_api_tokens", "") or "").strip()
-                    log_to_file(f"[edit] after refresh: llm_api_tokens={'present' if token_check else 'still empty'}")
-                    if not token_check:
-                        break  # no point retrying without a token
-            _close_wait()
-            if cancelled["value"]:
-                return
-            if aborted["value"]:
-                self._show_message(
-                    _t("msg.edit_title"),
-                    _t("msg.ask_instead")
-                )
-                return
-            # Strip think/reasoning blocks (e.g. deepseek-r1)
-            accumulated_text = re.sub(r"<think>.*?</think>", "", accumulated_text, flags=re.DOTALL | re.IGNORECASE)
-            accumulated_text = re.sub(r"^.*?</think>", "", accumulated_text, flags=re.DOTALL | re.IGNORECASE)
-            accumulated_text = re.sub(r"<think>.*$", "", accumulated_text, flags=re.DOTALL | re.IGNORECASE)
-            accumulated_text = accumulated_text.strip()
-
-            if not accumulated_text.strip():
-                self._show_message(
-                    _t("msg.edit_title"),
-                    _t("msg.no_answer")
-                )
-                return
-
-            new_len = len(accumulated_text)
-
-            log_to_file(f"EditSelection insert: old_len={old_len} new_len={new_len} segments=1")
-            # Delete original selection (if any)
-            delete_cursor = text_obj.createTextCursorByRange(start)
-            delete_cursor.gotoRange(end, True)
-            delete_cursor.setString("")
-            insert_point = delete_cursor.getStart()
-
-            # Insert new text at cursor position
-            insert_cursor = text_obj.createTextCursorByRange(insert_point)
-            if original_text == "":
-                try:
-                    insert_cursor.setPropertyValue("CharStyleName", "Default")
-                except Exception:
-                    pass
-                try:
-                    insert_cursor.setPropertyValue("ParaStyleName", "Standard")
-                except Exception:
-                    pass
-            doc = None
-            try:
-                doc = self.ctx.ServiceManager.createInstanceWithContext(
-                    "com.sun.star.frame.Desktop", self.ctx
-                ).getCurrentComponent()
-            except Exception:
-                pass
-
-            insert_formatted(doc, text_obj, insert_cursor, accumulated_text, base_char_style, base_para_style)
-            log_to_file("EditSelection insert: done")
-
-            # Reselect inserted text
-            try:
-                controller = doc.getCurrentController() if doc else None
-                if controller:
-                    sel_cursor = text_obj.createTextCursorByRange(insert_point)
-                    sel_cursor.gotoRange(insert_cursor.getEnd(), True)
-                    controller.select(sel_cursor)
-            except Exception:
-                pass
-        except Exception as e:
-            log_to_file(f"EditSelection insert failed: {str(e)}")
-
     def _show_about_dialog(self):
         """Show the About dialog with version, icon, description and update check."""
         from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
@@ -7098,7 +5075,7 @@ EDITED VERSION:
         btn_y = HEIGHT - VERT_MARGIN - BTN_HEIGHT - 18
 
         # Check updates button
-        _mascot_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16.png")
+        _mascot_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "mascot16.png"))
         btn_update_props = {
             "Label": _t("about.updates_button"),
             "FontHeight": _UI["font_small"],
@@ -7168,15 +5145,14 @@ EDITED VERSION:
                                 try:
                                     pend = about_self._pending_update_dir()
                                     os.makedirs(pend, exist_ok=True)
-                                    open(os.path.join(pend, "mirai_update.oxt"), "a").close()
+                                    oxt = os.path.join(pend, "mirai_update.oxt")
+                                    open(oxt, "a").close()
                                     if update_status:
                                         update_status.getModel().Label = (
                                             _t("about.selftest_blocked")
                                         )
                                         update_status.getModel().TextColor = _UI["info"]
-                                    about_self._notify_update_blocked(
-                                        "SELFTEST", os.path.join(pend, "mirai_update.bat")
-                                    )
+                                    about_self._notify_update_blocked("SELFTEST", oxt)
                                 except Exception as _e:
                                     log_to_file(f"selftest update-blocked: {str(_e)}")
                                 return
@@ -7193,9 +5169,9 @@ EDITED VERSION:
                                 # Wait for update to finish (max 60s)
                                 for _ in range(120):
                                     time.sleep(0.5)
-                                    if not MainJob._update_in_progress_cls:
+                                    if not about_self.runtime.update_in_progress:
                                         break
-                                if MainJob._update_in_progress_cls:
+                                if about_self.runtime.update_in_progress:
                                     update_status.getModel().Label = _t("about.downloading", target=target)
                                     update_status.getModel().TextColor = _UI["info"]
                                 else:
@@ -7319,1993 +5295,6 @@ EDITED VERSION:
 
         dialog.setVisible(True)
 
-    def _show_resize_dialog(self, text, text_range, controller=None, model=None):
-        """Mini floating dialog with − / + buttons to shrink or expand selected text."""
-        # Singleton: reuse if already open
-        if self._resize_dialog:
-            try:
-                self._resize_dialog.setVisible(True)
-                return
-            except Exception:
-                self._resize_dialog = None
-
-        from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-
-        WIDTH = 320
-        HORI_MARGIN = 14
-        VERT_MARGIN = 12
-        BTN_SIZE = 50
-        BTN_GAP = 20
-        LABEL_HEIGHT = 20
-        PREVIEW_HEIGHT = 80
-        HEIGHT = VERT_MARGIN * 2 + LABEL_HEIGHT + 8 + BTN_SIZE + 8 + PREVIEW_HEIGHT
-
-        ctx = uno.getComponentContext()
-        def create(name):
-            return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-
-        dialog = create("com.sun.star.awt.UnoControlDialog")
-        dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-        dialog.setModel(dialog_model)
-        dialog.setVisible(False)
-        dialog.setTitle(_t("resize.title"))
-        dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-        try:
-            dialog_model.BackgroundColor = _UI["bg"]
-        except Exception:
-            pass
-        try:
-            dialog_model.Sizeable = False
-        except Exception:
-            pass
-        try:
-            dialog_model.Closeable = True
-        except Exception:
-            pass
-
-        def add(name, type_, x_, y_, width_, height_, props):
-            try:
-                m = dialog_model.createInstance("com.sun.star.awt.UnoControl" + type_ + "Model")
-                dialog_model.insertByName(name, m)
-                control = dialog.getControl(name)
-                control.setPosSize(x_, y_, width_, height_, POSSIZE)
-                for key, value in props.items():
-                    try:
-                        setattr(m, key, value)
-                    except Exception:
-                        pass
-                return control
-            except Exception:
-                return None
-
-        # Status label
-        status_label = add(
-            "resize_status", "FixedText",
-            HORI_MARGIN, VERT_MARGIN,
-            WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT,
-            {"Label": _t("resize.hint"),
-             "NoLabel": True,
-             "FontHeight": _UI["font_small"],
-             "TextColor": _UI["text_secondary"],
-             "Align": 1,
-            }
-        )
-
-        # − button (reduce)
-        btn_y = VERT_MARGIN + LABEL_HEIGHT + 8
-        center_x = WIDTH // 2
-        btn_minus = add(
-            "btn_resize_minus", "Button",
-            center_x - BTN_SIZE - BTN_GAP // 2, btn_y,
-            BTN_SIZE, BTN_SIZE,
-            {"Label": "−",
-             "FontHeight": 22,
-             "FontWeight": 200,
-             "TextColor": _UI["btn_primary_fg"],
-             "BackgroundColor": _UI["btn_primary_bg"],
-            }
-        )
-        # + button (expand)
-        btn_plus = add(
-            "btn_resize_plus", "Button",
-            center_x + BTN_GAP // 2, btn_y,
-            BTN_SIZE, BTN_SIZE,
-            {"Label": "+",
-             "FontHeight": 22,
-             "FontWeight": 200,
-             "TextColor": _UI["btn_primary_fg"],
-             "BackgroundColor": _UI["btn_primary_bg"],
-            }
-        )
-
-        # Preview area — shows streaming LLM output (including reasoning)
-        preview_y = btn_y + BTN_SIZE + 8
-        preview_control = add(
-            "resize_preview", "Edit",
-            HORI_MARGIN, preview_y,
-            WIDTH - HORI_MARGIN * 2, PREVIEW_HEIGHT,
-            {"Text": "", "MultiLine": True, "ReadOnly": True, "VScroll": True,
-             "BackgroundColor": _UI["bg_section"],
-             "FontHeight": 7,
-             "TextColor": _UI["text_secondary"],
-             "Border": 1,
-             "BorderColor": _UI["border"],
-            }
-        )
-
-        resize_self = self
-
-        def _get_current_selection():
-            """Grab the live selection from the document."""
-            try:
-                desktop = resize_self.ctx.ServiceManager.createInstanceWithContext(
-                    "com.sun.star.frame.Desktop", resize_self.ctx)
-                doc = desktop.getCurrentComponent()
-                if doc and hasattr(doc, "Text"):
-                    sel = doc.CurrentController.getSelection()
-                    if sel and sel.getCount() > 0:
-                        return doc.Text, sel.getByIndex(0), doc.CurrentController, doc
-            except Exception:
-                pass
-            return text, text_range, controller, model
-
-        def _do_resize(direction):
-            """Run the resize LLM call. direction: 'reduce' or 'expand'."""
-            _, rng, ctrl, mdl = _get_current_selection()
-            original = rng.getString()
-            if not original or len(original.strip()) < 5:
-                if status_label:
-                    try:
-                        status_label.getModel().Label = _t("resize.no_selection")
-                        status_label.getModel().TextColor = _UI["warning"]
-                    except Exception:
-                        pass
-                return
-
-            # Update status label
-            if status_label:
-                try:
-                    label = _t("resize.reduce_running") if direction == "reduce" else _t("resize.expand_running")
-                    status_label.getModel().Label = label
-                    status_label.getModel().TextColor = _UI["primary"]
-                except Exception:
-                    pass
-
-            word_count = len(original.split())
-
-            if direction == "reduce":
-                target_words = max(5, int(word_count * 0.65))
-                system = (
-                    "Tu DOIS répondre dans la MÊME LANGUE que le texte fourni. "
-                    "Si le texte est en français, réponds en français. "
-                    "Si le texte est en anglais, réponds en anglais.\n"
-                    "Tu es un rédacteur professionnel. Tu raccourcis le texte fourni "
-                    "en conservant le sens, le ton et les informations essentielles. "
-                    f"Le texte original fait {word_count} mots. "
-                    f"Tu DOIS produire un texte de {target_words} mots MAXIMUM. "
-                    "Produis UNIQUEMENT le texte raccourci, "
-                    "sans introduction, sans explication, sans commentaire, sans guillemets."
-                )
-                prompt = (
-                    f"Raccourcis ce texte à {target_words} mots maximum "
-                    f"(actuellement {word_count} mots) :\n\n"
-                    f"{original}\n\n"
-                    f"TEXTE RACCOURCI ({target_words} mots max) :"
-                )
-            else:
-                target_words = int(word_count * 1.4)
-                system = (
-                    "Tu DOIS répondre dans la MÊME LANGUE que le texte fourni. "
-                    "Si le texte est en français, réponds en français. "
-                    "Si le texte est en anglais, réponds en anglais.\n"
-                    "Tu es un rédacteur professionnel. Tu développes le texte fourni "
-                    "en ajoutant des détails, des précisions ou des formulations plus "
-                    "riches tout en conservant le sens et le ton. "
-                    f"Le texte original fait {word_count} mots. "
-                    f"Tu DOIS produire un texte d'environ {target_words} mots. "
-                    "Produis UNIQUEMENT le texte développé, "
-                    "sans introduction, sans explication, sans commentaire, sans guillemets."
-                )
-                prompt = (
-                    f"Développe ce texte à environ {target_words} mots "
-                    f"(actuellement {word_count} mots) :\n\n"
-                    f"{original}\n\n"
-                    f"TEXTE DÉVELOPPÉ (~{target_words} mots) :"
-                )
-
-            try:
-                api_type = str(resize_self.get_config("api_type", "completions")).lower()
-                max_tokens = int(resize_self.get_config("edit_selection_max_new_tokens", 15000))
-                request = resize_self.make_api_request(prompt, system, max_tokens, api_type=api_type)
-                accumulated = []
-                # Clear preview
-                if preview_control:
-                    try:
-                        preview_control.getModel().Text = ""
-                    except Exception:
-                        pass
-                def _collect(chunk):
-                    accumulated.append(chunk)
-                    full = "".join(accumulated)
-                    # Show raw stream in preview (including think for transparency)
-                    if preview_control:
-                        try:
-                            preview_control.getModel().Text = full
-                            # Auto-scroll to bottom
-                            sel = uno.createUnoStruct("com.sun.star.awt.Selection")
-                            sel.Min = len(full)
-                            sel.Max = len(full)
-                            preview_control.setSelection(sel)
-                        except Exception:
-                            pass
-                resize_self.stream_request(request, api_type, _collect)
-                raw = "".join(accumulated).strip()
-                # Strip think/reasoning blocks before applying to document
-                # 1. Remove complete <think>…</think> blocks
-                raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
-                # 2. Remove everything up to and including a dangling </think>
-                raw = re.sub(r"^.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
-                # 3. Remove a trailing unclosed <think>… block
-                raw = re.sub(r"<think>.*$", "", raw, flags=re.DOTALL | re.IGNORECASE)
-                raw = raw.strip()
-                log_to_file(f"ResizeSelection cleaned result ({len(raw)} chars)")
-
-                # Show cleaned result in preview
-                if preview_control:
-                    try:
-                        preview_control.getModel().Text = raw
-                    except Exception:
-                        pass
-
-                if not raw:
-                    if status_label:
-                        try:
-                            status_label.getModel().Label = _t("resize.no_result")
-                            status_label.getModel().TextColor = _UI["warning"]
-                        except Exception:
-                            pass
-                    return
-
-                # Replace the selection in-place with undo grouping
-                undo_label = _t("resize.undo_reduce") if direction == "reduce" else _t("resize.undo_expand")
-                mgr = None
-                try:
-                    mgr = mdl.getUndoManager()
-                    mgr.enterUndoContext(undo_label)
-                except Exception:
-                    mgr = None
-                try:
-                    text_obj = rng.getText()
-                    resize_cursor = text_obj.createTextCursorByRange(rng)
-                    resize_cursor.setString("")
-                    insert_point = resize_cursor.getStart()
-                    insert_formatted(mdl, text_obj, resize_cursor, raw)
-                    if ctrl:
-                        try:
-                            # Select the newly inserted text so user can resize again
-                            sel_cursor = text_obj.createTextCursorByRange(insert_point)
-                            sel_cursor.gotoRange(resize_cursor.getEnd(), True)
-                            ctrl.select(sel_cursor)
-                        except Exception:
-                            pass
-                finally:
-                    if mgr:
-                        try:
-                            mgr.leaveUndoContext()
-                        except Exception:
-                            pass
-
-                new_word_count = len(raw.split())
-                delta = new_word_count - word_count
-                sign = "+" if delta > 0 else ""
-                if status_label:
-                    try:
-                        status_label.getModel().Label = _t(
-                            "resize.ok_format",
-                            new_word_count=new_word_count, sign=sign, delta=delta,
-                        )
-                        status_label.getModel().TextColor = _UI["success"]
-                    except Exception:
-                        pass
-            except Exception as e:
-                log_to_file(f"ResizeSelection failed: {str(e)}")
-                if status_label:
-                    try:
-                        status_label.getModel().Label = _t("common.error", detail=str(e)[:60])
-                        status_label.getModel().TextColor = _UI["error"]
-                    except Exception:
-                        pass
-
-        class ResizeActionListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, event):
-                source = getattr(event, "Source", None)
-                if source == btn_minus:
-                    _do_resize("reduce")
-                elif source == btn_plus:
-                    _do_resize("expand")
-            def disposing(self, event):
-                return
-
-        listener = ResizeActionListener()
-        if btn_minus:
-            try:
-                btn_minus.addActionListener(listener)
-            except Exception:
-                pass
-        if btn_plus:
-            try:
-                btn_plus.addActionListener(listener)
-            except Exception:
-                pass
-
-        # Rollover effects
-        def _add_btn_rollover(control):
-            if not control:
-                return
-            class _Rollover(unohelper.Base, XMouseListener):
-                def mousePressed(self, event):
-                    return
-                def mouseReleased(self, event):
-                    return
-                def mouseEntered(self, event):
-                    try:
-                        control.getModel().BackgroundColor = _UI["primary_hover"]
-                    except Exception:
-                        pass
-                def mouseExited(self, event):
-                    try:
-                        control.getModel().BackgroundColor = _UI["btn_primary_bg"]
-                    except Exception:
-                        pass
-                def disposing(self, event):
-                    return
-            try:
-                control.addMouseListener(_Rollover())
-            except Exception:
-                pass
-
-        _add_btn_rollover(btn_minus)
-        _add_btn_rollover(btn_plus)
-
-        # Window close handler
-        class ResizeWindowListener(unohelper.Base, XTopWindowListener):
-            def __init__(self, outer):
-                self.outer = outer
-            def windowClosing(self, event):
-                try:
-                    dialog.setVisible(False)
-                    dialog.dispose()
-                except Exception:
-                    pass
-                self.outer._resize_dialog = None
-            def windowOpened(self, event):
-                return
-            def windowClosed(self, event):
-                return
-            def windowMinimized(self, event):
-                return
-            def windowNormalized(self, event):
-                return
-            def windowActivated(self, event):
-                return
-            def windowDeactivated(self, event):
-                return
-            def disposing(self, event):
-                return
-
-        # Position and show
-        frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dialog.createPeer(create("com.sun.star.awt.Toolkit"), window)
-        if window:
-            ps = window.getPosSize()
-            _x = ps.Width - WIDTH - 40
-            _y = ps.Height // 2 - HEIGHT // 2
-            dialog.setPosSize(_x, _y, 0, 0, POS)
-
-        try:
-            peer = dialog.getPeer()
-            if peer:
-                peer.addTopWindowListener(ResizeWindowListener(self))
-        except Exception:
-            pass
-
-        dialog.setVisible(True)
-        self._resize_dialog = dialog
-
-    def _show_edit_selection_dialog(self, text, text_range):
-        if self._edit_dialog:
-            try:
-                self._edit_dialog.setVisible(True)
-            except Exception:
-                pass
-            return
-
-        current_selection = {"range": text_range}
-
-        WIDTH = 740
-        HORI_MARGIN = 14
-        VERT_MARGIN = 12
-        BUTTON_WIDTH = 140
-        BUTTON_HEIGHT = 30
-        HORI_SEP = 10
-        VERT_SEP = 8
-        LABEL_HEIGHT = 22
-        EDIT_HEIGHT = 120
-        SUGGEST_LABEL_HEIGHT = 18
-        SUGGEST_LIST_HEIGHT = 120
-        HEIGHT = (
-            VERT_MARGIN * 2
-            + LABEL_HEIGHT + VERT_SEP
-            + EDIT_HEIGHT + VERT_SEP
-            + BUTTON_HEIGHT + VERT_SEP
-            + SUGGEST_LABEL_HEIGHT + VERT_SEP
-            + SUGGEST_LIST_HEIGHT + VERT_SEP
-            + BUTTON_HEIGHT
-        )
-
-        from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-        ctx = uno.getComponentContext()
-        def create(name):
-            return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-
-        dialog = create("com.sun.star.awt.UnoControlDialog")
-        dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-        dialog.setModel(dialog_model)
-        dialog.setVisible(False)
-        dialog.setTitle(_t("edit.title"))
-        dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-        try:
-            dialog_model.BackgroundColor = _UI["bg"]
-        except Exception:
-            pass
-        try:
-            dialog_model.AlwaysOnTop = True
-        except Exception:
-            pass
-        try:
-            dialog_model.Sizeable = True
-        except Exception:
-            pass
-        try:
-            dialog_model.Closeable = True
-        except Exception:
-            pass
-
-        def add(name, type, x_, y_, width_, height_, props):
-            try:
-                model = dialog_model.createInstance("com.sun.star.awt.UnoControl" + type + "Model")
-            except Exception as e:
-                log_to_file(f"Dialog control type unsupported: name={name} type={type} error={str(e)}")
-                return None
-            try:
-                dialog_model.insertByName(name, model)
-            except Exception as e:
-                log_to_file(f"Dialog insert failed: name={name} type={type} error={str(e)}")
-                return None
-            control = dialog.getControl(name)
-            try:
-                control.setPosSize(x_, y_, width_, height_, POSSIZE)
-            except Exception as e:
-                log_to_file(f"Dialog size failed: name={name} type={type} error={str(e)}")
-            for key, value in props.items():
-                try:
-                    setattr(model, key, value)
-                except Exception as e:
-                    log_to_file(f"Dialog prop unsupported: control={name} type={type} prop={key} error={str(e)}")
-            return control
-
-        def _refresh_selection_range():
-            try:
-                desktop = self.ctx.ServiceManager.createInstanceWithContext(
-                    "com.sun.star.frame.Desktop", self.ctx)
-                model = desktop.getCurrentComponent()
-                if model is None or not hasattr(model, "Text"):
-                    return
-                selection = model.CurrentController.getSelection()
-                if selection and selection.getCount() > 0:
-                    current_selection["range"] = selection.getByIndex(0)
-            except Exception:
-                pass
-
-        def _has_multiple_styles():
-            try:
-                selected = current_selection["range"].getString()
-            except Exception:
-                return False
-            if not selected:
-                return False
-            try:
-                text_obj = current_selection["range"].getText()
-                cursor = text_obj.createTextCursorByRange(current_selection["range"].getStart())
-                cursor.goRight(1, True)
-                try:
-                    base_char = cursor.getPropertyValue("CharStyleName")
-                except Exception:
-                    base_char = ""
-                cursor.collapseToEnd()
-                max_scan = min(len(selected), 2000)
-                for _ in range(max_scan):
-                    cursor.goRight(1, True)
-                    try:
-                        char_style = cursor.getPropertyValue("CharStyleName")
-                    except Exception:
-                        char_style = base_char
-                    cursor.collapseToEnd()
-                    if char_style != base_char:
-                        return True
-            except Exception:
-                return False
-            return False
-
-        def _selection_info():
-            _refresh_selection_range()
-            try:
-                selected = current_selection["range"].getString()
-            except Exception:
-                selected = ""
-            if not selected:
-                return _t("edit.intro")
-            snippet = " ".join(selected.split())
-            max_len = 90
-            if len(snippet) > max_len:
-                head_len = (max_len - 9) // 2
-                tail_len = max_len - 9 - head_len
-                head = snippet[:head_len].rsplit(" ", 1)[0] or snippet[:head_len]
-                tail = snippet[-tail_len:].split(" ", 1)[-1] or snippet[-tail_len:]
-                snippet = head.rstrip() + " ... ... ... " + tail.lstrip()
-            warning = _t("edit.warning_mixed_styles") if _has_multiple_styles() else ""
-            return _t("edit.selection_prefix", snippet=snippet, warning=warning)
-
-        PROMPT_BTN_WIDTH = 150
-        label_max_width = WIDTH - HORI_MARGIN * 2 - PROMPT_BTN_WIDTH - HORI_SEP
-        add("label_edit", "FixedText", HORI_MARGIN, VERT_MARGIN, label_max_width, LABEL_HEIGHT, {
-            "Label": _t("edit.button"), "NoLabel": True,
-            "FontHeight": _UI["font_section"],
-            "TextColor": _UI["primary"],
-            "FontWeight": 150,
-        })
-        OFFSET_BELOW = 20
-        selection_width = label_max_width
-        label_selection_control = add(
-            "label_selection_info",
-            "FixedText",
-            HORI_MARGIN,
-            VERT_MARGIN + LABEL_HEIGHT - 6 + OFFSET_BELOW,
-            selection_width,
-            SUGGEST_LABEL_HEIGHT,
-            {"Label": _selection_info(), "NoLabel": True,
-             "FontHeight": _UI["font_small"],
-             "TextColor": _UI["text_light"]}
-        )
-        if label_selection_control:
-            try:
-                if _has_multiple_styles():
-                    label_selection_control.getModel().TextColor = _UI["warning"]
-                else:
-                    label_selection_control.getModel().TextColor = _UI["text_light"]
-            except Exception:
-                pass
-        edit_control = add("edit_prompt", "Edit", HORI_MARGIN, VERT_MARGIN + LABEL_HEIGHT + VERT_SEP + OFFSET_BELOW,
-            WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-                "Text": "", "MultiLine": True,
-                "BackgroundColor": _UI["bg_section"],
-                "FontHeight": _UI["font_label"],
-            })
-
-        send_y = VERT_MARGIN + LABEL_HEIGHT + VERT_SEP + OFFSET_BELOW + EDIT_HEIGHT + VERT_SEP
-
-        # Mascot icon paths (shared by buttons)
-        _mascot_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16.png")
-        _mascot_hover_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16_hover.png")
-        _mascot_url = ""
-        _mascot_hover_url = ""
-        try:
-            if os.path.exists(_mascot_path):
-                _mascot_url = uno.systemPathToFileUrl(_mascot_path)
-            if os.path.exists(_mascot_hover_path):
-                _mascot_hover_url = uno.systemPathToFileUrl(_mascot_hover_path)
-        except Exception:
-            pass
-
-        def _add_rollover(control, normal_bg, hover_bg, icon_url="", icon_hover_url=""):
-            """Attach a mouse listener for rollover effect on a button."""
-            if not control:
-                return
-            class _RolloverListener(unohelper.Base, XMouseListener):
-                def mousePressed(self, event):
-                    return
-                def mouseReleased(self, event):
-                    return
-                def mouseEntered(self, event):
-                    try:
-                        m = control.getModel()
-                        m.BackgroundColor = hover_bg
-                        m.FontWeight = 200
-                        if icon_hover_url:
-                            m.ImageURL = icon_hover_url
-                    except Exception:
-                        pass
-                def mouseExited(self, event):
-                    try:
-                        m = control.getModel()
-                        m.BackgroundColor = normal_bg
-                        m.FontWeight = 150
-                        if icon_url:
-                            m.ImageURL = icon_url
-                    except Exception:
-                        pass
-                def disposing(self, event):
-                    return
-            try:
-                control.addMouseListener(_RolloverListener())
-            except Exception:
-                pass
-
-        # Send button with mascot icon
-        send_btn_props = {
-            "Label": "  " + _t("common.send"),
-            "FontHeight": _UI["font_label"],
-            "FontWeight": 150,
-            "TextColor": _UI["btn_primary_fg"],
-            "BackgroundColor": _UI["btn_primary_bg"],
-        }
-        if _mascot_url:
-            send_btn_props["ImageURL"] = _mascot_url
-            send_btn_props["ImagePosition"] = 0
-            send_btn_props["ImageAlign"] = 0
-        btn_send = add(
-            "btn_send",
-            "Button",
-            WIDTH - HORI_MARGIN - BUTTON_WIDTH,
-            send_y,
-            BUTTON_WIDTH,
-            BUTTON_HEIGHT + 4,
-            send_btn_props,
-        )
-        _add_rollover(btn_send, _UI["btn_primary_bg"], _UI["primary_hover"],
-                       _mascot_url, _mascot_hover_url)
-
-        suggest_y = send_y + BUTTON_HEIGHT + VERT_SEP + 4
-        add(
-            "line_suggestions",
-            "FixedLine",
-            HORI_MARGIN,
-            suggest_y - (VERT_SEP // 2),
-            WIDTH - HORI_MARGIN * 2,
-            6,
-            {}
-        )
-        label_suggestions_control = add(
-            "label_suggestions",
-            "FixedText",
-            HORI_MARGIN,
-            suggest_y + 12,
-            WIDTH - HORI_MARGIN * 2,
-            SUGGEST_LABEL_HEIGHT,
-            {"Label": _t("common.suggestions"), "NoLabel": True,
-             "FontHeight": _UI["font_small"],
-             "TextColor": _UI["text_secondary"],
-             "FontSlant": 2,
-            }
-        )
-        suggest_y += SUGGEST_LABEL_HEIGHT + VERT_SEP + 5
-
-        # Visible list (not dropdown) — shows all suggestions at once
-        REGEN_BTN_WIDTH = 180
-        suggestions_list = add(
-            "list_suggestions",
-            "ListBox",
-            HORI_MARGIN,
-            suggest_y,
-            WIDTH - HORI_MARGIN * 2 - REGEN_BTN_WIDTH - HORI_SEP,
-            SUGGEST_LIST_HEIGHT,
-            {"Dropdown": False,
-             "BackgroundColor": _UI["bg_section"],
-             "FontHeight": _UI["font_small"],
-             "TextColor": _UI["text_light"],
-             "Border": 1,
-             "BorderColor": _UI["border"],
-            }
-        )
-
-        # Regen button aligned to the right of the list, with mascot
-        regen_props = {
-            "Label": _t("common.new_suggestions"),
-            "FontHeight": _UI["font_small"],
-            "FontWeight": 150,
-            "TextColor": _UI["text_secondary"],
-            "BackgroundColor": _UI["bg_section"],
-        }
-        if _mascot_url:
-            regen_props["ImageURL"] = _mascot_url
-            regen_props["ImagePosition"] = 0
-            regen_props["ImageAlign"] = 0
-        btn_regen_suggestions = add(
-            "btn_regen_suggestions",
-            "Button",
-            WIDTH - HORI_MARGIN - REGEN_BTN_WIDTH,
-            suggest_y,
-            REGEN_BTN_WIDTH,
-            BUTTON_HEIGHT,
-            regen_props,
-        )
-        _add_rollover(btn_regen_suggestions, _UI["bg_section"], _UI["bg_accent"],
-                       _mascot_url, _mascot_hover_url)
-
-        # Rollover on the list: highlight selected item color
-        if suggestions_list:
-            class SuggestionsMouseListener(unohelper.Base, XMouseListener):
-                def mousePressed(self, event):
-                    return
-                def mouseReleased(self, event):
-                    return
-                def mouseEntered(self, event):
-                    try:
-                        suggestions_list.getModel().BackgroundColor = _UI["bg_accent"]
-                    except Exception:
-                        pass
-                def mouseExited(self, event):
-                    try:
-                        suggestions_list.getModel().BackgroundColor = _UI["bg_section"]
-                    except Exception:
-                        pass
-                def disposing(self, event):
-                    return
-            try:
-                suggestions_list.addMouseListener(SuggestionsMouseListener())
-            except Exception:
-                pass
-
-        link_control = add(
-            "link_prompt_file",
-            "Button",
-            WIDTH - HORI_MARGIN - PROMPT_BTN_WIDTH,
-            VERT_MARGIN + 4,
-            PROMPT_BTN_WIDTH,
-            LABEL_HEIGHT,
-            {"Label": _t("edit.open_prompt"),
-             "FontHeight": _UI["font_small"],
-             "Tabstop": True,
-             "TextColor": _UI["text_secondary"],
-            }
-        )
-        if link_control is None:
-            log_to_file("Open prompt button not created")
-
-        frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dialog.createPeer(create("com.sun.star.awt.Toolkit"), window)
-        if window:
-            ps = window.getPosSize()
-            saved_x = self.get_config("edit_dialog_x", None)
-            saved_y = self.get_config("edit_dialog_y", None)
-            if isinstance(saved_x, (int, float)) and isinstance(saved_y, (int, float)):
-                _x = int(saved_x)
-                _y = int(saved_y)
-            else:
-                _x = ps.Width / 2 - WIDTH / 2
-                _y = ps.Height / 2 - HEIGHT / 2
-            dialog.setPosSize(_x, _y, 0, 0, POS)
-
-        def _extract_snippet(text_value, limit=180):
-            value = " ".join((text_value or "").split())
-            return value[:limit].rstrip()
-
-        _FALLBACK_PROMPT_KEYS = tuple(
-            "edit.suggest.%d" % position for position in range(1, 11)
-        )
-
-        def _fallback_prompts():
-            return [_t(key) for key in _FALLBACK_PROMPT_KEYS]
-
-        def _generate_prompt_suggestions(text_value):
-            """Generate contextual suggestions via the LLM, fallback to static list."""
-            snippet = _extract_snippet(text_value, limit=1500)
-            if not snippet or len(snippet.strip()) < 10:
-                return _fallback_prompts()
-            try:
-                system = (
-                    "Tu es un assistant qui propose des instructions d’édition de texte. "
-                    "Réponds UNIQUEMENT avec une liste numérotée de 8 instructions courtes "
-                    "(une par ligne, format: ‘1. instruction’). "
-                    "Chaque instruction doit être une consigne d’édition concrète et directe "
-                    "(verbe à l’impératif). "
-                    "Adapte les suggestions au contenu, au style et au domaine du texte. "
-                    "Ne répète pas le texte. Pas de commentaire. Pas d’explication."
-                )
-                prompt = (
-                    f"Voici un extrait de texte sélectionné par l’utilisateur :\n\n"
-                    f"«{snippet}»\n\n"
-                    f"Propose 8 instructions d’édition pertinentes pour ce texte.\n\n"
-                    f"Exemple de format attendu :\n"
-                    f"1. Corrige les fautes d’orthographe et de grammaire.\n"
-                    f"2. Reformule en style plus concis.\n"
-                    f"3. Simplifie le vocabulaire technique.\n\n"
-                    f"Tes 8 instructions :"
-                )
-                api_type = str(self.get_config("api_type", "completions")).lower()
-                # Use non-streaming HTTP call — this runs in a background thread
-                # and stream_request must NOT be called from background threads
-                # (processEventsToIdle crashes LibreOffice).
-                request = self.make_api_request(prompt, system, max_tokens=600, api_type=api_type,
-                                                answer_in_ui_language=True)
-                # Override stream=false for a synchronous call
-                req_data = json.loads(request.data.decode("utf-8"))
-                req_data["stream"] = False
-                request.data = json.dumps(req_data).encode("utf-8")
-                try:
-                    ssl_ctx = self.get_ssl_context()
-                    timeout = int(self.get_config("llm_request_timeout_seconds", 45))
-                    with self._urlopen(request, context=ssl_ctx, timeout=timeout) as resp:
-                        body = resp.read().decode("utf-8")
-                    result = json.loads(body)
-                    choices = result.get("choices", [])
-                    raw = ""
-                    if choices:
-                        raw = choices[0].get("message", {}).get("content", "")
-                except Exception as e:
-                    log_to_file(f"AI suggestions HTTP error: {e}")
-                    raw = ""
-                raw = raw.strip()
-                if not raw:
-                    return _fallback_prompts()
-                # Strip chain-of-thought blocks (<think>…</think>)
-                raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).lstrip("\n")
-                # Parse numbered lines only: "1. ...", "2. ...", etc.
-                # This filters out reasoning/thinking text the model may produce.
-                lines = []
-                for line in raw.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if not re.match(r"^\d+[\.\)\-]\s", line):
-                        continue
-                    # Remove leading number + dot/parenthesis
-                    cleaned = re.sub(r"^\d+[\.\)\-]\s*", "", line).strip()
-                    if cleaned and len(cleaned) > 5:
-                        lines.append(cleaned)
-                if len(lines) >= 3:
-                    log_to_file(f"AI suggestions generated: {len(lines)} items")
-                    return lines[:10]
-                log_to_file(f"AI suggestions too few ({len(lines)}), using fallback")
-                return _fallback_prompts()
-            except Exception as e:
-                log_to_file(f"AI suggestion generation failed: {str(e)}")
-                return _fallback_prompts()
-
-        # Loading animation state
-        _loading_anim = {"active": False, "thread": None}
-
-        def _start_loading_animation():
-            """Animate the suggestions label while LLM generates."""
-            _loading_anim["active"] = True
-            frames = [
-                _t("edit.prepare_suggestions", dots=""),
-                _t("edit.prepare_suggestions", dots=" ."),
-                _t("edit.prepare_suggestions", dots=" . ."),
-                _t("edit.prepare_suggestions", dots=" . . ."),
-            ]
-            def _animate():
-                idx = 0
-                while _loading_anim["active"]:
-                    try:
-                        if label_suggestions_control:
-                            label_suggestions_control.getModel().Label = frames[idx % len(frames)]
-                    except Exception:
-                        break
-                    idx += 1
-                    time.sleep(0.5)
-                # Restore default label when done
-                try:
-                    if label_suggestions_control:
-                        label_suggestions_control.getModel().Label = _t("edit.suggestions_plain")
-                except Exception:
-                    pass
-            t = threading.Thread(target=_animate, daemon=True)
-            _loading_anim["thread"] = t
-            t.start()
-
-        def _stop_loading_animation():
-            """Stop the loading animation."""
-            _loading_anim["active"] = False
-
-        def _load_suggestions(use_ai=False):
-            """Load suggestions into the list. use_ai=True triggers LLM generation."""
-            if suggestions_list:
-                try:
-                    suggestions_list.removeItems(0, suggestions_list.getItemCount())
-                except Exception:
-                    pass
-            if use_ai:
-                # Show loading animation
-                _start_loading_animation()
-                if suggestions_list:
-                    try:
-                        suggestions_list.addItems((_t("edit.generating"),), 0)
-                    except Exception:
-                        pass
-                text_value = ""
-                try:
-                    _refresh_selection_range()
-                    text_value = current_selection["range"].getString()
-                except Exception:
-                    pass
-                # If no selection, grab document body (capped for LLM context)
-                if not text_value or len(text_value.strip()) < 10:
-                    try:
-                        desktop = self.ctx.ServiceManager.createInstanceWithContext(
-                            "com.sun.star.frame.Desktop", self.ctx)
-                        doc = desktop.getCurrentComponent()
-                        if doc and hasattr(doc, "Text"):
-                            full_text = doc.Text.getString()
-                            # Cap at ~2000 chars to stay within LLM context
-                            if len(full_text) > 2000:
-                                text_value = full_text[:1000] + "\n[...]\n" + full_text[-800:]
-                            else:
-                                text_value = full_text
-                            log_to_file(f"Suggestions: no selection, using document body ({len(full_text)} chars)")
-                    except Exception as e:
-                        log_to_file(f"Suggestions: failed to read document body: {str(e)}")
-                suggestions = _generate_prompt_suggestions(text_value)
-                _stop_loading_animation()
-            else:
-                suggestions = _fallback_prompts()
-            if suggestions_list:
-                try:
-                    suggestions_list.removeItems(0, suggestions_list.getItemCount())
-                except Exception:
-                    pass
-                if suggestions:
-                    try:
-                        suggestions_list.addItems(tuple(suggestions), 0)
-                    except Exception:
-                        pass
-
-        # Show static suggestions immediately, then generate AI suggestions in background
-        _load_suggestions(use_ai=False)
-        def _bg_load_ai_suggestions():
-            try:
-                _load_suggestions(use_ai=True)
-            except Exception:
-                _stop_loading_animation()
-        threading.Thread(target=_bg_load_ai_suggestions, daemon=True).start()
-
-        def _refresh_selection_label():
-            if label_selection_control:
-                try:
-                    label_selection_control.getModel().Label = _selection_info()
-                    if _has_multiple_styles():
-                        label_selection_control.getModel().TextColor = _UI["warning"]
-                    else:
-                        label_selection_control.getModel().TextColor = _UI["text_light"]
-                except Exception:
-                    pass
-
-        class SuggestionsItemListener(unohelper.Base, XItemListener):
-            def itemStateChanged(self, event):
-                try:
-                    suggestion = suggestions_list.getSelectedItem() if suggestions_list else ""
-                    if suggestion:
-                        edit_control.getModel().Text = suggestion
-                except Exception:
-                    pass
-            def disposing(self, event):
-                return
-
-        class EditDialogListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, event):
-                source = getattr(event, "Source", None)
-                if source == btn_send:
-                    _refresh_selection_range()
-                    try:
-                        user_input = edit_control.getModel().Text.strip()
-                    except Exception:
-                        user_input = ""
-                    if not user_input:
-                        return
-                    try:
-                        self.outer._run_edit_selection(text, current_selection["range"], user_input)
-                    except Exception as e:
-                        log_to_file(f"EditSelection dialog failed: {str(e)}")
-                elif source == btn_regen_suggestions:
-                    _refresh_selection_label()
-                    _load_suggestions(use_ai=True)
-
-            def __init__(self, outer):
-                self.outer = outer
-
-            def disposing(self, event):
-                return
-
-        listener = EditDialogListener(self)
-        if btn_send:
-            try:
-                btn_send.addActionListener(listener)
-            except Exception:
-                pass
-        if btn_regen_suggestions:
-            try:
-                btn_regen_suggestions.addActionListener(listener)
-            except Exception:
-                pass
-        if suggestions_list:
-            try:
-                item_listener = SuggestionsItemListener()
-                suggestions_list.addItemListener(item_listener)
-            except Exception:
-                pass
-
-        class EditDialogTopWindowListener(unohelper.Base, XTopWindowListener):
-            def __init__(self, outer):
-                self.outer = outer
-            def _save_pos(self):
-                try:
-                    ps = dialog.getPosSize()
-                    self.outer.set_config("edit_dialog_x", int(ps.X))
-                    self.outer.set_config("edit_dialog_y", int(ps.Y))
-                except Exception:
-                    pass
-            def windowClosing(self, event):
-                try:
-                    self._save_pos()
-                    dialog.setVisible(False)
-                    dialog.dispose()
-                except Exception:
-                    pass
-                self.outer._edit_dialog = None
-            def windowOpened(self, event):
-                return
-            def windowClosed(self, event):
-                return
-            def windowMinimized(self, event):
-                return
-            def windowNormalized(self, event):
-                return
-            def windowActivated(self, event):
-                _refresh_selection_label()
-            def windowDeactivated(self, event):
-                return
-            def disposing(self, event):
-                return
-
-        try:
-            peer = dialog.getPeer()
-            if peer:
-                peer.addTopWindowListener(EditDialogTopWindowListener(self))
-        except Exception:
-            pass
-
-        class PromptLinkActionListener(unohelper.Base, XActionListener):
-            def __init__(self, outer):
-                self.outer = outer
-            def actionPerformed(self, event):
-                try:
-                    prompt_log_path = self.outer._prompt_log_path()
-                    if not prompt_log_path:
-                        return
-                    if not os.path.exists(prompt_log_path):
-                        with open(prompt_log_path, "a", encoding="utf-8") as f:
-                            f.write("")
-                    prompt_url = uno.systemPathToFileUrl(prompt_log_path)
-                    shell = self.outer.ctx.getServiceManager().createInstanceWithContext(
-                        "com.sun.star.system.SystemShellExecute", self.outer.ctx
-                    )
-                    shell.execute(prompt_url, "", 0)
-                except Exception as e:
-                    log_to_file(f"Failed to open prompt.txt: {str(e)}")
-            def disposing(self, event):
-                return
-
-        if link_control:
-            try:
-                link_listener = PromptLinkActionListener(self)
-                link_control.addActionListener(link_listener)
-            except Exception:
-                pass
-
-        dialog.setVisible(True)
-        self._edit_dialog = dialog
-
-        def _selection_refresh_loop():
-            while True:
-                try:
-                    if self._edit_dialog is None or not dialog.isVisible():
-                        break
-                except Exception:
-                    break
-                _refresh_selection_label()
-                time.sleep(3)
-
-        try:
-            threading.Thread(target=_selection_refresh_loop, daemon=True).start()
-        except Exception:
-            pass
-
-    _FALLBACK_CALC_TRANSFORM_PROMPT_KEYS = tuple(
-        "calc.suggest.%d" % position for position in range(1, 11)
-    )
-
-    def _fallback_calc_prompts(self):
-        return [_t(key) for key in self._FALLBACK_CALC_TRANSFORM_PROMPT_KEYS]
-
-    def _show_calc_input_dialog(self, context_label="", title="", ok_label="", cell_content="") -> str:
-        """DSFR-styled modal input dialog for Calc actions.
-
-        Mirrors the visual structure of _show_edit_selection_dialog:
-        section header in primary blue, selection-info label, text area,
-        suggestions list with click-to-fill, Send + « Nouvelles suggestions » buttons.
-
-        Returns the instruction string entered by the user, or "" on cancel.
-        """
-        title = title or _t("calc.title")
-        ok_label = ok_label or _t("calc.ok_button")
-        WIDTH = 740
-        HORI_MARGIN = 14
-        VERT_MARGIN = 12
-        BUTTON_WIDTH = 140
-        BUTTON_HEIGHT = 30
-        HORI_SEP = 10
-        VERT_SEP = 8
-        LABEL_HEIGHT = 22
-        EDIT_HEIGHT = 120
-        SUGGEST_LABEL_HEIGHT = 18
-        SUGGEST_LIST_HEIGHT = 120
-        REGEN_BTN_WIDTH = 180
-        HEIGHT = (
-            VERT_MARGIN * 2
-            + LABEL_HEIGHT + VERT_SEP
-            + EDIT_HEIGHT + VERT_SEP
-            + BUTTON_HEIGHT + VERT_SEP
-            + SUGGEST_LABEL_HEIGHT + VERT_SEP
-            + SUGGEST_LIST_HEIGHT + VERT_MARGIN
-        )
-
-        from com.sun.star.awt.PosSize import POS, SIZE, POSSIZE
-        ctx = uno.getComponentContext()
-        def create(name):
-            return ctx.getServiceManager().createInstanceWithContext(name, ctx)
-
-        dialog = create("com.sun.star.awt.UnoControlDialog")
-        dialog_model = create("com.sun.star.awt.UnoControlDialogModel")
-        dialog.setModel(dialog_model)
-        dialog.setVisible(False)
-        dialog.setTitle(title)
-        dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-        try:
-            dialog_model.BackgroundColor = _UI["bg"]
-        except Exception:
-            pass
-        try:
-            dialog_model.AlwaysOnTop = True
-        except Exception:
-            pass
-        try:
-            dialog_model.Sizeable = True
-        except Exception:
-            pass
-        try:
-            dialog_model.Closeable = True
-        except Exception:
-            pass
-
-        def add(name, ctrl_type, x_, y_, width_, height_, props):
-            try:
-                m = dialog_model.createInstance("com.sun.star.awt.UnoControl" + ctrl_type + "Model")
-            except Exception as e:
-                log_to_file(f"_show_calc_input_dialog: unsupported control {name}/{ctrl_type}: {e}")
-                return None
-            try:
-                dialog_model.insertByName(name, m)
-            except Exception as e:
-                log_to_file(f"_show_calc_input_dialog: insert failed {name}: {e}")
-                return None
-            ctrl = dialog.getControl(name)
-            try:
-                ctrl.setPosSize(x_, y_, width_, height_, POSSIZE)
-            except Exception:
-                pass
-            for k, v in props.items():
-                try:
-                    setattr(m, k, v)
-                except Exception:
-                    pass
-            return ctrl
-
-        OFFSET_BELOW = 20
-        label_max_width = WIDTH - HORI_MARGIN * 2
-
-        # Section header
-        add("label_title", "FixedText", HORI_MARGIN, VERT_MARGIN, label_max_width, LABEL_HEIGHT, {
-            "Label": ok_label + _t("calc.title_suffix"), "NoLabel": True,
-            "FontHeight": _UI["font_section"],
-            "TextColor": _UI["primary"],
-            "FontWeight": 150,
-        })
-
-        # Selection-info label (cell range + count)
-        add("label_context", "FixedText",
-            HORI_MARGIN, VERT_MARGIN + LABEL_HEIGHT - 6 + OFFSET_BELOW,
-            label_max_width, SUGGEST_LABEL_HEIGHT, {
-            "Label": context_label, "NoLabel": True,
-            "FontHeight": _UI["font_small"],
-            "TextColor": _UI["text_light"],
-        })
-
-        # Instruction edit area
-        edit_y = VERT_MARGIN + LABEL_HEIGHT + VERT_SEP + OFFSET_BELOW
-        edit_control = add("edit_instruction", "Edit",
-            HORI_MARGIN, edit_y, WIDTH - HORI_MARGIN * 2, EDIT_HEIGHT, {
-            "Text": "", "MultiLine": True,
-            "BackgroundColor": _UI["bg_section"],
-            "FontHeight": _UI["font_label"],
-        })
-
-        # Send button with mascot icon
-        send_y = edit_y + EDIT_HEIGHT + VERT_SEP
-        _mascot_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16.png")
-        _mascot_hover_path = os.path.join(os.path.dirname(__file__), "icons", "mascot16_hover.png")
-        _mascot_url = ""
-        _mascot_hover_url = ""
-        try:
-            if os.path.exists(_mascot_path):
-                _mascot_url = uno.systemPathToFileUrl(_mascot_path)
-            if os.path.exists(_mascot_hover_path):
-                _mascot_hover_url = uno.systemPathToFileUrl(_mascot_hover_path)
-        except Exception:
-            pass
-
-        send_btn_props = {
-            "Label": f"  {ok_label}",
-            "FontHeight": _UI["font_label"],
-            "FontWeight": 150,
-            "TextColor": _UI["btn_primary_fg"],
-            "BackgroundColor": _UI["btn_primary_bg"],
-        }
-        if _mascot_url:
-            send_btn_props["ImageURL"] = _mascot_url
-            send_btn_props["ImagePosition"] = 0
-            send_btn_props["ImageAlign"] = 0
-        btn_send = add("btn_send", "Button",
-            WIDTH - HORI_MARGIN - BUTTON_WIDTH, send_y,
-            BUTTON_WIDTH, BUTTON_HEIGHT + 4, send_btn_props)
-
-        def _add_rollover(ctrl, normal_bg, hover_bg, icon_url="", icon_hover_url=""):
-            if not ctrl:
-                return
-            class _RL(unohelper.Base, XMouseListener):
-                def mousePressed(self, e): return
-                def mouseReleased(self, e): return
-                def mouseEntered(self, e):
-                    try:
-                        m = ctrl.getModel()
-                        m.BackgroundColor = hover_bg
-                        m.FontWeight = 200
-                        if icon_hover_url:
-                            m.ImageURL = icon_hover_url
-                    except Exception:
-                        pass
-                def mouseExited(self, e):
-                    try:
-                        m = ctrl.getModel()
-                        m.BackgroundColor = normal_bg
-                        m.FontWeight = 150
-                        if icon_url:
-                            m.ImageURL = icon_url
-                    except Exception:
-                        pass
-                def disposing(self, e): return
-            try:
-                ctrl.addMouseListener(_RL())
-            except Exception:
-                pass
-
-        _add_rollover(btn_send, _UI["btn_primary_bg"], _UI["primary_hover"],
-                      _mascot_url, _mascot_hover_url)
-
-        # Separator + suggestions
-        suggest_y = send_y + BUTTON_HEIGHT + VERT_SEP + 4
-        add("line_sep", "FixedLine",
-            HORI_MARGIN, suggest_y - VERT_SEP // 2, WIDTH - HORI_MARGIN * 2, 6, {})
-        add("label_suggestions", "FixedText",
-            HORI_MARGIN, suggest_y + 12, WIDTH - HORI_MARGIN * 2, SUGGEST_LABEL_HEIGHT, {
-            "Label": _t("common.suggestions"), "NoLabel": True,
-            "FontHeight": _UI["font_small"],
-            "TextColor": _UI["text_secondary"],
-            "FontSlant": 2,
-        })
-        suggest_y += SUGGEST_LABEL_HEIGHT + VERT_SEP + 5
-
-        suggestions_list = add("list_suggestions", "ListBox",
-            HORI_MARGIN, suggest_y,
-            WIDTH - HORI_MARGIN * 2 - REGEN_BTN_WIDTH - HORI_SEP, SUGGEST_LIST_HEIGHT, {
-            "Dropdown": False,
-            "BackgroundColor": _UI["bg_section"],
-            "FontHeight": _UI["font_small"],
-            "TextColor": _UI["text_light"],
-            "Border": 1,
-            "BorderColor": _UI["border"],
-        })
-        def _generate_calc_suggestions(content):
-            """Generate contextual Calc transform suggestions via LLM, fallback to static list."""
-            if not content or len(content.strip()) < 3:
-                return self._fallback_calc_prompts()
-            try:
-                system = (
-                    "Tu es un assistant de transformation de données pour un tableur. "
-                    "Réponds UNIQUEMENT avec une liste numérotée de 8 transformations courtes "
-                    "(une par ligne, format: '1. transformation'). "
-                    "Chaque transformation doit être une consigne concrète commençant par un verbe "
-                    "à l'impératif, adaptée au type et au contenu des cellules fournies. "
-                    "Pas de commentaire, pas d'explication."
-                )
-                prompt = (
-                    "Voici des exemples de valeurs des cellules sélectionnées :\n\n"
-                    f"«{content[:500]}»\n\n"
-                    "Propose 8 transformations pertinentes pour ces données."
-                )
-                api_type = str(self.get_config("api_type", "completions")).lower()
-                request = self.make_api_request(prompt, system, max_tokens=400, api_type=api_type,
-                                                answer_in_ui_language=True)
-                accumulated = []
-                def _collect(chunk):
-                    accumulated.append(chunk)
-                self.stream_request(request, api_type, _collect)
-                raw = "".join(accumulated).strip()
-                if not raw:
-                    return self._fallback_calc_prompts()
-                lines = []
-                for line in raw.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    cleaned = re.sub(r"^\d+[\.\)\-]\s*", "", line).strip()
-                    if cleaned and len(cleaned) > 5:
-                        lines.append(cleaned)
-                if len(lines) >= 3:
-                    return lines[:10]
-                return self._fallback_calc_prompts()
-            except Exception:
-                return self._fallback_calc_prompts()
-
-        def _set_suggestions_ui(suggestions):
-            if not suggestions_list:
-                return
-            try:
-                suggestions_list.removeItems(0, suggestions_list.getItemCount())
-            except Exception:
-                pass
-            if suggestions:
-                try:
-                    suggestions_list.addItems(tuple(suggestions), 0)
-                except Exception:
-                    pass
-
-        def _load_cached_suggestions():
-            try:
-                cached = self._get_config_from_file("calc_transform_suggestions_cache", None)
-                if isinstance(cached, list) and len(cached) >= 3:
-                    return cached
-            except Exception:
-                pass
-            return None
-
-        cached = _load_cached_suggestions()
-        _set_suggestions_ui(cached if cached else self._fallback_calc_prompts())
-
-        def _bg_ai_suggestions():
-            try:
-                suggestions = _generate_calc_suggestions(cell_content)
-                if suggestions and suggestions != self._fallback_calc_prompts():
-                    try:
-                        self.set_config("calc_transform_suggestions_cache", suggestions)
-                    except Exception:
-                        pass
-                _set_suggestions_ui(suggestions)
-            except Exception:
-                pass
-        threading.Thread(target=_bg_ai_suggestions, daemon=True).start()
-
-        regen_props = {
-            "Label": _t("common.new_suggestions"),
-            "FontHeight": _UI["font_small"],
-            "FontWeight": 150,
-            "TextColor": _UI["text_secondary"],
-            "BackgroundColor": _UI["bg_section"],
-        }
-        if _mascot_url:
-            regen_props["ImageURL"] = _mascot_url
-            regen_props["ImagePosition"] = 0
-            regen_props["ImageAlign"] = 0
-        btn_regen = add("btn_regen", "Button",
-            WIDTH - HORI_MARGIN - REGEN_BTN_WIDTH, suggest_y,
-            REGEN_BTN_WIDTH, BUTTON_HEIGHT, regen_props)
-        _add_rollover(btn_regen, _UI["bg_section"], _UI["bg_accent"],
-                      _mascot_url, _mascot_hover_url)
-
-        # Position dialog
-        frame = create("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dialog.createPeer(create("com.sun.star.awt.Toolkit"), window)
-        saved_x = self.get_config("calc_input_dialog_x", None)
-        saved_y = self.get_config("calc_input_dialog_y", None)
-        if window:
-            ps = window.getPosSize()
-            if isinstance(saved_x, (int, float)) and isinstance(saved_y, (int, float)):
-                _x, _y = int(saved_x), int(saved_y)
-            else:
-                _x = ps.Width / 2 - WIDTH / 2
-                _y = ps.Height / 2 - HEIGHT / 2
-            dialog.setPosSize(_x, _y, 0, 0, POS)
-
-        # State
-        result = {"text": ""}
-
-        def _save_pos():
-            try:
-                ps = dialog.getPosSize()
-                self.set_config("calc_input_dialog_x", int(ps.X))
-                self.set_config("calc_input_dialog_y", int(ps.Y))
-            except Exception:
-                pass
-
-        # Listeners
-        class SendListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, event):
-                try:
-                    result["text"] = edit_control.getModel().Text.strip()
-                except Exception:
-                    pass
-                _save_pos()
-                try:
-                    dialog.endExecute()
-                except Exception:
-                    pass
-            def disposing(self, event):
-                return
-
-        class RegenListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, event):
-                try:
-                    threading.Thread(
-                        target=_bg_ai_suggestions,
-                        daemon=True,
-                    ).start()
-                except Exception:
-                    pass
-            def disposing(self, event):
-                return
-
-        class SuggestItemListener(unohelper.Base, XItemListener):
-            def itemStateChanged(self, event):
-                try:
-                    selected = suggestions_list.getSelectedItem() if suggestions_list else ""
-                    if selected and edit_control:
-                        edit_control.getModel().Text = selected
-                except Exception:
-                    pass
-            def disposing(self, event):
-                return
-
-        if btn_send:
-            try:
-                btn_send.addActionListener(SendListener())
-            except Exception:
-                pass
-        if btn_regen:
-            try:
-                btn_regen.addActionListener(RegenListener())
-            except Exception:
-                pass
-        if suggestions_list:
-            try:
-                suggestions_list.addItemListener(SuggestItemListener())
-            except Exception:
-                pass
-
-        if edit_control:
-            try:
-                edit_control.setFocus()
-            except Exception:
-                pass
-
-        dialog.execute()
-        try:
-            dialog.dispose()
-        except Exception:
-            pass
-        return result["text"]
-
-    def _prompts_calc_path(self):
-        """Chemin du fichier d'historique des prompts Calc.
-
-        L'historique se range dans le dossier de l'extension, dans le profil
-        utilisateur LibreOffice. Si ce dossier est introuvable on rend "" — surtout pas un
-        repli sur le HOME : ces lignes sont du contenu saisi par l'utilisateur,
-        et les écrire en clair dans le dossier personnel est un défaut de
-        confidentialité. Les appelants traitent "" comme
-        « pas d'historique disponible ».
-        """
-        base = self._data_dir()
-        return os.path.join(base, "prompts_calc.txt") if base else ""
-
-    def _load_prompts_calc(self):
-        """Load saved prompts (most-recent-first, max 100)."""
-        path = self._prompts_calc_path()
-        if not path:
-            return []
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                lines = [l.rstrip("\n") for l in f if l.strip()]
-            return lines[:100]
-        except Exception:
-            return []
-
-    def _save_prompt_calc(self, prompt: str):
-        """Prepend prompt to the history file (deduplicated, max 100 lines)."""
-        path = self._prompts_calc_path()
-        if not path or local_config.is_frozen():
-            return
-        try:
-            existing = self._load_prompts_calc()
-            deduped = [p for p in existing if p != prompt]
-            lines = [prompt] + deduped
-            with open(path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines[:100]) + "\n")
-        except Exception:
-            pass
-
-    def _show_formula_assistant_dialog(
-        self,
-        schema_context: str = "",
-        history_lines: list = None,
-        on_generate=None,
-        on_apply=None,
-        schema_builder=None,
-        title: str = "",
-    ) -> None:
-        """Non-modal multi-turn formula assistant dialog with preview.
-
-        Layout (top to bottom):
-          Header
-          Input zone (label + textarea)
-          Prévisualiser + Appliquer buttons
-          Detail zone (formula + explanation)
-          Context strip
-          History row (label + Vider… + Ouvrir prompts…)
-          Clickable history listbox (a ▶ line refills the input)
-
-        on_generate(user_input): called on Prévisualiser, returns new history
-          lines, or (lines, detail_text). Does NOT apply the formula, only
-          previews it.
-        on_apply(): called on Appliquer, applies the previewed formula.
-        schema_builder(raw_selection): called on selection change, returns
-          (on_generate_fn, schema_ctx_str, on_apply_fn). When provided, a
-          XSelectionChangeListener keeps the context strip live.
-        Closing the window (X) disposes the dialog.
-        """
-        if history_lines is None:
-            history_lines = []
-        title = title or _t("formula.title")
-
-        WIDTH = 700
-        HORI_MARGIN = 14
-        VERT_MARGIN = 12
-        VERT_SEP = 8
-        LABEL_HEIGHT = 20
-        CONTEXT_HEIGHT = 36       # 2 lines of schema info
-        HISTORY_HEIGHT = 140      # clickable conversation history (listbox)
-        DETAIL_HEIGHT = 80        # formula explanation + alternative
-        INPUT_HEIGHT = 70         # user input area
-        BUTTON_HEIGHT = 30
-        BUTTON_WIDTH = 130
-
-        HEIGHT = (
-            VERT_MARGIN
-            + LABEL_HEIGHT + VERT_SEP          # section header
-            + LABEL_HEIGHT + VERT_SEP          # "Votre demande" label
-            + INPUT_HEIGHT + VERT_SEP          # input textarea
-            + BUTTON_HEIGHT + VERT_SEP         # Générer + Appliquer button row
-            + DETAIL_HEIGHT + VERT_SEP         # formula detail (explanation + alt)
-            + CONTEXT_HEIGHT + VERT_SEP        # schema context strip
-            + LABEL_HEIGHT + VERT_SEP          # "Conversation" label row (with utils)
-            + HISTORY_HEIGHT + VERT_MARGIN     # clickable conversation history
-        )
-
-        from com.sun.star.awt.PosSize import SIZE, POSSIZE
-
-        self._log("[formula_dlg] creating dialog")
-        ctx = uno.getComponentContext()
-        sm = ctx.getServiceManager()
-
-        def _cr(n):
-            return sm.createInstanceWithContext(n, ctx)
-
-        dlg = _cr("com.sun.star.awt.UnoControlDialog")
-        dlg_m = _cr("com.sun.star.awt.UnoControlDialogModel")
-        dlg.setModel(dlg_m)
-        dlg.setVisible(False)
-        dlg.setTitle(title)
-        dlg.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
-
-        try:
-            dlg_m.BackgroundColor = _UI["bg"]
-        except Exception:
-            pass
-
-        def _add(name, ctrl_type, x, y, w, h, props):
-            m = dlg_m.createInstance("com.sun.star.awt.UnoControl" + ctrl_type + "Model")
-            dlg_m.insertByName(name, m)
-            c = dlg.getControl(name)
-            c.setPosSize(x, y, w, h, POSSIZE)
-            for k, v in props.items():
-                try:
-                    setattr(m, k, v)
-                except Exception:
-                    pass
-            return c
-
-        try:
-            from com.sun.star.awt.FontWeight import BOLD
-        except Exception:
-            BOLD = 150
-
-        y = VERT_MARGIN
-
-        _add("lbl_header", "FixedText", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": _t("formula.header"),
-            "FontHeight": _UI["font_section"],
-            "FontWeight": BOLD,
-            "TextColor": _UI["text_on_dark"],
-            "BackgroundColor": _UI["bg_header"],
-        })
-        y += LABEL_HEIGHT + VERT_SEP
-
-        _add("lbl_input", "FixedText", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, LABEL_HEIGHT, {
-            "Label": _t("formula.request_label"),
-            "FontHeight": _UI["font_label"],
-            "FontWeight": BOLD,
-            "TextColor": _UI["text"],
-        })
-        y += LABEL_HEIGHT + VERT_SEP
-
-        _add("txt_input", "Edit", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, INPUT_HEIGHT, {
-            "Text": "",
-            "MultiLine": True,
-            "VScroll": False,
-            "FontHeight": _UI["font_body"],
-            "BackgroundColor": _UI["bg_input"],
-            "Border": 1,
-        })
-        y += INPUT_HEIGHT + VERT_SEP
-
-        APPLY_WIDTH = 110
-        btn_x_apply = WIDTH - HORI_MARGIN - APPLY_WIDTH
-        btn_x_send = btn_x_apply - BUTTON_WIDTH - 8
-
-        _add("btn_send", "Button", btn_x_send, y, BUTTON_WIDTH, BUTTON_HEIGHT, {
-            "Label": _t("formula.preview"),
-            "PushButtonType": 0,
-            "DefaultButton": True,
-            "FontHeight": _UI["font_label"],
-            "BackgroundColor": _UI["btn_primary_bg"],
-            "TextColor": _UI["btn_primary_fg"],
-        })
-        _add("btn_apply", "Button", btn_x_apply, y, APPLY_WIDTH, BUTTON_HEIGHT, {
-            "Label": _t("formula.apply"),
-            "PushButtonType": 0,
-            "FontHeight": _UI["font_label"],
-            "BackgroundColor": _UI["success"],
-            "TextColor": _UI["text_on_dark"],
-        })
-        y += BUTTON_HEIGHT + VERT_SEP
-
-        _add("txt_detail", "Edit", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, DETAIL_HEIGHT, {
-            "Text": _t("formula.detail_placeholder"),
-            "MultiLine": True,
-            "ReadOnly": True,
-            "VScroll": True,
-            "FontHeight": _UI["font_small"],
-            "TextColor": _UI["text_secondary"],
-            "BackgroundColor": _UI["bg_section"],
-            "Border": 1,
-            "BorderColor": _UI["border"],
-        })
-        y += DETAIL_HEIGHT + VERT_SEP
-
-        _add("lbl_ctx", "FixedText", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, CONTEXT_HEIGHT, {
-            "Label": schema_context or _t("formula.no_context"),
-            "FontHeight": _UI["font_small"],
-            "TextColor": _UI["text_secondary"],
-            "BackgroundColor": _UI["bg_section"],
-            "MultiLine": True,
-        })
-        y += CONTEXT_HEIGHT + VERT_SEP
-
-        lbl_hist_w = WIDTH - HORI_MARGIN * 2 - 90 - 8 - 120 - 8
-        _add("lbl_hist", "FixedText", HORI_MARGIN, y, lbl_hist_w, LABEL_HEIGHT, {
-            "Label": _t("formula.conversation"),
-            "FontHeight": _UI["font_label"],
-            "FontWeight": BOLD,
-            "TextColor": _UI["text"],
-        })
-        btn_clear_x = HORI_MARGIN + lbl_hist_w + 8
-        _add("btn_clear", "Button", btn_clear_x, y, 90, LABEL_HEIGHT, {
-            "Label": _t("formula.clear"),
-            "PushButtonType": 0,
-            "FontHeight": _UI["font_small"],
-        })
-        btn_open_x = btn_clear_x + 90 + 8
-        _add("btn_open_prompts", "Button", btn_open_x, y, 120, LABEL_HEIGHT, {
-            "Label": _t("formula.open_prompts"),
-            "PushButtonType": 0,
-            "FontHeight": _UI["font_small"],
-        })
-        y += LABEL_HEIGHT + VERT_SEP
-
-        _add("lst_history", "ListBox", HORI_MARGIN, y, WIDTH - HORI_MARGIN * 2, HISTORY_HEIGHT, {
-            "StringItemList": tuple(history_lines),
-            "FontHeight": _UI["font_body"],
-            "BackgroundColor": _UI["bg_section"],
-            "Border": 1,
-            "MultiSelection": False,
-            "Dropdown": False,
-        })
-
-        _job = self  # capture outer instance for inner class closures
-        # Mutable state — on_generate replaced in-place on selection change
-        _job._formula_dialog_state = {
-            "on_generate": on_generate,
-            "on_apply": on_apply,
-            "history_lines": history_lines,
-            "schema_builder": schema_builder,
-            "sel_listener": None,   # (listener, controller) set after createPeer
-        }
-
-        class GenerateListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, _ev):
-                source = getattr(_ev, "Source", None)
-                state = _job._formula_dialog_state
-                if state is None:
-                    return
-
-                def _set_busy(busy, label=""):
-                    """Toggle busy state on the dialog."""
-                    try:
-                        btn = dlg.getControl("btn_send")
-                        lbl = dlg.getControl("lbl_input")
-                        if busy:
-                            btn.getModel().Label = _t("formula.thinking")
-                            btn.setEnable(False)
-                            lbl.getModel().Label = label or _t("formula.generating")
-                            lbl.getModel().TextColor = _UI["primary"]
-                        else:
-                            btn.getModel().Label = _t("formula.preview")
-                            btn.setEnable(True)
-                            lbl.getModel().Label = _t("formula.request_label")
-                            lbl.getModel().TextColor = _UI["text"]
-                    except Exception:
-                        pass
-
-                try:
-                    apply_ctrl = dlg.getControl("btn_apply")
-                except Exception:
-                    apply_ctrl = None
-                if source == apply_ctrl:
-                    on_apply_fn = state.get("on_apply")
-                    if on_apply_fn is None:
-                        return
-                    try:
-                        _set_busy(True, _t("formula.applying"))
-                        result_lines = on_apply_fn()
-                        state["history_lines"].extend(result_lines or [])
-                        dlg.getControl("lst_history").getModel().StringItemList = tuple(state["history_lines"])
-                        dlg.getControl("lst_history").selectItemPos(len(state["history_lines"]) - 1, True)
-                    except Exception as e:
-                        _job._log(f"[formula_dlg] apply error: {e}")
-                    finally:
-                        _set_busy(False)
-                    return
-
-                try:
-                    user_input = dlg.getControl("txt_input").getText().strip()
-                except Exception:
-                    return
-                if not user_input:
-                    return
-                if state.get("on_generate") is None:
-                    return
-                try:
-                    _set_busy(True)
-                    result = state["on_generate"](user_input)
-                    # on_generate returns (lines, detail_text) or just lines
-                    if isinstance(result, tuple) and len(result) == 2:
-                        new_lines, detail_text = result
-                    else:
-                        new_lines = result
-                        detail_text = ""
-                    state["history_lines"].extend(new_lines or [])
-                    _job._save_prompt_calc(user_input)
-                    dlg.getControl("lst_history").getModel().StringItemList = tuple(state["history_lines"])
-                    dlg.getControl("lst_history").selectItemPos(len(state["history_lines"]) - 1, True)
-                    dlg.getControl("txt_input").getModel().Text = ""
-                    # Update detail zone
-                    if detail_text:
-                        try:
-                            dlg.getControl("txt_detail").getModel().Text = detail_text
-                            dlg.getControl("txt_detail").getModel().TextColor = _UI["text"]
-                        except Exception:
-                            pass
-                except Exception as e:
-                    _job._log(f"[formula_dlg] generate error: {e}")
-                finally:
-                    _set_busy(False)
-
-        class ClearListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, _ev):
-                try:
-                    mb = _cr("com.sun.star.awt.Toolkit")
-                    frame2 = _cr("com.sun.star.frame.Desktop").getCurrentFrame()
-                    win2 = frame2.getContainerWindow() if frame2 else None
-                    mbox = mb.createMessageBox(win2, 3, 3, _t("common.confirm"), _t("formula.clear_history_question"))
-                    if mbox.execute() == 2:  # YES = 2
-                        try:
-                            _hist = _job._prompts_calc_path()
-                            if _hist:
-                                os.remove(_hist)
-                        except Exception:
-                            pass
-                        _job._formula_dialog_state["history_lines"].clear()
-                        try:
-                            dlg.getControl("lst_history").getModel().StringItemList = ()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-        class OpenPromptsListener(unohelper.Base, XActionListener):
-            def actionPerformed(self, _ev):
-                try:
-                    path = _job._prompts_calc_path()
-                    if not path:
-                        return
-                    if not os.path.exists(path):
-                        open(path, "w").close()
-                    subprocess.Popen(["open", path])
-                except Exception:
-                    pass
-
-        class HistorySelectListener(unohelper.Base, XItemListener):
-            def itemStateChanged(self, ev):
-                try:
-                    idx = ev.Selected
-                    if idx >= 0:
-                        items = dlg.getControl("lst_history").getModel().StringItemList
-                        if idx < len(items) and items[idx].startswith("▶ "):
-                            dlg.getControl("txt_input").getModel().Text = items[idx][2:]
-                except Exception:
-                    pass
-
-        class FormulaDialogTopWindowListener(unohelper.Base, XTopWindowListener):
-            def windowClosing(self, _ev):
-                try:
-                    ps = dlg.getPosSize()
-                    _job.set_config("formula_dialog_x", int(ps.X))
-                    _job.set_config("formula_dialog_y", int(ps.Y))
-                except Exception:
-                    pass
-                try:
-                    dlg.setVisible(False)
-                    dlg.dispose()
-                except Exception:
-                    pass
-                # Detach selection listener before disposing
-                try:
-                    lc = _job._formula_dialog_state.get("sel_listener") if _job._formula_dialog_state else None
-                    if lc:
-                        lc[1].removeSelectionChangeListener(lc[0])
-                except Exception:
-                    pass
-                _job._formula_dialog = None
-                _job._formula_dialog_state = None
-            def windowOpened(self, _ev): return
-            def windowClosed(self, _ev): return
-            def windowMinimized(self, _ev): return
-            def windowNormalized(self, _ev): return
-            def windowActivated(self, _ev): return
-            def windowDeactivated(self, _ev): return
-            def disposing(self, _ev): return
-
-        class FormulaSelectionListener(unohelper.Base, XSelectionChangeListener):
-            """Listens to cell selection changes and refreshes the dialog context."""
-            def selectionChanged(self, ev):
-                state = _job._formula_dialog_state
-                if state is None or state.get("schema_builder") is None:
-                    return
-                try:
-                    new_sel = ev.Source.getSelection()
-                    build_result = state["schema_builder"](new_sel)
-                    new_on_gen = build_result[0]
-                    new_sc = build_result[1]
-                    new_on_apply = build_result[2] if len(build_result) > 2 else None
-                    if new_on_gen is None:
-                        return
-                    state["on_generate"] = new_on_gen
-                    if new_on_apply is not None:
-                        state["on_apply"] = new_on_apply
-                    # Add separator to history so the user sees the context switch
-                    hl = state["history_lines"]
-                    if hl:
-                        hl.append(f"── {new_sc.splitlines()[0]} ──")
-                    try:
-                        dlg.getControl("lbl_ctx").getModel().Label = new_sc
-                        dlg.getControl("lst_history").getModel().StringItemList = tuple(hl)
-                        if hl:
-                            dlg.getControl("lst_history").selectItemPos(len(hl) - 1, True)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    _job._log(f"[formula_dlg] selectionChanged error: {e}")
-            def disposing(self, _ev): return
-
-        _gen_listener = GenerateListener()
-        dlg.getControl("btn_send").addActionListener(_gen_listener)
-        dlg.getControl("btn_apply").addActionListener(_gen_listener)
-        dlg.getControl("btn_clear").addActionListener(ClearListener())
-        dlg.getControl("btn_open_prompts").addActionListener(OpenPromptsListener())
-        try:
-            dlg.getControl("lst_history").addItemListener(HistorySelectListener())
-        except Exception:
-            pass
-
-        # Position dialog — remember last position
-        _saved_x = self.get_config("formula_dialog_x", None)
-        _saved_y = self.get_config("formula_dialog_y", None)
-        toolkit = _cr("com.sun.star.awt.Toolkit")
-        frame = _cr("com.sun.star.frame.Desktop").getCurrentFrame()
-        window = frame.getContainerWindow() if frame else None
-        dlg.createPeer(toolkit, window)
-
-        try:
-            peer = dlg.getPeer()
-            if peer:
-                peer.addTopWindowListener(FormulaDialogTopWindowListener())
-        except Exception:
-            pass
-
-        # Register selection change listener on the Calc controller
-        try:
-            ctrl = frame.getController() if frame else None
-            if ctrl and schema_builder is not None:
-                sl = FormulaSelectionListener()
-                ctrl.addSelectionChangeListener(sl)
-                _job._formula_dialog_state["sel_listener"] = (sl, ctrl)
-        except Exception as e:
-            _job._log(f"[formula_dlg] sel_listener register error: {e}")
-
-        if _saved_x is not None and _saved_y is not None:
-            try:
-                dlg.setPosSize(int(_saved_x), int(_saved_y), WIDTH, HEIGHT, POSSIZE)
-            except Exception:
-                pass
-        else:
-            if window:
-                ps = window.getPosSize()
-                cx = ps.X + (ps.Width - WIDTH) // 2
-                cy = ps.Y + (ps.Height - HEIGHT) // 4
-                dlg.setPosSize(cx, cy, WIDTH, HEIGHT, POSSIZE)
-
-        # Select last item in history listbox
-        try:
-            if history_lines:
-                dlg.getControl("lst_history").selectItemPos(len(history_lines) - 1, True)
-        except Exception:
-            pass
-
-        dlg.setVisible(True)
-        self._formula_dialog = dlg
-
-
     def _settings_token_values(self):
         """(valeur affichée, jeton des requêtes du dialogue) du champ « Token OWUI ».
 
@@ -9328,7 +5317,6 @@ EDITED VERSION:
         VERT_SEP = 8
         LABEL_HEIGHT = 22
         EDIT_HEIGHT = 28
-        IMAGE_HEIGHT = 132
         EXTRA_BOTTOM = 60
         DESC_HEIGHT = EDIT_HEIGHT * 2
         TEST_ROW_HEIGHT = BUTTON_HEIGHT + VERT_SEP
@@ -9461,7 +5449,7 @@ EDITED VERSION:
             api_key_value, request_token = self._settings_token_values()
             log_to_file(f"Settings open: llm_api_tokens length={len(request_token)}")
             current_model = str(self._get_config_from_file("llm_default_models","")).strip()
-            models, model_descriptions = self._fetch_models(endpoint_value, request_token, True, include_info=True)
+            models, model_descriptions = self._fetch_models(endpoint_value, request_token, include_info=True)
             if current_model and current_model not in models:
                 models = [current_model] + models
             if not models and current_model:
@@ -9483,7 +5471,7 @@ EDITED VERSION:
         num_fields = len(field_specs)
         total_field_height = num_fields * (LABEL_HEIGHT + EDIT_HEIGHT + VERT_SEP * 2) + TEST_ROW_HEIGHT + (BUTTON_HEIGHT - LABEL_HEIGHT)
         desc_block_height = LABEL_HEIGHT + VERT_SEP + DESC_HEIGHT + VERT_SEP * 2
-        HEIGHT = VERT_MARGIN * 2 + IMAGE_HEIGHT + VERT_SEP + total_field_height + desc_block_height + LABEL_HEIGHT + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + EXTRA_BOTTOM
+        HEIGHT = VERT_MARGIN * 2 + total_field_height + desc_block_height + LABEL_HEIGHT + BUTTON_HEIGHT * 2 + VERT_SEP * 6 + EXTRA_BOTTOM
         dialog.setPosSize(0, 0, WIDTH, HEIGHT, SIZE)
 
         def add(name, type, x_, y_, width_, height_, props):
@@ -9511,73 +5499,6 @@ EDITED VERSION:
 
         field_controls = {}
         current_y = VERT_MARGIN
-
-        image_path = os.path.join(os.path.dirname(__file__), "icons", "iassistant.png")
-        if os.path.exists(image_path):
-            try:
-                image_url = uno.systemPathToFileUrl(image_path)
-                available_width = WIDTH - HORI_MARGIN * 2
-                image_width = int(min(available_width, IMAGE_HEIGHT * (1505.0 / 400.0)))
-                image_x = HORI_MARGIN + int((available_width - image_width) / 2)
-                img_splash = add("img_splash", "ImageControl", image_x, current_y,
-                    image_width, IMAGE_HEIGHT, {
-                        "ImageURL": image_url,
-                        "Border": 0,
-                        "ScaleImage": True
-                    })
-
-                # Make image clickable → opens mirai website
-                if img_splash:
-                    class SplashClickListener(unohelper.Base, XMouseListener):
-                        def __init__(self, outer):
-                            self.outer = outer
-                        def mousePressed(self, event):
-                            try:
-                                import webbrowser
-                                webbrowser.open("https://mirai.interieur.gouv.fr")
-                            except Exception as e:
-                                log_to_file(f"Splash click open URL failed: {str(e)}")
-                        def mouseReleased(self, event):
-                            return
-                        def mouseEntered(self, event):
-                            return
-                        def mouseExited(self, event):
-                            return
-                        def disposing(self, event):
-                            return
-                    try:
-                        img_splash.addMouseListener(SplashClickListener(self))
-                    except Exception:
-                        pass
-
-                current_y += IMAGE_HEIGHT + VERT_SEP
-                # Separator after image
-                add("line_after_image", "FixedLine", HORI_MARGIN, current_y,
-                    WIDTH - HORI_MARGIN * 2, 2, {})
-                current_y += VERT_SEP
-                # Section header: Connexion
-                add("section_connexion", "FixedText", HORI_MARGIN, current_y,
-                    WIDTH - HORI_MARGIN * 2 - 90, LABEL_HEIGHT, {
-                        "Label": _t("settings.section_connection"), "NoLabel": True,
-                        "FontHeight": _UI["font_section"],
-                        "TextColor": _UI["primary"],
-                        "FontWeight": 150,
-                    })
-                proxy_btn_width = 80
-                proxy_btn_height = LABEL_HEIGHT + 4
-                proxy_btn_x = WIDTH - HORI_MARGIN - proxy_btn_width
-                add("btn_proxy", "Button", proxy_btn_x, current_y - 2,
-                    proxy_btn_width, proxy_btn_height, {
-                        "Label": _t("settings.proxy_button"),
-                        "Name": "proxy_settings",
-                        "Tabstop": True,
-                        "Enabled": True,
-                        "FontHeight": _UI["font_small"],
-                        "TextColor": _UI["text_secondary"],
-                    })
-                current_y += LABEL_HEIGHT + VERT_SEP
-            except Exception:
-                pass
         api_key_plain_control = None
         for field in field_specs:
             label_name = f"label_{field['name']}"
@@ -9657,7 +5578,7 @@ EDITED VERSION:
 
         access_token = str(self._get_config_from_file("access_token", "")).strip()
         email = self._token_email(access_token, allow_network=False) if access_token else None
-        anon_ok, auth_ok = self._api_status(endpoint_value, request_token, True)
+        anon_ok, auth_ok = self._api_status(endpoint_value, request_token)
 
         def _status_style(anon_ok, auth_ok, email_value):
             if auth_ok:
@@ -9755,7 +5676,6 @@ EDITED VERSION:
         btn_keycloak = dialog.getControl("btn_keycloak")
         toggle_api_key = dialog.getControl("toggle_api_key")
         btn_reload_config = dialog.getControl("btn_reload_config")
-        btn_proxy = dialog.getControl("btn_proxy")
         btn_test_token = dialog.getControl("btn_test_token")
         if not btn_reload_config:
             log_to_file("Reload config button not found in dialog")
@@ -9774,7 +5694,7 @@ EDITED VERSION:
                 return ""
 
         def _update_api_status_label(endpoint_val, api_key_val, email_value=None):
-            anon_ok, auth_ok = self._api_status(endpoint_val, api_key_val, True)
+            anon_ok, auth_ok = self._api_status(endpoint_val, api_key_val)
             label, color = _status_style(anon_ok, auth_ok, email_value)
             status_text = label + (f" ({email_value})" if email_value else "")
             if status_dot_label:
@@ -9798,7 +5718,7 @@ EDITED VERSION:
             api_key_val = _read_api_key_value()
             effective_api_key = self._effective_api_token(api_key_val or request_token)
             log_to_file("Token test: start")
-            conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val, True)
+            conn_ok, conn_detail = self._endpoint_connectivity_status(endpoint_val)
             if not conn_ok:
                 proxy_cfg = self._get_proxy_config()
                 err = conn_detail.get("error", _t("settings.token_error_unknown"))
@@ -9831,7 +5751,7 @@ EDITED VERSION:
                     log_to_file("Token test: token saved")
             except Exception:
                 pass
-            models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, True, include_info=True)
+            models, model_descriptions_local = self._fetch_models(endpoint_val, effective_api_key, include_info=True)
             if not models:
                 self._show_message(
                     _t("settings.models_failed_title"),
@@ -9938,11 +5858,6 @@ EDITED VERSION:
                     )
                 elif command == "test_token":
                     _test_token_and_refresh()
-                elif command == "proxy_settings":
-                    try:
-                        self.outer.proxy_settings_box()
-                    except Exception:
-                        pass
 
         def _do_reload_config():
             log_to_file("Reload config: button clicked")
@@ -10062,7 +5977,7 @@ EDITED VERSION:
                 endpoint_val = str(self.get_config("llm_base_urls", ""))
                 api_key_val = str(self.get_config("llm_api_tokens", ""))
                 model_val = str(self.get_config("llm_default_models", ""))
-                models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, True, include_info=True)
+                models, model_descriptions_local = self._fetch_models(endpoint_val, api_key_val, include_info=True)
                 if not models:
                     self._show_message(
                         _t("settings.models_failed_title"),
@@ -10149,16 +6064,6 @@ EDITED VERSION:
             except Exception as e:
                 log_to_file(f"Reload config ActionCommand set failed: {str(e)}")
 
-        if btn_proxy:
-            try:
-                btn_proxy.addActionListener(listener)
-            except Exception:
-                pass
-            try:
-                btn_proxy.getModel().ActionCommand = "proxy_settings"
-            except Exception:
-                pass
-
         # Apply model selection after peer creation
         model_control = field_controls.get("model")
         if model_control:
@@ -10241,33 +6146,31 @@ EDITED VERSION:
 
         dialog.dispose()
         return result
-    #end sharealike section 
+    #end sharealike section
 
     def _needs_first_enrollment(self):
         """True si le wizard d'enrôlement doit s'ouvrir (DM actif) : jamais
         enrôlé et sans session valide, ou enrôlé sans creds relay ni session
-        valide."""
+        valide. Un enrôlement de fond en cours décide d'abord : son issue est
+        attendue, un temps borné, plutôt que d'ouvrir l'assistant pendant la
+        tentative silencieuse ou de le taire quand elle échoue."""
+        def lacking():
+            enrolled = self._as_bool(self._get_config_from_file("enrolled", False))
+            access_token = str(self._get_config_from_file("access_token", "")).strip()
+            has_login = bool(access_token) and not self._token_is_expired(access_token)
+            # Enrôlé « à moitié » : sans creds relay le DM ne mint aucun
+            # llmToken, et le ré-enrôlement de fond a lui-même besoin d'une
+            # session valide (il dérive l'email du token). Sans les deux, le
+            # poste ne peut plus sortir de l'impasse tout seul → wizard.
+            return not has_login and (not enrolled or not self._relay_credentials_valid())
+
         try:
             # No enrollment needed if device management is disabled
             if not self._device_management_enabled():
                 return False
-            enrolled = self._as_bool(self._get_config_from_file("enrolled", False))
-            access_token = str(self._get_config_from_file("access_token", "")).strip()
-            has_login = bool(access_token) and not self._token_is_expired(access_token)
-            if enrolled:
-                # Enrôlé « à moitié » : sans creds relay le DM ne mint aucun
-                # llmToken, et le ré-enrôlement de fond a lui-même besoin d'une
-                # session valide (il dérive l'email du token). Sans les deux, le
-                # poste ne peut plus sortir de l'impasse tout seul → wizard.
-                if not self._relay_credentials_valid() and not has_login:
-                    log_to_file(
-                        "[ENROLL] enrolled=True mais ni creds relay ni session "
-                        "valide — wizard d'enrôlement requis"
-                    )
-                    return True
+            if not (lacking() and self.runtime.enrollment_settled() and lacking()):
                 return False
-            if has_login:
-                return False
+            log_to_file("[ENROLL] ni session valide ni creds relay — wizard d'enrôlement requis")
             return True
         except Exception:
             return False
@@ -10275,11 +6178,11 @@ EDITED VERSION:
     def _run_first_enrollment(self):
         """Run the first-time enrollment: wizard → fetch config → auth flow."""
         log_to_file("First enrollment detected, starting wizard flow")
-        try:
-            self._schedule_config_refresh(force=True, reason="first_enrollment")
-            time.sleep(1)
-        except Exception:
-            pass
+        # Un fetch déjà en vol ferait refuser le fetch forcé (garde de récursion)
+        # et abandonner le wizard pour la session : on attend sa fin.
+        deadline = time.time() + 15
+        while self._fetching_config and time.time() < deadline:
+            time.sleep(0.1)
         config_data = self._fetch_config(force=True)
         if not config_data:
             log_to_file("First enrollment: config fetch failed")
@@ -10301,8 +6204,7 @@ EDITED VERSION:
     # Actions qui ne portent ni sur le document ni sur une sélection : elles
     # doivent aboutir dans TOUS les contextes, Writer comme Calc, avec ou sans
     # sélection, et même sans document ouvert.
-    _SHELL_ACTIONS = ("settings", "proxy_settings", "AboutDialog",
-                      "Documentation", "OpenmiraiWebsite", "TestModel")
+    _SHELL_ACTIONS = ("settings", "AboutDialog", "Documentation", "TestModel")
 
     def _handle_shell_action(self, action):
         """Traite les actions non textuelles. Retourne True si prise en charge."""
@@ -10312,8 +6214,6 @@ EDITED VERSION:
             if action == "settings":
                 self._send_telemetry("OpenSettings", {"action": "open_settings"})
                 apply_settings_result(self, self.settings_box("Settings"))
-            elif action == "proxy_settings":
-                self.proxy_settings_box()
             elif action == "AboutDialog":
                 self._send_telemetry("AboutDialog", {"action": "about"})
                 self._show_about_dialog()
@@ -10321,9 +6221,6 @@ EDITED VERSION:
                 self._send_telemetry("OpenDocumentation",
                                      {"action": "open_documentation"})
                 self._open_url_config("doc_url")
-            elif action == "OpenmiraiWebsite":
-                self._send_telemetry("OpenmiraiWebsite", {"action": "open_website"})
-                self._open_url_config("portal_url")
             elif action == "TestModel":
                 # Import paresseux : le moteur n'est chargé qu'à l'usage.
                 from .core.entry import test_model_capabilities
@@ -10336,16 +6233,16 @@ EDITED VERSION:
                 _t("msg.action_failed_body", action=action, exc=exc))
         return True
 
-    def _open_url_config(self, key):
-        """Ouvre l'URL d'une clé de configuration, avec repli sur le portail."""
-        import webbrowser
-        url = self.get_config(key, "") or self.get_config("portal_url", "")
+    def _open_url_config(self, key, url=""):
+        """Ouvre `url`, sinon l'URL d'une clé de configuration, avec repli sur le portail."""
+        url = url or self.get_config(key, "") or self.get_config("portal_url", "")
         if not url:
             raise RuntimeError(f"aucune URL configurée ({key})")
-        webbrowser.open(url)
+        if not open_url(self.ctx, url):
+            raise RuntimeError(_t("msg.no_browser"))
 
     def trigger(self, args):
-        # Parse &src= suffix if present (menu, toolbar, key)
+        # Parse &src= suffix if present (menu, key)
         if "&src=" in args:
             action, source = args.split("&src=", 1)
         else:
@@ -10368,19 +6265,19 @@ EDITED VERSION:
 
         # First-time enrollment: intercept before any action
         # Informational/navigation actions bypass enrollment check
-        _enrollment_bypass = {"Documentation", "OpenmiraiWebsite", "settings", "proxy_settings", "AboutDialog"}
-        if action not in _enrollment_bypass and not MainJob._enrollment_dismissed_cls and self._needs_first_enrollment():
-            with MainJob._enrollment_wizard_lock_cls:
-                if MainJob._enrollment_wizard_active_cls:
+        _enrollment_bypass = {"Documentation", "settings", "AboutDialog"}
+        if action not in _enrollment_bypass and not self.runtime.enrollment_dismissed and self._needs_first_enrollment():
+            with self.runtime.enrollment_wizard_lock:
+                if self.runtime.enrollment_wizard_active:
                     log_to_file("[ENROLL] Trigger: wizard already running, skipping")
                     return
-                MainJob._enrollment_wizard_active_cls = True
+                self.runtime.enrollment_wizard_active = True
             try:
                 if not self._run_first_enrollment():
-                    MainJob._enrollment_dismissed_cls = True
+                    self.runtime.enrollment_dismissed = True
                     return
             finally:
-                MainJob._enrollment_wizard_active_cls = False
+                self.runtime.enrollment_wizard_active = False
 
         desktop = self.ctx.ServiceManager.createInstanceWithContext(
             "com.sun.star.frame.Desktop", self.ctx)
@@ -10394,16 +6291,7 @@ EDITED VERSION:
             open_palette(self, model)
             return
 
-        # Actions non textuelles : elles ne dépendent NI du type de document NI
-        # d'une sélection. Elles doivent donc être traitées AVANT les handlers
-        # par module.
         if self._handle_shell_action(action):
-            return
-
-        if handle_writer_action(self, action, model):
-            return
-
-        if handle_calc_action(self, action, model):
             return
 
         # Aucune branche n'a traité l'action : le dire, plutôt que de rendre la

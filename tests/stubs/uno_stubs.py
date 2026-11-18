@@ -31,6 +31,8 @@ class _XSelectionChangeListener: pass
 class _XCommandEnvironment: pass
 class _XInteractionHandler: pass
 class _XCallback:        pass
+class _XTerminateListener: pass
+class _XModifyListener:  pass
 
 
 def install():
@@ -80,8 +82,16 @@ def install():
     com_sun_star_view.XSelectionChangeListener = _XSelectionChangeListener
 
     com_sun_star_frame = MagicMock()
+    com_sun_star_frame.XTerminateListener = _XTerminateListener
 
     com_sun_star_ui = MagicMock()
+
+    com_sun_star_util = MagicMock()
+    com_sun_star_util.XModifyListener = _XModifyListener
+
+    com_sun_star_system = MagicMock()
+    com_sun_star_system.SystemShellExecuteFlags.NO_SYSTEM_ERROR_MESSAGE = 1
+    com_sun_star_system.SystemShellExecuteFlags.URIS_ONLY = 2
 
     sys.modules.update({
         "uno": uno,
@@ -99,21 +109,11 @@ def install():
         "com.sun.star.view": com_sun_star_view,
         "com.sun.star.frame": com_sun_star_frame,
         "com.sun.star.ui": com_sun_star_ui,
+        "com.sun.star.util": com_sun_star_util,
+        "com.sun.star.system": com_sun_star_system,
         "com.sun.star.lang": MagicMock(),
         "com.sun.star.deployment": MagicMock(),
     })
-
-
-_STARTUP_LAUNCHERS = (
-    "_schedule_config_refresh",
-    "_warmup_secure_flow_async",
-    "_send_telemetry",
-    "_ensure_device_management_state_async",
-    "_schedule_update_reconciliation",
-    "_schedule_native_feed_check",
-    "_schedule_feed_rewrite",
-    "_schedule_enrollment_check",
-)
 
 
 def make_job(config_dir=None, ui_locale="fr"):
@@ -151,16 +151,14 @@ def make_job(config_dir=None, ui_locale="fr"):
     # mirai/settings.json (et l'instantané DM mirai/dm_snapshot.json). Les
     # neutraliser après coup laisse la course ouverte : selon la
     # charge, l'un d'eux écrase la valeur que le test vient d'écrire, et l'échec
-    # se déplace d'un test à l'autre. On patche donc la CLASSE le temps de
-    # l'instanciation, puis on la restaure pour ne rien laisser fuir.
-    originals = {name: getattr(MainJob, name) for name in _STARTUP_LAUNCHERS}
-    for name in originals:
-        setattr(MainJob, name, lambda self, *a, **k: None)
-    try:
-        job = MainJob(ctx)
-    finally:
-        for name, method in originals.items():
-            setattr(MainJob, name, method)
+    # se déplace d'un test à l'autre. Elles sont donc masquées sur l'instance le
+    # temps de la construction.
+    job = MainJob.__new__(MainJob)
+    for name in MainJob.STARTUP_TASKS:
+        setattr(job, name, lambda *a, **k: None)
+    job.__init__(ctx)
+    for name in MainJob.STARTUP_TASKS:
+        delattr(job, name)
 
     deadline = time.time() + 2.0
     while getattr(job, "_fetching_config", False) and time.time() < deadline:

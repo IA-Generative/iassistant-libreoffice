@@ -61,9 +61,13 @@ Attributs : `run.kind` (`agentic` | `pipeline` | `selection_rewrite` | `document
 `assistant.preset`, `assistant.ok`, `assistant.cancelled`, `assistant.reason`,
 `assistant.mode`, `assistant.iterations`, `assistant.duration_ms`, `append.mode`.
 
-Causes de fin possibles : `cancelled`, `max_iterations`, `http_401`/`http_429`/…,
-`network_error`, `empty_document`, `headings_only`, `reasoning_starved`, `empty_reply`,
-`palette_closed`, `exception`.
+Causes de fin possibles : `cancelled`, `max_iterations`, `max_iterations_after_changes`,
+`http_401`/`http_429`/…, `network_error`, `truncated`, `reasoning_starved`, `empty_reply`,
+`model_question`, `target_changed`, `palette_closed`, `exception`.
+
+Une demande libre sur un document sans texte de corps (vide, ou fait de titres seuls)
+rédige le texte demandé au lieu de réécrire : ses étapes sont `document.read` puis
+`document.rewrite.done`, avec `body.paragraphs` à 0, sans `document.rewrite.start`.
 
 ### Volumétrie maîtrisée
 

@@ -77,12 +77,14 @@ class MockHttpRouter:
             method = request.get_method()
             url = request.full_url
             req_headers = dict(request.headers)
+            data = request.data
         else:
             method = "GET"
             url = str(request)
             req_headers = {}
+            data = None
 
-        self.calls.append({"method": method, "url": url, "headers": req_headers})
+        self.calls.append({"method": method, "url": url, "headers": req_headers, "data": data})
 
         for route in self._routes:
             if route["method"] != method.upper():

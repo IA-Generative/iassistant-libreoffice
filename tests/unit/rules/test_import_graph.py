@@ -1,9 +1,7 @@
 """Règles d'architecture : qui a le droit d'importer qui.
 
 Couches : les modules communs (à plat dans src/mirai, sans UNO), le moteur
-(core), la palette (ui), la coquille (entrypoint) et l'add-in =PROMPT(). Le
-legacy (menu_actions, formatting, security_flow) est hors matrice : seule la
-coquille l'importe encore, en attendant sa suppression.
+(core), la palette (ui), la coquille (entrypoint) et l'add-in =PROMPT().
 
 Les écarts tolérés sont nommés ici, avec la raison de leur fin prévue. La liste
 ne peut que raccourcir : un écart disparu doit en être retiré.
@@ -15,9 +13,9 @@ import os
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _SRC = os.path.join(_REPO_ROOT, "src", "mirai")
+_TESTS = os.path.join(_REPO_ROOT, "tests")
 
 COMMON = {"local_config", "credentials", "log_setup", "feed_rewrite", "i18n"}
-LEGACY = {"menu_actions", "formatting", "security_flow"}
 SHELL = {"entrypoint", "shell"}
 ADDIN = "calc_prompt_function"
 # Ce que le moteur et la palette prennent dans les modules communs ; le reste
@@ -30,7 +28,6 @@ TOLERATED_EDGES = {
 # Un import UNO paresseux échoue hors du thread principal : seules ces fonctions,
 # appelées sur le thread principal, y ont droit.
 UNO_IMPORTS_IN_FUNCTIONS = {
-    ("i18n", "_uno_ui_locale"): "locale bientôt injectée par la coquille",
     ("calc_prompt_function", "_user_config_path"): "appelée par LibreOffice sur le thread principal",
 }
 # Accès directs au MainJob depuis le moteur ou la palette, hors de la façade.
@@ -118,8 +115,6 @@ def _layer(module):
         return "shell"
     if top == ADDIN:
         return "addin"
-    if top in LEGACY:
-        return "legacy"
     return None
 
 
@@ -179,10 +174,25 @@ def test_addin_uses_only_common_modules():
     assert offenders == []
 
 
-def test_legacy_shell_and_addin_are_never_imported_by_the_new_layers():
+def test_shell_modules_load_with_entrypoint():
+    """Un module de shell/ importe UNO en tête et n'est jamais importé dans une
+    fonction : il se charge avec entrypoint, sur le thread principal."""
+    offenders = []
+    for module, target, function in _edges():
+        if not function:
+            continue
+        if target.split(".")[0] == "shell":
+            offenders.append(f"{module} importe {target} dans {function}")
+        elif (target == "<uno>" and _layer(module) == "shell" and module != "entrypoint"
+              and (module, function) not in UNO_IMPORTS_IN_FUNCTIONS):
+            offenders.append(f"{module} importe UNO dans {function}")
+    assert offenders == []
+
+
+def test_shell_and_addin_are_never_imported_by_the_new_layers():
     offenders = [f"{module} -> {target}" for module, target, _ in _edges()
                  if target != "<uno>"
-                 and _layer(target) in ("legacy", "shell", "addin")
+                 and _layer(target) in ("shell", "addin")
                  and _layer(module) in ("common", "core", "ui", "addin")]
     assert offenders == []
 
@@ -195,14 +205,45 @@ def test_tolerated_exceptions_are_still_needed():
     assert stale == [], f"écarts disparus, à retirer de la liste : {stale}"
 
 
-def test_common_modules_and_addin_never_pump_events():
+def test_common_shell_and_addin_modules_never_pump_events():
     offenders = []
     for module, path in _modules():
-        if _layer(module) not in ("common", "addin"):
+        # entrypoint.pump_events ne pompe que sur le thread principal.
+        if _layer(module) not in ("common", "shell", "addin") or module == "entrypoint":
             continue
         tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
         offenders += [f"{module}:{node.lineno}" for node in ast.walk(tree)
                       if isinstance(node, ast.Attribute) and node.attr == "processEventsToIdle"]
+    assert offenders == []
+
+
+def _imports_a_test_module(node):
+    if isinstance(node, ast.Import):
+        names = [alias.name for alias in node.names]
+    else:
+        module = node.module or ""
+        names = [module] + [f"{module}.{alias.name}" for alias in node.names]
+    return any(part.startswith("test_") or part == "conftest"
+               for name in names for part in name.split("."))
+
+
+def test_test_files_share_code_only_through_the_stubs():
+    """Un fichier de tests n'importe ni un module de test ni un conftest : ce
+    qu'ils partagent vit dans tests/stubs/, les fixtures dans un conftest. Un
+    nom en test_ importé est refusé lui aussi, d'où qu'il vienne : pytest le
+    collecterait et le jouerait comme un test du fichier qui l'importe."""
+    offenders = []
+    for root, dirs, files in os.walk(_TESTS):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, _REPO_ROOT).replace(os.sep, "/")
+            tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+            offenders += [f"{rel}:{node.lineno}" for node in ast.walk(tree)
+                          if isinstance(node, (ast.Import, ast.ImportFrom))
+                          and _imports_a_test_module(node)]
     assert offenders == []
 
 

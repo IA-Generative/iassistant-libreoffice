@@ -178,9 +178,8 @@ et `/update/status`.
 
 ```bash
 cd <racine du dépôt>
-./scripts/06-use-config-profile.sh --profile dev      # bootstrap http://localhost:8089, ?profile=dev
 ./scripts/00-clean-install.sh --uninstall
-./scripts/02-build-oxt.sh
+./scripts/02-build-oxt.sh --config config/profiles/config.default.dev.json   # bootstrap http://localhost:8089, ?profile=dev
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
   "$PWD/dist/mirai.oxt"
 ```
@@ -223,9 +222,8 @@ Disponibilité vérifiée le 2026-07-26 : ✅ `/config?profile=prod` → **HTTP 
 ```bash
 cd <racine du dépôt>
 cp config/profiles/config.default.production.example.json config/profiles/config.default.production.json   # renseigner bootstrap_urls
-./scripts/06-use-config-profile.sh --profile production
 ./scripts/00-clean-install.sh --uninstall
-./scripts/02-build-oxt.sh
+./scripts/02-build-oxt.sh --config config/profiles/config.default.production.json
 /Applications/LibreOffice.app/Contents/MacOS/unopkg add --force --suppress-license \
   "$PWD/dist/mirai.oxt"
 ```
@@ -242,23 +240,27 @@ cp config/profiles/config.default.production.example.json config/profiles/config
    `bootstrap_url` — ajouter ou retirer une URL de repli compte) ou le `?profile=` de
    `config_path` revient à planifier une vague de ré-enrôlement : au démarrage suivant, les
    identifiants de l'ancien environnement sont effacés sur chaque poste mis à jour. L'ordre
-   des URL, `enabled` et `bootstrap_insecure_urls` n'entrent pas en compte.
+   des URL, `enabled` et `bootstrap_insecure_urls` n'entrent pas en compte. Pour changer de
+   DM **sans** nouvel OXT, l'ancien DM place le nouveau en tête des `bootstrapUrls` qu'il sert
+   (`DM_BOOTSTRAP_URLS`, surcharge à chaud par `/admin/api/config`) : chaque poste suit cet
+   ordre dès la récupération qui lui apporte la liste et se ré-enrôle auprès du nouveau DM
+   (voir README, § Passation entre DM).
 2. **Ne jamais poser `enrolled: true` à la main** dans
    `~/Library/Application Support/LibreOffice/4/user/config/mirai/settings.json`. Le drapeau franchit
    le gate mais aucune paire relais n'existe : 401 « Missing credentials » sur 100 % des
    appels, **et le drapeau empêche le ré-enrôlement qui corrigerait la situation**
    (`[ENROLL] Auto-check: already enrolled, skipping wizard`). Seule sortie : un vrai
    ré-enrôlement — `POST /enroll` est idempotent côté DM (il révoque puis ré-émet).
-3. **Libérer le port 28443 avant tout test SSO** : `lsof -nP -iTCP:28443`. Un simulateur lié
-   à `127.0.0.1:28443` intercepte le callback sans que le plugin échoue — il attend 3 min
-   puis expire. Signature du diagnostic : **aucune ligne `PKCE callback received` dans
-   `mirai/mirai.log`** alors que le navigateur a bien affiché une page.
+3. **Libérer le port 28443 avant tout test SSO** : `lsof -nP -iTCP:28443`. Port occupé, le
+   plugin ne peut pas écouter : le navigateur ne s'ouvre pas et `mirai/mirai.log` contient
+   `Failed to start local callback server`.
 4. **Neutraliser la campagne de mise à jour pendant les tests d'authentification** : une
    directive d'update ouvre une boîte modale à chaque lancement et **interrompt le login SSO
    en cours**. Aligner la version du build sur la cible de campagne (`target == current`
    ⇒ directive sautée) ou désactiver la campagne côté DM.
 5. **Un seul onglet SSO à la fois** : le serveur de callback ne connaît que le `state` du
-   dernier flux ; fermer les anciens onglets avant de recommencer.
+   dernier flux ; fermer les anciens onglets avant de recommencer. Un ancien onglet reçoit
+   une erreur 400 (`PKCE callback refused: state mismatch` dans le journal).
 
 ### Suivi d'une campagne
 

@@ -54,15 +54,17 @@ from ..core import (
     selection_info,
     suggestions,
     telemetry_steps,
+    whole_document,
 )
 from ..core import presets as presets_module
 from ..core.context import ToolContext
 from ..core.conversation import ConversationStore
+from ..core.links import target_url
 from ..core.llm_client import LLMClient
-from ..core.orchestrator import Orchestrator, RunObserver, error_message
+from ..core.orchestrator import Orchestrator, RunObserver, error_message, is_outage
 from ..core.progress import RunProgress
 from ..core.registry import ToolRegistry
-from ..core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSink
+from ..core.sinks import PaletteSink
 from ..core.tools import register_all
 from ..core.ui_thread import DispatcherClosed, MainThreadDispatcher
 from ..i18n import t as _t
@@ -98,8 +100,8 @@ PULSE_INTERVAL_S = 0.2    # cadence d'animation de la jauge d'activité
 
 # Zone basse : quatre contenus, un seul rectangle. L'identifiant sert aussi de
 # nom de contrôle (« response » est créé dans _build, hors de la boucle).
-# « Conversation » : le fil en cours, restauré d'une session à l'autre (une
-# seule conversation en v1).
+# « Conversation » : le fil de l'application du document actif, restauré
+# d'une session à l'autre.
 TABS = (("response", "tab.conversation"),
         ("suggestions", "tab.suggestions"),
         ("reasoning", "tab.reasoning"),
@@ -108,12 +110,41 @@ TABS = (("response", "tab.conversation"),
 REASONING_PANE = "reasoning"
 BOTTOM_PANES = tuple(tab_id for tab_id, _ in TABS)
 
+# Liens distribués par le DM (config.links) que la palette sait montrer, dans
+# l'ordre d'affichage : les rôles sont fixés ici, libellés et destinations
+# viennent du serveur (contrat DM §4.2 bis). Un rôle absent de la config n'a
+# pas de ligne. La liste est relue à chaque construction de la palette.
+LINK_IDS = ("search-portal", "beta-feedback")
+
 # Le retour d'un run doit se VOIR : une ligne de statut colorée selon l'issue.
 STATUS_COLORS = {
     "neutral": dsfr.TOKENS["text_mention"],
     "error":   dsfr.TOKENS["error"],
+    "warning": dsfr.TOKENS["warning"],
     "success": dsfr.TOKENS["success"],
 }
+
+
+def _bilan_line(summary):
+    """Libellé court et ton du bilan d'un run, selon son issue."""
+    if summary.get("written"):
+        return _t("palette.status_written"), "success"
+    if summary.get("ok"):
+        return _t("palette.done"), "success"
+    if is_outage(summary.get("reason") or ""):
+        return _t("palette.status_failed"), "error"
+    return _t("palette.status_unwritten"), "warning"
+
+
+def _pipeline_summary(message):
+    """Résumé d'un bouton d'action : son bilan dit s'il a écrit ou s'il
+    n'avait rien à changer, et une erreur du modèle porte son code."""
+    if isinstance(message, presets_module.Written):
+        return {"ok": True, "written": True, "bilan": message}
+    if isinstance(message, presets_module.Unchanged):
+        return {"ok": True, "bilan": message}
+    reason = message.code if isinstance(message, presets_module.Failed) else "not_written"
+    return {"ok": False, "reason": reason, "bilan": message}
 
 
 class _WindowCloser(unohelper.Base,
@@ -225,20 +256,10 @@ class _SelectionWatcher(unohelper.Base,
         self._palette.detach_selection_watcher()
 
 
-def _selection_string(ctx):
-    """Texte sélectionné, ou chaîne vide. À n'appeler que sur le thread principal."""
-    try:
-        return ctx.controller.getSelection().getByIndex(0).getString()
-    except Exception:
-        return ""
-
-
 def _writer_targets(model):
     """(texte sélectionné, texte du paragraphe courant) — jamais d'exception.
 
-    Sans sélection les actions ciblent le paragraphe sous le curseur : il faut
-    donc pouvoir l'afficher, sinon l'indicateur laisse croire qu'aucune cible
-    n'est déterminée.
+    Le paragraphe courant, lu seulement sans sélection, sert aux suggestions.
     """
     selected = paragraph = ""
     try:
@@ -399,6 +420,11 @@ class _PaneClickHandler(unohelper.Base, XMouseListener):
         pass
 
 
+def _stop_line():
+    """Rendu d'un arrêt voulu : ni le glyphe des erreurs, ni celui des succès."""
+    return "⏹ " + _t("run.stopped")
+
+
 class _JournalObserver(RunObserver):
     """Alimente le journal d'actions de la palette (optionnel, repliable)."""
 
@@ -473,6 +499,10 @@ class _JournalObserver(RunObserver):
         self.lines.append(f"⚠ {message}")
         self._render()
 
+    def on_stop(self):
+        self.lines.append(_stop_line())
+        self._render()
+
 
 class AssistantPalette:
     def __init__(self, uno_ctx, shell, app):
@@ -484,14 +514,18 @@ class AssistantPalette:
         self._bottom_height = 0        # ajusté par le redimensionnement
         self._current_exchange = []    # tour en cours, affiché en tête du fil
         self._history_cache = None     # historique relu seulement quand il change
+        self._history_app = app        # application dont le fil est affiché
+        self._exchange_app = app       # application du tour en cours
         self._journal_lines = []       # onglet « Actions » du run courant
         self._tab_before_reasoning = None   # onglet à restaurer en refermant
         self._analysis_text = ""       # analyse du document, quand elle arrive
         self._analysis_running = False  # une seule analyse à la fois
+        self._analysis_generation = 0  # change à chaque invalidation
         self._analysis_base = ""       # socle statique, repli si l'analyse échoue
         self._title_shown = ""         # dernier titre posé (évite le clignotement)
         self.append_mode = self._restore_append_mode(shell)
         self._progress = None          # jauge du run en cours
+        self._bilan = None             # bilan du dernier run, tant qu'il est affiché
         self._pulse = None             # thread d'animation de la jauge
         self._width = 0                # largeur courante (0 = pas encore mesurée)
         self._height = 0
@@ -507,11 +541,13 @@ class AssistantPalette:
         self._models = {}
         self._handlers = []                 # garde les listeners vivants (GC)
         self._chip_names = []
+        self._link_names = []               # lignes de liens DM du pied (ordre d'affichage)
         # Exécution non bloquante : le run vit dans un worker, tout ce qui
         # touche UNO repasse par le dispatcher (voir core/ui_thread.py).
         self.dispatcher = MainThreadDispatcher(uno_ctx, log=shell.log)
         self._worker = None
         self._cancel = None
+        self._run_ctx = None                # ToolContext du run en cours
         self._delta_buffer = _DeltaCoalescer(self._flush_deltas)
         self._selection_watcher = None      # (listener, contrôleur) — garde vivante
         # Usage de la session : compté en mémoire, envoyé en UNE fois à la
@@ -675,7 +711,9 @@ class AssistantPalette:
             self._handlers.append(handler)
 
         # Réglages / À propos / Documentation vivent UNIQUEMENT dans le menu
-        # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler.
+        # 🤖 MIrAI : la fenêtre ne garde que ce qui sert à travailler. Seuls les
+        # liens distribués par le DM s'y ajoutent : le menu, statique
+        # (Addons.xcu), ne peut pas les porter.
         dsfr.add_link(dialog, model, "link_clear", _t("palette.new_conversation"),
                       0, 0, 120, 16, font, self._on_clear)
         _, hint_model = dsfr.add_control(
@@ -685,6 +723,7 @@ class AssistantPalette:
                 "FontName": font, "FontHeight": 6, "Align": 2,
             })
         self._models["hint"] = hint_model
+        self._add_dm_links(dialog, model, font)
 
         # La palette est une fenêtre POSSÉDÉE par la fenêtre de document (sur
         # macOS elle la suit et ne peut pas quitter son écran). Passer `None` en
@@ -716,18 +755,16 @@ class AssistantPalette:
             except Exception:
                 pass
 
-        key_handler = _KeyHandler(self._on_send, self.close)
-        prompt_control.addKeyListener(key_handler)
-        self._handlers.append(key_handler)
+        send_handler = _KeyHandler(self._on_send, lambda: None)
+        prompt_control.addKeyListener(send_handler)
+        self._handlers.append(send_handler)
 
-        # Échap doit fermer quel que soit le contrôle qui a le focus : le
-        # brancher sur le seul champ de prompt laissait la fenêtre coincée dès
-        # que le focus était ailleurs (une chip, la zone de réponse…).
+        # Échap ferme la palette quel que soit le contrôle qui a le focus.
         escape_handler = _KeyHandler(lambda: None, self.close)
         self._handlers.append(escape_handler)
-        for name in ("response", "journal", "send", *self._chip_names):
+        for control in dialog.getControls():
             try:
-                dialog.getControl(name).addKeyListener(escape_handler)
+                control.addKeyListener(escape_handler)
             except Exception:
                 pass          # enregistrement du listener refusé : sans gravité
 
@@ -904,6 +941,8 @@ class AssistantPalette:
         self._place("link_clear", max(x, width - margin - clear_w), y, clear_w, line_h)
         y += line_h + int(4 * scale)
 
+        y = self._place_link_rows(y, margin, width, line_h, scale)
+
         hint_pref = self._preferred("hint")
         hint_w = int((hint_pref.Width if hint_pref else 90) + 6 * scale)
         self._place("hint", width - margin - hint_w, y, hint_w, line_h)
@@ -969,6 +1008,14 @@ class AssistantPalette:
                 self.dialog.removeTopWindowListener(closer)
             except Exception:
                 pass          # peer déjà parti : rien à retirer
+        # Le dispatcher inerte, le worker ne pourra plus refermer le contexte
+        # undo de son run : close() est sur le thread principal, il le fait.
+        run_ctx = self._run_ctx
+        if run_ctx is not None:
+            try:
+                run_ctx.close_undo()
+            except Exception:
+                pass          # document déjà fermé
         self.dispatcher.close()
         try:
             self.dialog.setVisible(False)
@@ -1000,24 +1047,37 @@ class AssistantPalette:
     # Ces méthodes sont appelées indifféremment depuis le thread principal et
     # depuis le worker : elles postent systématiquement, ce qui garantit que
     # l'écriture dans les contrôles VCL a bien lieu sur le thread principal.
-    def set_status(self, message, tone="neutral", tooltip=None):
+    def set_status(self, message, tone="neutral", tooltip="", bold=False):
         """Ligne de statut, colorée selon l'issue — le retour doit se VOIR.
 
-        `tooltip` alimente l'infobulle native : pendant que le modèle réfléchit,
-        survoler le statut affiche le fil de sa réflexion. C'est le seul moyen
-        de le montrer sans encombrer une fenêtre déjà dense — et il n'y a rien
-        à cliquer, donc rien à découvrir.
+        Le gras marque le bilan d'un run, et `tooltip` en porte le texte
+        complet quand la ligne n'en montre qu'un libellé court. Chaque appel
+        remplace les deux : l'image suivante de la jauge efface le bilan.
         """
         def _apply():
             status = self._models["status"]
             status.Label = message
             status.TextColor = STATUS_COLORS.get(tone, STATUS_COLORS["neutral"])
-            if tooltip is not None:
-                try:
-                    status.HelpText = tooltip
-                except Exception:
-                    pass          # modèle sans HelpText : sans gravité
+            status.FontWeight = 150.0 if bold else 100.0
+            try:
+                status.HelpText = tooltip
+            except Exception:
+                pass          # modèle sans HelpText : sans gravité
         self.dispatcher.post(_apply)
+
+    def _show_bilan(self, label, tone, detail=""):
+        """Le bilan d'un run reste en gras dans la ligne d'état jusqu'au run
+        suivant ou à « Nouvelle conversation » ; l'infobulle en donne le texte
+        complet, que la ligne n'a pas la place de montrer."""
+        self._bilan = (label, tone, detail)
+        self.set_status(label, tone=tone, tooltip=detail, bold=True)
+
+    def _restore_status(self):
+        """Ligne d'état au repos : le bilan du dernier run, sinon « Prêt »."""
+        if self._bilan is None:
+            self.set_status(_t("palette.ready"), tone="neutral")
+        else:
+            self._show_bilan(*self._bilan)
 
     def set_journal_text(self, text):
         self.dispatcher.post(lambda: self._set_text("journal", text))
@@ -1107,7 +1167,10 @@ class AssistantPalette:
             pass
 
     def refresh_selection_label(self):
-        """Recalcule le libellé de cible ET le titre. Thread principal uniquement."""
+        """Recalcule le libellé de cible, le titre ET le fil affiché.
+
+        Thread principal uniquement.
+        """
         if self.busy:
             return
         try:
@@ -1115,6 +1178,18 @@ class AssistantPalette:
         except Exception:
             pass          # contrôle disposé : la palette se ferme, rien à signaler
         self.refresh_title()
+        self._show_history_of(self.current_app(fallback=self._history_app))
+
+    def _show_history_of(self, app):
+        """Affiche le fil de `app` : celui que son prochain run réinjectera."""
+        # Un rendu de fin de run encore en file passerait APRÈS celui-ci et
+        # ramènerait l'autre fil à l'écran : on le livre d'abord.
+        self.dispatcher.drain()
+        if app == self._history_app:
+            return
+        self._history_app = app
+        self._history_cache = None
+        self._render_conversation()
 
     def refresh_title(self):
         """Nomme dans le titre le document sur lequel la demande portera.
@@ -1149,24 +1224,27 @@ class AssistantPalette:
         except Exception:
             return ""
 
-    def current_app(self):
+    def current_app(self, fallback=None):
         """Application du document ACTIF, pas celle de l'ouverture.
 
-        `self.app`, figé à la création, n'est qu'un défaut de repli.
+        `fallback` est rendu quand le composant courant n'est ni Writer ni
+        Calc (Centre de démarrage, Impress) ; par défaut `self.app`, figé à
+        la création.
         """
+        default = self.app if fallback is None else fallback
         try:
             desktop = self.uno_ctx.getServiceManager().createInstanceWithContext(
                 "com.sun.star.frame.Desktop", self.uno_ctx)
             model = desktop.getCurrentComponent()
             if model is None:
-                return self.app
+                return default
             if hasattr(model, "Text"):
                 return "writer"
             if hasattr(model, "Sheets"):
                 return "calc"
         except Exception:
             pass
-        return self.app
+        return default
 
     def _describe_selection(self):
         """Décrit la cible courante ; ne rend JAMAIS None ni ne lève."""
@@ -1177,7 +1255,7 @@ class AssistantPalette:
             if model is None:
                 return ""
             if hasattr(model, "Text"):
-                return selection_info.writer_label(*_writer_targets(model))
+                return selection_info.writer_label(_writer_targets(model)[0])
             if hasattr(model, "Sheets"):
                 area = model.CurrentController.Selection.getRangeAddress()
                 return selection_info.calc_label(
@@ -1286,15 +1364,18 @@ class AssistantPalette:
     def start_document_analysis(self):
         """Lance l'analyse en tâche de fond. Thread principal uniquement.
 
-        Le texte est lu ICI, avant de partir : la pompe du dispatcher ne tourne
-        que pendant un run, donc un `call` depuis le thread d'analyse expirait
-        au bout de 10 s (« le thread principal n'a pas répondu »). Même raison
-        pour `start_pump()` — il n'est fiable que depuis le thread principal,
-        et sans lui le résultat ne serait jamais affiché.
+        Le texte est lu ICI, avant de partir : lu par `call()` depuis le thread
+        d'analyse, il dépendrait d'un armement de pompe émis depuis un worker,
+        délivré seulement au prochain réveil de la boucle d'événements. Même
+        raison pour `start_pump()` : depuis le thread principal, l'armement est
+        délivré tout de suite, et sans lui le résultat ne serait jamais affiché.
 
         Rend True si l'analyse a démarré (lu par les tests).
         """
-        if self._analysis_running or self._analysis_text or self.current_app() != "writer":
+        # Pendant un run, la ligne d'état appartient à sa jauge et le document
+        # change encore : l'analyse attend la fin du run.
+        if (self.busy or self._analysis_running or self._analysis_text
+                or self.current_app() != "writer"):
             return False
         try:
             text = self._document_text()
@@ -1312,15 +1393,17 @@ class AssistantPalette:
         # deux animations à deux endroits apprendraient deux habitudes.
         progress = RunProgress(activity=_t("analysis.phase"))
         self._start_pulse(progress)
-        threading.Thread(target=self._analyse_in_worker, args=(messages, progress),
+        threading.Thread(target=self._analyse_in_worker,
+                         args=(messages, progress, self._analysis_generation),
                          daemon=True, name="mirai-doc-analysis").start()
         return True
 
-    def _analyse_in_worker(self, messages, progress):
+    def _analyse_in_worker(self, messages, progress, generation):
         """Interroge le modèle et remplace l'onglet.
 
         Toute sortie anormale laisse les suggestions statiques en place : une
         analyse qui échoue ne doit jamais faire perdre ce qui marchait avant.
+        Une analyse dont le document a changé entre-temps est écartée.
         """
         try:
             step = LLMClient(self.shell,
@@ -1336,6 +1419,10 @@ class AssistantPalette:
                 self.shell.log("[palette] analyse du document : aucune "
                                "proposition exploitable")
                 return
+            if generation != self._analysis_generation:
+                self.shell.log("[palette] analyse du document écartée : "
+                               "le document a changé pendant l'analyse")
+                return
             self.shell.log(f"[palette] analyse du document : {len(items)} proposition(s)")
             self._analysis_text = doc_analysis.render(items)
         except DispatcherClosed:
@@ -1343,23 +1430,30 @@ class AssistantPalette:
         except Exception as exc:
             self.shell.log(f"[palette] analyse du document échouée : {exc}")
         finally:
+            # Le run a pu finir entre la vérification et l'écriture du constat.
+            stale = generation != self._analysis_generation
+            if stale:
+                self._analysis_text = ""
             self._analysis_running = False
-            self._publish_analysis(progress)
+            self._publish_analysis(progress, stale=stale)
 
-    def _publish_analysis(self, progress):
-        """Affiche le résultat — ou rend la main au socle statique en cas d'échec."""
+    def _publish_analysis(self, progress, stale=False):
+        """Affiche le résultat — ou rend la main au socle statique en cas d'échec.
+        Une analyse périmée en relance une, si l'onglet est affiché."""
         final = self._analysis_text or self._analysis_base
         # La jauge n'est arrêtée que si elle est encore la NÔTRE : un run
         # démarré entre-temps a posé la sienne, et la couper afficherait un run
         # figé alors qu'il travaille.
         if self._progress is progress:
             self._stop_pulse()
-            self.set_status(_t("palette.ready"), tone="neutral")
+            self._restore_status()
         try:
             self.dispatcher.post(lambda: self._set_text("suggestions", final))
             # La pompe a été armée pour cette analyse : on l'éteint, sauf si un
             # run l'utilise encore — il la gère alors pour son propre compte.
             self.dispatcher.post(self._stop_pump_if_idle)
+            if stale:
+                self.dispatcher.post(self._refresh_if_shown)
         except DispatcherClosed:
             pass
 
@@ -1367,8 +1461,16 @@ class AssistantPalette:
         if not self.busy:
             self.dispatcher.stop_pump()
 
+    def _refresh_if_shown(self):
+        """Thread principal : l'onglet Suggestions affiché relance l'analyse
+        d'un document qui vient de changer."""
+        if self.active_tab == "suggestions":
+            self.refresh_suggestions()
+
     def invalidate_analysis(self):
-        """Le document a changé : l'analyse précédente ne le décrit plus."""
+        """Le document a changé : ni l'analyse précédente ni celle qui tourne
+        encore ne le décrivent."""
+        self._analysis_generation += 1
         self._analysis_text = ""
 
     def _current_suggestions(self):
@@ -1475,7 +1577,9 @@ class AssistantPalette:
         avoir à faire défiler pour voir ce qui vient d'arriver.
         """
         blocks = []
-        if self._current_exchange:
+        # Un run en échec n'est jamais persisté : son tour reste en mémoire et
+        # ne s'affiche que sur le fil de son application.
+        if self._current_exchange and self._exchange_app == self._history_app:
             blocks.append("\n".join(self._current_exchange))
 
         # L'historique est mis en CACHE : cette méthode est rappelée à chaque
@@ -1484,7 +1588,7 @@ class AssistantPalette:
         # grande chaîne postée au thread principal — de quoi saturer sa file
         # d'événements et donner l'impression d'une interface figée.
         if self._history_cache is None:
-            self._history_cache = self.conversation.load()
+            self._history_cache = self.conversation.load_for(self._history_app)
         entries = self._history_cache
         # Les entrées arrivent dans l'ordre chronologique, par paires
         # (utilisateur, assistant) : on regroupe puis on inverse les groupes,
@@ -1531,8 +1635,13 @@ class AssistantPalette:
             pass          # contrôle sans setText (FixedText) ou déjà disposé
 
     def _append_response(self, prefix, text=""):
-        """Ajoute une ligne à l'échange EN COURS, affiché en tête du fil."""
-        self._current_exchange.append((prefix + text) if text else prefix)
+        """Ajoute une ligne à l'échange EN COURS, affiché en tête du fil. Une
+        ligne ouverte restée vide (préfixe seul) reçoit le texte plutôt que
+        d'en précéder une seconde."""
+        if text and self._current_exchange and self._current_exchange[-1] == prefix:
+            self._current_exchange[-1] = prefix + text
+        else:
+            self._current_exchange.append((prefix + text) if text else prefix)
         self._render_conversation()
 
     def _stream_response(self, chunk):
@@ -1546,15 +1655,65 @@ class AssistantPalette:
         self._current_exchange[-1] += text
         self._render_conversation()
 
+    def _place_link_rows(self, y, margin, width, line_h, scale):
+        """Une ligne par lien DM, large comme son texte, au-dessus du hint ; rend le y suivant."""
+        for name in self._link_names:
+            pref = self._preferred(name)
+            w = min(width - 2 * margin, int((pref.Width if pref else width) + 6 * scale))
+            self._place(name, margin, y, w, line_h)
+            y += line_h + int(4 * scale)
+        return y
+
+    def _add_dm_links(self, dialog, model, font):
+        """Une ligne par lien DM connu, son hint dessous ; les libellés viennent du serveur."""
+        for link_id in LINK_IDS:
+            link = self.shell.get_link(link_id)
+            if not link:
+                continue
+            name = "link_" + link_id.replace("-", "_")
+            _, link_model = dsfr.add_link(
+                dialog, model, name, link["label"] + " ↗", 0, 0, 120, 16, font,
+                lambda u=target_url(link), i=link_id: self._on_link(i, u))
+            link_model.HelpText = link["label"]
+            self._models[name] = link_model
+            self._link_names.append(name)
+            if link.get("hint"):
+                self._add_link_hint(dialog, model, font, name + "_hint", link_id, link)
+
+    def _add_link_hint(self, dialog, model, font, name, link_id, link):
+        """Le hint est un lien quand le DM lui donne une cible, du texte sinon."""
+        if link.get("hintUrl"):
+            _, hint_model = dsfr.add_link(
+                dialog, model, name, link["hint"] + " ↗", 0, 0, 120, 16, font,
+                lambda u=link["hintUrl"], i=link_id + ".hint": self._on_link(i, u))
+        else:
+            _, hint_model = dsfr.add_control(
+                dialog, model, name, "FixedText", 0, 0, 120, 16, {
+                    "Label": link["hint"], "TextColor": dsfr.TOKENS["text_mention"],
+                    "FontName": font, "FontHeight": 8})
+        hint_model.HelpText = link["hint"]
+        self._models[name] = hint_model
+        self._link_names.append(name)
+
+    def _on_link(self, link_id, url):
+        self.shell.telemetry("LinkClick", {"link": link_id})
+        try:
+            self.shell.open_link(url)
+        except Exception as exc:
+            self.shell.log(f"[palette] ouverture du lien {link_id} impossible : {exc}")
+            self.set_status(_t("msg.no_browser").split("\n")[0], tone="error")
+
     def _on_clear(self):
         if self.busy:
             return
         self._session["clears"] += 1
-        self.conversation.clear()
-        self._current_exchange = []
+        self.conversation.clear_for(self._history_app)
+        if self._exchange_app == self._history_app:   # le tour en cours peut être à l'autre
+            self._current_exchange = []
         self._history_cache = None
-        self._models["response"].Text = ""
+        self._set_text("response", "")
         self.set_journal_text("")
+        self._bilan = None
         self.set_status(_t("palette.cleared"))
 
     def _current_context(self):
@@ -1591,7 +1750,11 @@ class AssistantPalette:
             async_callback = self.uno_ctx.getServiceManager() \
                 .createInstanceWithContext("com.sun.star.awt.AsyncCallback",
                                            self.uno_ctx)
-            deferred = _DeferredCall(fn)
+            def run():
+                self._handlers.remove(deferred)
+                fn()
+
+            deferred = _DeferredCall(run)
             self._handlers.append(deferred)   # référence vivante jusqu'au notify
             async_callback.addCallback(deferred, None)
         except Exception:
@@ -1610,10 +1773,11 @@ class AssistantPalette:
         self._defer(lambda: self._start_run(preset=None))
 
     def _cancel_run(self):
-        """Demande l'arrêt du run en cours. Le worker s'arrête entre deux chunks."""
+        """Demande l'arrêt du run en cours. Le worker s'arrête entre deux chunks ;
+        d'ici là, c'est la jauge, seule à écrire la ligne d'état, qui l'annonce."""
         if self._cancel is not None:
             self._cancel.set()
-            self.set_status(_t("palette.stopping"))
+            self._progress.hold_phase(_t("palette.stopping"))
 
     def _start_run(self, preset=None):
         """Valide la demande sur le thread principal, puis lance le worker.
@@ -1643,11 +1807,15 @@ class AssistantPalette:
                 preset)
 
         self._last_refusal = ""
+        self._bilan = None
         self.busy = True
         self._cancel = threading.Event()
+        self._run_ctx = ctx
         self._delta_buffer.reset()
         self._current_exchange = []    # nouvel échange : le précédent est persisté
         self._history_cache = None     # le tour précédent a rejoint l'historique
+        self._history_app = ctx.app
+        self._exchange_app = ctx.app
         self._journal_lines = []
         self._progress = RunProgress()
         self._set_input_enabled(False)
@@ -1713,20 +1881,6 @@ class AssistantPalette:
             return False
         return bool(verdict and verdict.supports_agentic)
 
-    def _document_sink(self, ctx):
-        """Destination du texte : remplacer la sélection, ou l'ajouter après.
-
-        Le choix appartient à l'utilisateur (case « Ajouter à la suite ») : les
-        deux usages sont légitimes — remplacer va plus vite, ajouter permet de
-        comparer avant de décider. Les marqueurs reprennent la forme historique.
-        """
-        if self.append_mode:
-            return WriterInsertSink(
-                ctx,
-                "\n\n---début-du-texte-modifié---\n",
-                "\n---fin-du-texte-modifié---\n")
-        return WriterReplaceSink(ctx)
-
     def _document_snapshot(self, ctx, preset, prompt_text):
         """Lit d'avance ce dont le run aura besoin. Thread principal uniquement.
 
@@ -1735,10 +1889,11 @@ class AssistantPalette:
         `_run_selection_rewrite`) seulement si le modèle n'a pas prouvé savoir
         enchaîner les outils (`_model_can_chain_tools`).
         """
-        snapshot = {"selection": "", "paragraphs": [], "styles": [],
+        snapshot = {"selection": "", "target": None, "document": None,
                     "rewrite": False, "rewrite_selection": False}
         try:
-            snapshot["selection"] = _selection_string(ctx) or ""
+            snapshot["target"] = ctx.controller.getSelection().getByIndex(0)
+            snapshot["selection"] = snapshot["target"].getString() or ""
         except Exception:
             pass
         wants_edit = (preset is None and ctx.app == "writer"
@@ -1753,10 +1908,7 @@ class AssistantPalette:
             return snapshot
         if wants_edit and not snapshot["selection"].strip():
             try:
-                from ..core.tools.writer_tools import _paragraphs, paragraph_style
-                items = _paragraphs(ctx)
-                snapshot["paragraphs"] = [p.getString() for p in items]
-                snapshot["styles"] = [paragraph_style(p) for p in items]
+                snapshot["document"] = whole_document.read(ctx)
                 snapshot["rewrite"] = True
             except Exception as exc:
                 self.shell.log(f"[palette] lecture du document impossible : {exc}")
@@ -1773,8 +1925,8 @@ class AssistantPalette:
         self._session["runs"] += 1
         self.shell.log("[palette] run: début")
         # Chaque branche rend un résumé {ok, reason, …} : c'est lui qui alimente
-        # le span de fin. Les valeurs par défaut couvrent le cas où la branche
-        # lève avant d'avoir rendu quoi que ce soit.
+        # le span de fin et le bilan de la ligne d'état. Les valeurs par défaut
+        # couvrent le cas où la branche lève avant d'avoir rendu quoi que ce soit.
         kind, summary = "agentic", {"ok": False, "reason": "exception"}
         try:
             if preset is not None and preset.mode == "pipeline":
@@ -1783,16 +1935,17 @@ class AssistantPalette:
             elif snapshot.get("rewrite_selection"):
                 kind = "selection_rewrite"
                 summary = self._run_selection_rewrite(ctx, prompt_text,
-                                                      snapshot["selection"])
+                                                      snapshot["selection"],
+                                                      snapshot["target"])
             elif snapshot.get("rewrite"):
                 kind = "document_rewrite"
                 summary = self._run_document_rewrite(ctx, prompt_text,
-                                                     snapshot["paragraphs"],
-                                                     snapshot["styles"])
+                                                     snapshot["document"])
             else:
                 summary = self._run_agentic(preset, prompt_text, ctx)
             self._delta_buffer.flush()
-            self._finish_run()
+            self._stop_pulse()
+            self._finish_run(summary)
         except DispatcherClosed:
             summary = {"ok": False, "reason": "palette_closed"}
             self.shell.log("[palette] run interrompu : palette fermée")
@@ -1800,8 +1953,9 @@ class AssistantPalette:
             summary = {"ok": False, "reason": "exception"}
             self.shell.log(f"[palette] run error: {exc}")
             self._delta_buffer.flush()
+            self._stop_pulse()
             message = _friendly_error(exc)
-            self.set_status(message, tone="error")
+            self._show_bilan(_t("palette.status_failed"), "error", message)
             self._append_response(_t("palette.assistant_prefix"), f"⚠ {message}")
         finally:
             # Le span AVANT de libérer l'état : `_cancel` est remis à None juste
@@ -1809,6 +1963,9 @@ class AssistantPalette:
             self._emit_run_span(kind, preset, summary, started)
             # Ordre important : libérer l'état AVANT de poster les mises à
             # jour, pour qu'un filet déclenché entre-temps voie un run terminé.
+            # Le contexte avant `busy` : le run suivant pose le sien dès que
+            # `busy` retombe.
+            self._run_ctx = None
             self.busy = False
             self._cancel = None
             self._worker = None
@@ -1818,7 +1975,7 @@ class AssistantPalette:
             self._set_send_label(running=False)
             # Dernier drain, puis extinction : la pompe ne doit pas tourner
             # au repos.
-            self.dispatcher.post(self.dispatcher.stop_pump)
+            self.dispatcher.post(self._settle_after_run)
             self.shell.log("[palette] run: terminé, interface restaurée")
 
     def _emit_run_span(self, kind, preset, summary, started):
@@ -1848,96 +2005,118 @@ class AssistantPalette:
         """Preset piloté par Python : le LLM n'est qu'une fonction texte.
 
         Le runner touche le document ; il le fait via ctx.on_main. Son appel LLM
-        reste dans ce worker.
+        reste dans ce worker, et le texte du modèle s'affiche dans la palette.
         """
         self.journal_line(_t("palette.journal_prepare", label=preset.label),
                           step=telemetry_steps.PRESET_START,
                           **{"preset.name": preset.id})
-        message = preset.runner(ctx, self.shell, prompt_text, None,
+        self._append_response(_t("palette.assistant_prefix"))
+        message = preset.runner(ctx, self.shell, prompt_text, self._stream_response,
                                 cancel_event=self._cancel,
                                 dispatcher=self.dispatcher,
-                                append_mode=self.append_mode)
+                                append_mode=self.append_mode,
+                                progress=self._progress)
+        self._delta_buffer.flush()
+        if self._cancelled():
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
         # Le texte du message vient du modèle : l'onglet Actions le montre, le
         # fichier n'en garde que la longueur et la télémétrie aussi.
         self.journal_line(f"✓ {preset.label}", detail=message[:70],
                           step=telemetry_steps.PRESET_DONE,
                           **{"preset.name": preset.id,
                              "result.chars": len(message or "")})
-        self._append_response(_t("palette.assistant_prefix"), message)
+        # Le bilan ouvre sa propre ligne quand le texte du modèle le précède,
+        # et le fil garde les deux : le texte reste lisible après l'échange suivant.
+        prefix = _t("palette.assistant_prefix")
+        line = self._current_exchange[-1]
+        new_line = "" if line.endswith(("\n", prefix)) else "\n"
+        self._stream_response(new_line + message)
         self.conversation.append("user", shown, ctx.app)
-        self.conversation.append("assistant", message, ctx.app)
-        return {"ok": True}
+        self.conversation.append("assistant", line.removeprefix(prefix) + new_line + message,
+                                 ctx.app)
+        return _pipeline_summary(message)
 
     def _run_agentic(self, preset, prompt_text, ctx):
         """Run piloté par le LLM, qui appelle les outils du registre."""
 
+        observer = _JournalObserver(self)
         orchestrator = Orchestrator(
             LLMClient(self.shell), self.registry, ctx,
-            observer=_JournalObserver(self),
+            observer=observer,
             conversation=self.conversation,
             cancel_event=self._cancel,
             dispatcher=self.dispatcher,
             progress=self._progress)
 
-        extra, user_prompt, sink = self._prepare_agentic_run(preset, prompt_text, ctx)
+        extra = ""
+        if preset is not None and preset.build_extra:
+            extra = preset.build_extra(ctx, self.shell, prompt_text)
         self._append_response(_t("palette.assistant_prefix"))
-        result = orchestrator.run_agentic(user_prompt, sink, preset_extra=extra)
+        result = orchestrator.run_agentic(prompt_text,
+                                          PaletteSink(on_delta=self._stream_response),
+                                          preset_extra=extra)
         self._delta_buffer.flush()
-        if not result.ok:
+        if result.reason == "cancelled":
+            self._report_stop(observer)
+        elif not result.ok:
             self._stream_response("⚠ " + (result.text or result.reason))
-        elif not isinstance(sink, PaletteSink):
-            self._stream_response(result.text or _t("palette.applied"))
         return {"ok": result.ok, "reason": result.reason,
                 "mode": orchestrator.llm.effective_mode(),
-                "iterations": result.iterations}
+                "iterations": result.iterations,
+                "written": result.changed,
+                "bilan": "" if result.ok else result.text or result.reason}
 
-    def _run_selection_rewrite(self, ctx, instruction, selection):
+    def _run_selection_rewrite(self, ctx, instruction, selection, target):
         """Applique une demande libre À LA SÉLECTION, par un chemin sûr.
 
-        Même principe que la réécriture du document : Python tient le texte, le
-        LLM n'est qu'une fonction texte, et le résultat est écrit par le sink
-        choisi dans la palette — remplacement, ou ajout entre marqueurs si la
-        case « Ajouter à la suite » est cochée.
+        Comme les boutons d'action : Python tient le texte, le LLM n'est qu'une
+        fonction texte. La réponse s'affiche au fil du flux et n'est écrite
+        qu'une fois complète, en une seule action d'annulation : à la place de
+        la sélection lue au lancement, ou après elle entre marqueurs si la case
+        « Ajouter à la suite » est cochée.
         """
         from ..core.presets import text_sink
+        from ..core.text_filters import EXTEND_QUESTION_PATTERNS, STOP_PHRASES, patterns_absent_from
 
         self.journal_line(_t("palette.journal_selection_start", chars=len(selection)),
                           step=telemetry_steps.SELECTION_START,
                           **{"selection.chars": len(selection),
                              "append.mode": bool(self.append_mode)})
         self._append_response(_t("palette.assistant_prefix"))
-        sink = self.dispatcher.call(
-            lambda: text_sink(ctx, self.append_mode,
-                              "\n\n---début-du-texte-modifié---\n",
-                              "\n---fin-du-texte-modifié---\n"),
-            timeout=10)
+        sink = text_sink(ctx, self.append_mode,
+                         "\n\n---début-du-texte-modifié---\n",
+                         "\n---fin-du-texte-modifié---\n",
+                         tee=self._stream_response, target=target,
+                         original=selection, cancel_event=self._cancel,
+                         undo_label=_t("preset.undo_edit_selection"),
+                         stop_phrases=STOP_PHRASES,
+                         question_patterns=patterns_absent_from(
+                             selection, EXTEND_QUESTION_PATTERNS))
 
         llm = LLMClient(self.shell)
-        self.dispatcher.call(
-            lambda: ctx.undo_begin(_t("preset.undo_edit_selection")),
-            timeout=10)
-        try:
-            step = llm.step(
-                [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
-                 {"role": "user",
-                  "content": (f"TEXTE :\n{selection}\n\n"
-                              f"DEMANDE : {instruction}\n\n"
-                              "Réponds UNIQUEMENT avec le texte modifié, sans "
-                              "introduction ni commentaire.")}],
-                on_text_delta=self._stream_response,
-                cancel_event=self._cancel,
-                progress=self._progress)
-            self._delta_buffer.flush()
-            if step.error:
-                self._stream_response("⚠ " + error_message(step.error))
-                return {"ok": False, "reason": step.error}
-            if self._cancelled():
-                return {"ok": False, "reason": "cancelled"}
-            self.dispatcher.call(
-                lambda: sink.finish(step.text, step.streamed), timeout=30)
-        finally:
-            self.dispatcher.call(ctx.undo_end, timeout=10)
-
+        step = llm.step(
+            [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
+             {"role": "user",
+              "content": (f"TEXTE :\n{selection}\n\n"
+                          f"DEMANDE : {instruction}\n\n"
+                          "Réponds UNIQUEMENT avec le texte modifié, sans "
+                          "introduction ni commentaire.")}],
+            on_text_delta=sink.stream_delta,
+            cancel_event=self._cancel,
+            progress=self._progress)
+        self._delta_buffer.flush()
+        if self._cancelled():
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if step.error:
+            message = error_message(step.error)
+            self._stream_response("⚠ " + message)
+            return {"ok": False, "reason": step.error, "bilan": message}
+        sink.finish(step.text, step.streamed)
+        unwritten = self._selection_unwritten(sink)
+        if unwritten:
+            return unwritten
         how = (_t("palette.how_appended_selection") if self.append_mode
                else _t("palette.how_replaced"))
         self.journal_line(_t("palette.journal_selection_done", how=how),
@@ -1946,158 +2125,262 @@ class AssistantPalette:
         summary = _t("palette.selection_summary", how=how)
         self.conversation.append("user", instruction, ctx.app)
         self.conversation.append("assistant", summary, ctx.app)
-        return {"ok": True}
+        return {"ok": True, "written": True, "bilan": summary}
 
-    def _run_document_rewrite(self, ctx, instruction, originals, styles=None):
-        """Réécrit le document : Python lit, le LLM rédige, Python applique.
+    def _selection_unwritten(self, sink):
+        """Résumé du run quand la réponse n'a pas été écrite sur la sélection :
+        arrêt, question, réponse vide ou sélection modifiée. None sinon."""
+        self._delta_buffer.flush()
+        if sink.stopped:
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if sink.question_detected:
+            reason, message = "model_question", _t("preset.question_asked")
+        elif not sink.accumulated.strip():
+            reason, message = "empty_response", error_message("empty_response")
+        elif sink.target_changed:
+            reason, message = "target_changed", _t("preset.target_changed")
+        else:
+            return None
+        self._stream_response(("\n" if self._line_is_open() else "") + message)
+        return {"ok": False, "reason": reason, "bilan": message}
+
+    def _run_document_rewrite(self, ctx, instruction, document):
+        """Réécrit le document : Python lit, le LLM rédige, Python écrit une
+        fois la réponse complète.
 
         Aucun tool call n'est demandé au modèle — c'est ce qui rend l'opération
-        fiable là où le mode agentique échouait silencieusement.
+        fiable là où le mode agentique échouait silencieusement. Le corps part
+        d'un seul appel pour qu'une demande globale garde son sens ; le modèle
+        rend les titres intérieurs qu'il garde, et Python redonne à chaque
+        paragraphe son style : le corps ne prend jamais celui d'un titre.
         """
-        from ..core.tools.writer_tools import replace_paragraphs
-
-        if not originals:
-            self._append_response(_t("palette.assistant_prefix"),
-                                  _t("palette.empty_document"))
-            return {"ok": False, "reason": "empty_document"}
-
-        # Les titres restent en place : les inclure dans la plage réécrite y
-        # ferait tomber du corps de texte, qui hériterait du style Titre.
-        styles = styles or [""] * len(originals)
-        span = doc_rewrite.body_range(styles)
-        if span is None:
-            self._append_response(
-                _t("palette.assistant_prefix"), _t("palette.headings_only"))
-            return {"ok": False, "reason": "headings_only"}
-        first, last = span
-        body = originals[first - 1:last]
-        headings = [text for text, style in zip(originals, styles, strict=False)
+        found = doc_rewrite.sections(document.texts, document.styles)
+        if not found:
+            return self._compose_document(ctx, instruction, document)
+        headings = [text for text, style in zip(document.texts, document.styles,
+                                                strict=True)
                     if doc_rewrite.is_heading(style) and text.strip()]
+        append = self.append_mode
+        self._journal_rewrite_start(document, found, headings, append)
 
-        self.journal_line(_t("palette.journal_read", count=len(originals)),
+        self._progress.set_phase(_t("progress.writing"))
+        self._append_response(_t("palette.assistant_prefix"))
+        result = self._ask_rewrite(self._document_model(document), document, instruction,
+                                   append)
+        failure = self._ask_failed(result)
+        if failure is None:
+            failure = self._write_document(
+                ctx, document,
+                lambda: self._apply_rewrite(ctx, document, result.drafts, append),
+                _t("preset.undo_rewrite_document"))
+        if failure is not None:
+            return failure
+
+        body = sum(len(draft.indexes) for draft in result.drafts)
+        after = sum(len(draft.paragraphs) for draft in result.drafts)
+        # En ajout, l'original reste entier ; en remplacement, le modèle peut
+        # avoir retiré tous les titres intérieurs.
+        kept_count = (len(headings) if append
+                      else whole_document.headings_kept(document, result.drafts))
+        self.journal_line(
+            _t("palette.journal_written", before=body, after=after),
+            step=telemetry_steps.DOCUMENT_DONE,
+            **{"body.paragraphs": body,
+               "result.paragraphs": after,
+               "headings.kept": kept_count,
+               "append.mode": bool(append)})
+        kept = _t("palette.title_kept") if kept_count else ""
+        how = _t("palette.how_appended") if append else _t("palette.how_rewritten")
+        summary = whole_document.with_tables(document, _t(
+            "palette.document_summary", how=how, before=body, after=after, kept=kept))
+        self._stream_response(summary)
+        self.conversation.append("user", instruction, ctx.app)
+        self.conversation.append("assistant", summary, ctx.app)
+        return {"ok": True, "written": True, "bilan": summary}
+
+    def _compose_document(self, ctx, instruction, document):
+        """Document sans texte de corps, vide ou fait de titres seuls : le
+        texte demandé est rédigé puis écrit à la fin du document. Sans
+        marqueurs, même en ajout : il n'y a rien à comparer."""
+        self.journal_line(_t("palette.journal_read", count=len(document.texts)),
                           step=telemetry_steps.DOCUMENT_READ,
-                          **{"document.paragraphs": len(originals),
-                             "document.headings": len(headings)})
+                          **{"document.paragraphs": len(document.texts),
+                             "document.headings": 0,
+                             "document.tables": len(document.tables)})
+        self._progress.set_phase(_t("progress.writing"))
+        self._append_response(_t("palette.assistant_prefix"))
+        result = whole_document.compose(self._document_model(document), document, instruction,
+                                        tee=self._stream_response)
+        failure = self._ask_failed(result)
+        if failure is None:
+            failure = self._write_document(
+                ctx, document, lambda: whole_document.add_text(ctx, document, result.drafts[0]),
+                _t("preset.undo_compose_document"))
+        if failure is not None:
+            return failure
+
+        count = len(result.drafts[0].paragraphs)
+        self.journal_line(
+            _t("palette.journal_written", before=0, after=count),
+            step=telemetry_steps.DOCUMENT_DONE,
+            **{"body.paragraphs": 0, "result.paragraphs": count,
+               "headings.kept": 0, "append.mode": bool(self.append_mode)})
+        summary = whole_document.with_tables(document,
+                                             _t("palette.document_composed", count=count))
+        self._stream_response(summary)
+        self.conversation.append("user", instruction, ctx.app)
+        self.conversation.append("assistant", summary, ctx.app)
+        return {"ok": True, "written": True, "bilan": summary}
+
+    def _document_model(self, document):
+        from ..core.text_filters import EXTEND_QUESTION_PATTERNS, patterns_absent_from
+        return whole_document.Model(
+            LLMClient(self.shell), prompts.PIPELINE_TEXT_SYSTEM,
+            cancel_event=self._cancel, progress=self._progress,
+            question_patterns=patterns_absent_from(document.text, EXTEND_QUESTION_PATTERNS))
+
+    def _ask_failed(self, result):
+        """Résumé du run quand le modèle n'a rien rendu à écrire : arrêt,
+        question, erreur ou réponse vide. None sinon."""
+        self._delta_buffer.flush()
+        if self._cancelled():
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if result.question:
+            self._stream_response("\n" + _t("preset.question_asked"))
+            return {"ok": False, "reason": "model_question",
+                    "bilan": _t("preset.question_asked")}
+        if result.error:
+            return self._report_rewrite_failure(result)
+        return None
+
+    def _write_document(self, ctx, document, apply, undo_label):
+        """Écrit d'un seul passage sur le thread principal. Rend le résumé du
+        run quand rien n'a été écrit (arrêt, document modifié), None sinon."""
+        self._progress.set_phase(_t("progress.applying"))
+        outcome = self.dispatcher.call(lambda: whole_document.write(
+            ctx, document, apply, undo_label, self._cancel), timeout=30)
+        if outcome == "stopped":
+            self._report_stop()
+            return {"ok": False, "reason": "cancelled"}
+        if outcome == "changed":
+            self._stream_response(_t("preset.target_changed"))
+            return {"ok": False, "reason": "target_changed",
+                    "bilan": _t("preset.target_changed")}
+        return None
+
+    def _ask_rewrite(self, model, document, instruction, append):
+        """Tout le corps d'un seul appel ; au-delà du seuil, ou quand un
+        tableau le coupe en remplacement, section par section et entre les
+        tableaux, et la palette le dit : une demande globale (« en deux
+        paragraphes ») s'applique alors à chaque morceau. Une seule réponse ne
+        peut pas se répartir de part et d'autre d'un tableau ; en ajout, elle
+        suit le document et n'a pas à le faire."""
+        limit = whole_document.max_chars(self.shell)
+        span = whole_document.body_span(document)
+        if not append and whole_document.spans_table(document, span):
+            self._stream_response(_t("palette.rewrite_around_tables") + "\n")
+        elif sum(len(document.texts[i]) for i in span) <= limit:
+            return whole_document.rewrite_whole(model, document, instruction,
+                                                tee=self._stream_response)
+        else:
+            self._stream_response(_t("palette.rewrite_by_section") + "\n")
+        return whole_document.rewrite(model, document, lambda _originals: instruction,
+                                      limit, tee=self._stream_response)
+
+    def _journal_rewrite_start(self, document, found, headings, append):
+        self.journal_line(_t("palette.journal_read", count=len(document.texts)),
+                          step=telemetry_steps.DOCUMENT_READ,
+                          **{"document.paragraphs": len(document.texts),
+                             "document.headings": len(headings),
+                             "document.tables": len(document.tables)})
         if headings:
             self.journal_line(_t("palette.journal_heading_kept"),
                               detail=f"« {headings[0][:50]} »")
         self.journal_line(
-            _t("palette.journal_rewrite_start", first=first, last=last),
+            _t("palette.journal_rewrite_start",
+               first=found[0].body[0] + 1, last=found[-1].body[-1] + 1),
             step=telemetry_steps.DOCUMENT_START,
-            **{"body.paragraphs": len(body),
-               "append.mode": bool(self.append_mode)})
-        self._progress.set_phase(_t("progress.writing"))
-        self._append_response(_t("palette.assistant_prefix"))
-        llm = LLMClient(self.shell)
-        step = llm.step(
-            [{"role": "system", "content": prompts.PIPELINE_TEXT_SYSTEM},
-             {"role": "user",
-              "content": doc_rewrite.build_rewrite_prompt(
-                  body, instruction, headings=headings)}],
-            on_text_delta=self._stream_response,
-            cancel_event=self._cancel,
-            progress=self._progress)
-        self._delta_buffer.flush()
+            **{"body.paragraphs": found[-1].body[-1] - found[0].body[0] + 1,
+               "append.mode": bool(append)})
 
-        if step.error:
-            self._stream_response("⚠ " + error_message(step.error))
-            return {"ok": False, "reason": step.error}
-        if self._cancelled():
-            return {"ok": False, "reason": "cancelled"}
+    @staticmethod
+    def _apply_rewrite(ctx, document, drafts, append):
+        """Thread principal exclusivement. En ajout, l'original reste en place
+        et le résultat suit le dernier paragraphe, entre deux marqueurs."""
+        if append:
+            whole_document.append_block(
+                ctx, document, whole_document.rewritten_lines(document, drafts),
+                "---début-du-texte-réécrit---", "---fin-du-texte-réécrit---")
+        else:
+            whole_document.replace(ctx, document, drafts)
 
-        rewritten = doc_rewrite.parse_rewritten(step.text)
-        if not rewritten:
-            # Dire CE QUI s'est passé : « inexploitable » n'oriente vers aucune
-            # action. Si le modèle a consommé son budget en raisonnement sans
-            # rien répondre — et que la reprise élargie du client n'a pas suffi —
-            # le remède est un autre modèle, pas un autre prompt.
-            if step.starved_by_reasoning:
-                self.journal_line(
-                    _t("palette.journal_budget_starved"),
-                    step=telemetry_steps.REASONING_STARVED,
-                    **{"reasoning.chars": int(step.reasoning_chars),
-                       "finish.reason": "length"})
-                self._stream_response(_t("palette.budget_starved"))
-                return {"ok": False, "reason": "reasoning_starved"}
-            else:
-                self.journal_line(
-                    _t("palette.journal_unusable"),
-                    step=telemetry_steps.DOCUMENT_EMPTY,
-                    **{"reply.chars": len(step.text or ""),
-                       "finish.reason": (step.finish_reason or "unknown")})
-                self._stream_response(_t("palette.unusable"))
-            return {"ok": False, "reason": "empty_reply"}
-
-        self._progress.set_phase(_t("progress.applying"))
-
-        def _apply():
-            if self.append_mode:
-                # L'original est conservé : le résultat s'ajoute après le
-                # dernier paragraphe traité, encadré par des marqueurs.
-                body_text = "\n".join(rewritten)
-                replace_paragraphs(ctx, {
-                    "start": last, "end": last,
-                    "text": "\n".join([originals[last - 1],
-                                       "---début-du-texte-réécrit---",
-                                       body_text,
-                                       "---fin-du-texte-réécrit---"])})
-            else:
-                replace_paragraphs(ctx, {"start": first, "end": last,
-                                         "text": "\n".join(rewritten)})
-            ctx.undo_end()
-
-        # `post` et non `call` : on n'a pas besoin du résultat, et attendre
-        # exposerait au délai d'AsyncCallback décrit plus haut.
-        self.dispatcher.post(_apply)
+    def _report_rewrite_failure(self, result):
+        """Dit pourquoi le document n'a pas été réécrit."""
+        if result.error != "empty_response":
+            message = error_message(result.error)
+            self._stream_response("⚠ " + message)
+            return {"ok": False, "reason": result.error, "bilan": message}
+        # Dire CE QUI s'est passé : « inexploitable » n'oriente vers aucune
+        # action. Si le modèle a consommé son budget en raisonnement sans
+        # rien répondre — et que la reprise élargie du client n'a pas suffi —
+        # le remède est un autre modèle, pas un autre prompt.
+        step = result.step
+        if step.starved_by_reasoning:
+            self.journal_line(
+                _t("palette.journal_budget_starved"),
+                step=telemetry_steps.REASONING_STARVED,
+                **{"reasoning.chars": int(step.reasoning_chars),
+                   "finish.reason": "length"})
+            self._stream_response(_t("palette.budget_starved"))
+            return {"ok": False, "reason": "reasoning_starved",
+                    "bilan": _t("palette.budget_starved")}
         self.journal_line(
-            _t("palette.journal_written", before=len(body), after=len(rewritten)),
-            step=telemetry_steps.DOCUMENT_DONE,
-            **{"body.paragraphs": len(body),
-               "result.paragraphs": len(rewritten),
-               "headings.kept": len(headings),
-               "append.mode": bool(self.append_mode)})
-        kept = _t("palette.title_kept") if headings else ""
-        how = (_t("palette.how_appended") if self.append_mode
-               else _t("palette.how_rewritten"))
-        summary = _t("palette.document_summary", how=how,
-                     before=len(body), after=len(rewritten), kept=kept)
-        self._stream_response("\n" + summary)
-        self.conversation.append("user", instruction, ctx.app)
-        self.conversation.append("assistant", summary, ctx.app)
-        return {"ok": True}
+            _t("palette.journal_unusable"),
+            step=telemetry_steps.DOCUMENT_EMPTY,
+            **{"reply.chars": len(step.text or ""),
+               "finish.reason": (step.finish_reason or "unknown")})
+        self._stream_response(_t("palette.unusable"))
+        return {"ok": False, "reason": "empty_reply", "bilan": _t("palette.unusable")}
 
-    def _prepare_agentic_run(self, preset, prompt_text, ctx):
-        """Résout prompt, contexte supplémentaire et destination de la sortie."""
-        extra = ""
-        user_prompt = prompt_text
-        sink = None
-        if preset is not None:
-            if preset.build_extra:
-                extra = preset.build_extra(ctx, self.shell, prompt_text)
-            if preset.prompt_template:
-                user_prompt = preset.prompt_template(prompt_text)
-            if preset.sink_spec == "auto_edit":
-                # Lecture du document → thread principal obligatoire.
-                selection = self.dispatcher.call(
-                    lambda: _selection_string(ctx), timeout=10)
-                if selection.strip():
-                    sink = self._document_sink(ctx)
-        if sink is None:
-            sink = PaletteSink(on_delta=self._stream_response)
-        return extra, user_prompt, sink
+    def _report_stop(self, observer=None):
+        """Un arrêt voulu, rendu de la même façon sur chaque chemin de run.
 
-    def _finish_run(self):
-        """Statut de fin : arrêté, ou terminé avec le champ de prompt vidé."""
+        Le journal d'un run agentique appartient à son observer : passer par
+        lui évite d'écraser les lignes d'outils déjà affichées.
+        """
+        if observer is None:
+            self.journal_line(_stop_line())
+        else:
+            observer.on_stop()
+        # La ligne d'arrêt ne s'accroche pas au texte déjà streamé.
+        self._stream_response(("\n" if self._line_is_open() else "") + _stop_line())
+
+    def _line_is_open(self):
+        """La dernière ligne de l'échange en cours porte déjà du texte."""
+        line = self._current_exchange[-1] if self._current_exchange else ""
+        return bool(line) and not line.endswith(("\n", _t("palette.assistant_prefix")))
+
+    def _finish_run(self, summary):
+        """Bilan de fin : arrêté, ou l'issue du run avec le champ de prompt vidé."""
         # Un run touche presque toujours au document : l'analyse précédente
-        # décrit alors un état révolu. La suivante sera relancée à la prochaine
-        # visite de l'onglet, plutôt que d'afficher un constat périmé.
+        # décrit alors un état révolu. La suivante part dès la fin du run si
+        # l'onglet est affiché, sinon à sa prochaine visite.
         self.invalidate_analysis()
         if self._cancelled():
-            self.set_status(_t("run.stopped"), tone="neutral")
+            self._show_bilan(_t("run.stopped"), "neutral")
             return
         self.dispatcher.post(
             lambda: setattr(self._models["prompt"], "Text", ""))
-        self.set_status(_t("palette.done"), tone="success")
+        label, tone = _bilan_line(summary)
+        self._show_bilan(label, tone, summary.get("bilan", "").strip())
+
+    def _settle_after_run(self):
+        """Thread principal, run libéré : la pompe s'éteint, et l'onglet
+        Suggestions affiché relance l'analyse du document que le run a modifié."""
+        self.dispatcher.stop_pump()
+        self._refresh_if_shown()
 
     def _set_input_enabled(self, enabled):
         """Grise le champ de saisie et les chips pendant un run.
@@ -2141,12 +2424,24 @@ class AssistantPalette:
                 progress = self._progress
                 if progress is None:
                     return
-                self.set_reasoning(progress.tooltip)
-                self.set_status(progress.render(), tone="neutral")
+                self._post_pulse_frame(progress, stop)
 
         thread = threading.Thread(target=_tick, daemon=True, name="mirai-pulse")
         self._pulse = (thread, stop)
         thread.start()
+
+    def _post_pulse_frame(self, progress, stop):
+        """Une image de la jauge, appliquée sur le thread principal. Une image
+        publiée juste avant l'arrêt de sa jauge y arrive après l'état final :
+        elle est alors écartée."""
+        tooltip, line = progress.tooltip, progress.render()
+
+        def _apply():
+            if stop.is_set():
+                return
+            self.set_reasoning(tooltip)
+            self.set_status(line, tone="neutral")
+        self.dispatcher.post(_apply)
 
     def _close_reasoning(self):
         """Fin de run : on quitte le panneau et le « ⓘ » s'efface.

@@ -25,6 +25,7 @@ import dataclasses
 import json
 
 from ..i18n import t as _t
+from .llm_client import TOOLS_REJECTED
 from .tool_calls import ToolResult
 
 CONFIG_KEY = "assistant_model_capabilities"
@@ -74,6 +75,7 @@ class Capabilities:
     calls_tool: bool = False
     chains: bool = False
     detail: str = ""
+    error: str = ""      # sonde interrompue : "http_401", "network_error"…
 
     @property
     def supports_agentic(self) -> bool:
@@ -121,7 +123,12 @@ def load_cached(shell, endpoint, model):
 
 
 def save_cached(shell, endpoint, model, capabilities):
-    """Mémorise le verdict sans écraser ceux des autres modèles."""
+    """Mémorise le verdict sans écraser ceux des autres modèles.
+
+    Une sonde interrompue n'est pas un verdict : elle n'est jamais mémorisée.
+    """
+    if capabilities.error:
+        return
     try:
         raw = shell.get_config(CONFIG_KEY, "") or ""
         store = json.loads(raw) if raw else {}
@@ -140,6 +147,20 @@ def _tool_names(step):
     return [call.name for call in (getattr(step, "tool_calls", None) or [])]
 
 
+def _empty(step):
+    """Flux terminé sans texte ni appel d'outil : rien n'a été mesuré."""
+    return not (step.text or "").strip() and not step.tool_calls
+
+
+def _interrupted(capabilities, step, refused_key):
+    """Le verdict porte l'erreur, et n'en est pas un. Son détail est la seule
+    phrase du message d'échec : il est traduit."""
+    capabilities.error = step.error or "empty_response"
+    capabilities.detail = (_t(refused_key, error=step.error) if step.error
+                           else _t("caps.empty", error=capabilities.error))
+    return capabilities
+
+
 def probe(llm, model=""):
     """Mesure les trois capacités. Deux allers-retours au plus.
 
@@ -151,9 +172,13 @@ def probe(llm, model=""):
                 {"role": "user", "content": PROBE_TASK}]
 
     first = llm.step(messages, tools=PROBE_TOOLS)
-    if first.error:
-        capabilities.detail = f"appel refusé ({first.error})"
+    if first.error in TOOLS_REJECTED and llm.configured_mode == "native":
+        # Mode natif imposé : le rejet du corps portant `tools` EST la mesure
+        # de la capacité A. En auto, le client a déjà basculé en JSON.
+        capabilities.detail = f"outils refusés ({first.error})"
         return capabilities
+    if first.error or _empty(first):
+        return _interrupted(capabilities, first, "caps.refused")
 
     capabilities.accepts_tools = True
     names = _tool_names(first)
@@ -172,9 +197,8 @@ def probe(llm, model=""):
         first, [ToolResult(call_id=getattr(c, "id", ""), ok=True, content=PROBE_MAP)
                 for c in (first.tool_calls or [])])
     second = llm.step(messages + exchange, tools=PROBE_TOOLS)
-    if second.error:
-        capabilities.detail = f"second tour refusé ({second.error})"
-        return capabilities
+    if second.error or _empty(second):
+        return _interrupted(capabilities, second, "caps.second_turn_refused")
 
     second_names = _tool_names(second)
     capabilities.chains = WRITE_TOOL in second_names

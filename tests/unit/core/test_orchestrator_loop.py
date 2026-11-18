@@ -2,14 +2,18 @@
 conversation, observer (journal d'actions), erreurs HTTP."""
 
 import tempfile
+import threading
+
+import pytest
 
 from src.mirai.core.conversation import ConversationStore
-from src.mirai.core.llm_client import StepResult
+from src.mirai.core.llm_client import LLMClient, StepResult
 from src.mirai.core.orchestrator import Orchestrator, RunObserver
 from src.mirai.core.registry import ToolRegistry
 from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
-from tests.stubs.fake_shell import FakeShell
+from src.mirai.i18n import t as _t
+from tests.stubs.fake_shell import FakeShell, StoppedSSEResponse, text_chunks
 
 
 class FakeLLM:
@@ -79,7 +83,17 @@ def _registry():
         handler=lambda ctx, args: ToolResult(call_id="", ok=True, content="vu"),
         apps=("writer",),
     ))
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=lambda ctx, args: ToolResult(call_id="", ok=True, content="écrit"),
+        apps=("writer",), mutates=True,
+    ))
     return registry
+
+
+def _calls(name, turn=0):
+    return StepResult(tool_calls=[ToolCall(id=f"c{turn}", name=name, arguments={})])
 
 
 def test_text_only_run():
@@ -140,8 +154,81 @@ def test_max_iterations_terminates():
                                 observer=observer, max_iterations=3)
     result = orchestrator.run_agentic("boucle", PaletteSink())
     assert not result.ok and result.reason == "max_iterations"
+    assert result.text == _t("run.not_converged")
+    assert result.iterations == 3
     assert ("error", "max_iterations") in observer.events
     assert ctx.undo_ended == 1
+
+
+def test_turn_limit_after_a_write_says_the_changes_were_applied():
+    """Le plafond tombe après une écriture : le document a changé. Annoncer un
+    échec pousserait à relancer, donc à réécrire le document."""
+    observer = _RecordingObserver()
+    llm = FakeLLM([_calls("writer_write", 0), _calls("writer_probe", 1),
+                   _calls("writer_probe", 2)])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()),
+                                observer=observer, max_iterations=3)
+    result = orchestrator.run_agentic("écris puis relis", PaletteSink())
+    assert not result.ok
+    assert result.reason == "max_iterations_after_changes"
+    assert result.text == _t("run.applied_not_concluded")
+    assert result.iterations == 3
+    assert ("error", "max_iterations_after_changes") in observer.events
+
+
+@pytest.mark.parametrize("steps, write_ok, changed", [
+    ([StepResult(text="Réponse.")], True, False),
+    ([_calls("writer_write"), StepResult(text="Fait.")], True, True),
+    ([_calls("writer_write"), StepResult(text="Formule refusée.")], False, False),
+    ([_calls("writer_write"), StepResult(error="network_error")], True, True),
+], ids=["answered", "written", "write_refused", "outage_after_a_write"])
+def test_a_run_says_whether_it_changed_the_document(steps, write_ok, changed):
+    """Seul un outil d'écriture qui aboutit modifie le document, et une panne
+    qui suit ne défait pas ce qu'il a écrit."""
+    registry = _registry()
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=lambda ctx, args: ToolResult(call_id="", ok=write_ok, content="",
+                                             error="" if write_ok else "refusé"),
+        apps=("writer",), mutates=True,
+    ))
+    orchestrator = Orchestrator(FakeLLM(steps), registry, _Ctx(FakeShell()))
+    assert orchestrator.run_agentic("demande", PaletteSink()).changed is changed
+
+
+def test_stop_during_the_tools_of_the_last_turn_ends_the_run_as_stopped():
+    """« Arrêter » pendant les outils du dernier tour : un arrêt voulu, pas un
+    plafond de tours atteint."""
+    cancel = threading.Event()
+
+    def _write_then_stop(ctx, args):
+        cancel.set()
+        return ToolResult(call_id="", ok=True, content="écrit")
+
+    registry = _registry()
+    registry.register(ToolSpec(
+        name="writer_write", description="écriture",
+        parameters={"type": "object", "properties": {}},
+        handler=_write_then_stop, apps=("writer",), mutates=True,
+    ))
+    observer = _RecordingObserver()
+    orchestrator = Orchestrator(FakeLLM([_calls("writer_write")]), registry,
+                                _Ctx(FakeShell()), observer=observer,
+                                max_iterations=1, cancel_event=cancel)
+    result = orchestrator.run_agentic("écris", PaletteSink())
+    assert not result.ok and result.reason == "cancelled"
+    assert result.text == _t("run.stopped")
+    assert not [e for e in observer.events if e[0] == "error"]
+
+
+def test_a_write_concluded_on_the_last_turn_stays_a_success():
+    llm = FakeLLM([_calls("writer_write"), StepResult(text="Fait.")])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()),
+                                max_iterations=2)
+    result = orchestrator.run_agentic("écris", PaletteSink())
+    assert result.ok and result.reason == ""
+    assert result.text == "Fait." and result.iterations == 2
 
 
 def test_step_error_stops_run_with_message():
@@ -156,12 +243,35 @@ def test_step_error_stops_run_with_message():
     assert ("error", "http_429") in observer.events
 
 
+def test_stop_during_the_stream_ends_the_run_as_stopped():
+    """Un flux coupé par « Arrêter » n'est pas une panne réseau."""
+    cancel = threading.Event()
+    shell = FakeShell(responses=[
+        StoppedSSEResponse(text_chunks("Une ", "réponse ", "coupée."), cancel)])
+    observer = _RecordingObserver()
+    orchestrator = Orchestrator(LLMClient(shell), _registry(), _Ctx(shell),
+                                observer=observer, cancel_event=cancel)
+    result = orchestrator.run_agentic("x", PaletteSink())
+    assert not result.ok and result.reason == "cancelled"
+    assert result.text == _t("run.stopped")
+    assert not [e for e in observer.events if e[0] == "error"]
+
+
+def test_network_failure_is_reported_as_unreachable():
+    shell = FakeShell(responses=[OSError("connexion refusée")])
+    orchestrator = Orchestrator(LLMClient(shell), _registry(), _Ctx(shell),
+                                cancel_event=threading.Event())
+    result = orchestrator.run_agentic("x", PaletteSink())
+    assert not result.ok and result.reason == "network_error"
+    assert result.text == _t("run.err_network")
+
+
 def test_conversation_recorded_and_injected():
     shell = FakeShell()
     ctx = _Ctx(shell)
     store = ConversationStore(tempfile.mkdtemp())
-    store.append("user", "question précédente")
-    store.append("assistant", "réponse précédente")
+    store.append("user", "question précédente", "writer")
+    store.append("assistant", "réponse précédente", "writer")
     llm = FakeLLM([StepResult(text="Nouvelle réponse.")])
     orchestrator = Orchestrator(llm, _registry(), ctx, conversation=store)
     orchestrator.run_agentic("nouvelle question", PaletteSink())
@@ -173,6 +283,28 @@ def test_conversation_recorded_and_injected():
     entries = store.load()
     assert entries[-1]["text"] == "Nouvelle réponse."
     assert entries[-2]["text"] == "nouvelle question"
+
+
+def _run_and_read_context(store, app, prompt, answer):
+    """Fait un run complet dans `app` ; rend tout le texte envoyé au modèle."""
+    llm = FakeLLM([StepResult(text=answer)])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell(), app=app),
+                                conversation=store)
+    orchestrator.run_agentic(prompt, PaletteSink())
+    return "\n".join(m["content"] for m in llm.seen_messages[0])
+
+
+@pytest.mark.parametrize("app, other", [("writer", "calc"), ("calc", "writer")])
+def test_conversation_context_stays_within_its_application(app, other):
+    store = ConversationStore(tempfile.mkdtemp())
+    _run_and_read_context(store, other, f"question {other}", f"réponse {other}")
+    _run_and_read_context(store, app, f"question {app}", f"réponse {app}")
+
+    sent = _run_and_read_context(store, app, "suite", "fin")
+
+    assert f"question {app}" in sent and f"réponse {app}" in sent
+    assert f"question {other}" not in sent
+    assert f"réponse {other}" not in sent
 
 
 def test_conversation_not_polluted_by_failed_run():
@@ -241,7 +373,7 @@ def test_empty_final_after_tool_stays_a_success():
     shell = FakeShell()
     ctx = _Ctx(shell)
     llm = FakeLLM([
-        StepResult(tool_calls=[ToolCall(id="c1", name="writer_probe", arguments={})]),
+        StepResult(tool_calls=[ToolCall(id="c1", name="writer_write", arguments={})]),
         StepResult(text=""),
     ])
     orchestrator = Orchestrator(llm, _registry(), ctx)
@@ -249,6 +381,14 @@ def test_empty_final_after_tool_stays_a_success():
     assert result.ok
     assert result.iterations == 2
     assert result.reason == ""
+
+
+def test_empty_final_after_reads_only_is_a_failure():
+    """Lire n'a rien changé : sans texte, le run n'a rien produit du tout."""
+    llm = FakeLLM([_calls("writer_probe"), StepResult(text="")])
+    orchestrator = Orchestrator(llm, _registry(), _Ctx(FakeShell()))
+    result = orchestrator.run_agentic("résume le document", PaletteSink())
+    assert not result.ok and result.reason == "empty_response"
 
 
 def test_undo_is_closed_even_on_sterile_run():

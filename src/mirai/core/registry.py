@@ -14,6 +14,14 @@ DEFAULT_RESULT_MAX_CHARS = 6000
 UNDO_LABEL = "MIrAI — Assistant"
 
 
+def result_max_chars(ctx):
+    """Plafond appliqué par le registre au contenu de chaque résultat d'outil."""
+    try:
+        return int(ctx.shell.get_config("tool_result_max_chars", DEFAULT_RESULT_MAX_CHARS))
+    except Exception:
+        return DEFAULT_RESULT_MAX_CHARS
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools = {}
@@ -90,10 +98,7 @@ class ToolRegistry:
             )
             error_kind = "exception"
 
-        try:
-            max_chars = int(ctx.shell.get_config("tool_result_max_chars", DEFAULT_RESULT_MAX_CHARS))
-        except Exception:
-            max_chars = DEFAULT_RESULT_MAX_CHARS
+        max_chars = result_max_chars(ctx)
         if result.content and len(result.content) > max_chars:
             result.content = result.content[:max_chars] + "\n[... tronqué ...]"
 

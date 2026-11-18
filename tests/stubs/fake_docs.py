@@ -5,6 +5,8 @@ import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from tests.stubs.thread_guard import UnoStruct
+
 
 class FakeUndoManager:
     def __init__(self):
@@ -39,13 +41,76 @@ class FakeCursor:
     def getString(self):
         return self.selected_text
 
+    def setString(self, value):
+        self.selected_text = value
+        self._doc.replaced = value
+
+    def getText(self):
+        return self._doc.text_obj
+
+
+class _FakeInlineCursor:
+    """Curseur posé dans le texte de la sélection : il se déplace caractère
+    par caractère et remplace ce qu'il couvre. `point` bouge, `mark` reste,
+    sauf sans `expand`."""
+
+    def __init__(self, rng):
+        self._range = rng
+        self.mark = self.point = 0
+
+    @property
+    def start(self):
+        return min(self.mark, self.point)
+
+    @property
+    def end(self):
+        return max(self.mark, self.point)
+
+    def goRight(self, count, expand):
+        return self._go(count, expand)
+
+    def goLeft(self, count, expand):
+        return self._go(-count, expand)
+
+    def _go(self, count, expand):
+        self.point = min(max(self.point + count, 0), len(self._range._text))
+        if not expand:
+            self.mark = self.point
+        return True
+
+    def collapseToStart(self):
+        self.mark = self.point = self.start
+
+    def collapseToEnd(self):
+        self.mark = self.point = self.end
+
+    def getString(self):
+        return self._range._text[self.start:self.end]
+
+    def createEnumeration(self):
+        """Du texte seul : aucun objet ancré à rendre."""
+        return _FakeParagraphEnum([])
+
+    def setString(self, value):
+        text, start = self._range._text, self.start
+        self._range.setString(text[:start] + value + text[self.end:])
+        self.mark, self.point = start, start + len(value)
+
 
 class FakeWriterText:
     def __init__(self, doc):
         self._doc = doc
 
     def createTextCursorByRange(self, rng):
+        if isinstance(rng, SimpleNamespace) and hasattr(rng, "inline"):
+            return _FakeInlineCursor(rng.inline)
         return FakeCursor(self._doc)
+
+    def compareRegionEnds(self, first, second):
+        """1 si `first` finit avant `second`, 0 au même endroit, -1 après."""
+        ends = [r.end if isinstance(r, _FakeInlineCursor) else len(r._text)
+                for r in (first, second)]
+        return (ends[0] < ends[1]) - (ends[0] > ends[1])
 
     def createTextCursor(self):
         return FakeCursor(self._doc)
@@ -97,6 +162,9 @@ class FakeTextRange:
     def getText(self):
         return self._doc.text_obj
 
+    def getStart(self):
+        return SimpleNamespace(inline=self)
+
 
 class FakeWriterDoc:
     """Document Writer factice : model + controller + sélection."""
@@ -119,7 +187,7 @@ class FakeWriterDoc:
 
         controller = SimpleNamespace()
         controller.getSelection = lambda: SimpleNamespace(
-            getByIndex=lambda i: self.selection_range)
+            getCount=lambda: 1, getByIndex=lambda i: self.selection_range)
         controller.getViewCursor = lambda: MagicMock()
         controller.select = _select
         self.controller = controller
@@ -183,6 +251,12 @@ class FakeCell:
     def getFormula(self):
         return self._sheet.formulas.get((self._col, self._row), "")
 
+    def getError(self):
+        return self._sheet.formula_errors.get(self.getFormula(), 0)
+
+    def getCellAddress(self):
+        return UnoStruct(Sheet=0, Column=self._col, Row=self._row)
+
     def setPropertyValue(self, name, value):
         self.properties[name] = value
 
@@ -229,8 +303,8 @@ def _parse_ref(ref):
         end_col, end_row = col_index(match.group(3)), int(match.group(4)) - 1
     else:
         end_col, end_row = start_col, start_row
-    return SimpleNamespace(StartColumn=start_col, StartRow=start_row,
-                           EndColumn=end_col, EndRow=end_row)
+    return UnoStruct(StartColumn=start_col, StartRow=start_row,
+                     EndColumn=end_col, EndRow=end_row)
 
 
 class _FakeRange:
@@ -249,47 +323,111 @@ class _FakeRange:
         self._sheet.merged.append((self._area, value))
 
 
+class _FakeSheetCursor:
+    """Curseur de feuille. Seule la fin de la zone utilisée est simulée, telle
+    que Calc la donne pour une feuille sans mise en forme : la dernière colonne
+    et la dernière ligne qui portent un contenu, A1 sur une feuille vide."""
+
+    def __init__(self, sheet):
+        self._sheet = sheet
+        self._address = UnoStruct(StartColumn=0, StartRow=0, EndColumn=0, EndRow=0)
+
+    def gotoEndOfUsedArea(self, expand):
+        filled = [key for key, value in self._sheet.grid.items() if value]
+        filled += list(self._sheet.formulas)
+        col = max((c for c, _ in filled), default=0)
+        row = max((r for _, r in filled), default=0)
+        self._address = UnoStruct(StartColumn=col, StartRow=row, EndColumn=col, EndRow=row)
+
+    def getRangeAddress(self):
+        return self._address
+
+
 class FakeCalcSheet:
     def __init__(self, grid=None, num_cols=50, num_rows=200):
         self.grid = dict(grid or {})          # (col, row) → str
         self.formulas = {}
         self.formula_results = {}             # formule → valeur affichée simulée
+        self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
+        self.protected = False
+        self.cells_asked = 0                  # cellules demandées, lues ou écrites
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
 
     def getCellByPosition(self, col, row):
+        self.cells_asked += 1
         return FakeCell(self, col, row)
+
+    def isProtected(self):
+        return self.protected
 
     def getCellRangeByName(self, ref):
         return _FakeRange(self, _parse_ref(ref))
 
     def getCellRangeByPosition(self, start_col, start_row, end_col, end_row):
-        area = SimpleNamespace(StartColumn=start_col, StartRow=start_row,
-                               EndColumn=end_col, EndRow=end_row)
+        area = UnoStruct(StartColumn=start_col, StartRow=start_row,
+                         EndColumn=end_col, EndRow=end_row)
         return _FakeRange(self, area)
 
     def getColumns(self):
         return self._columns
 
+    def createCursor(self):
+        return _FakeSheetCursor(self)
+
     def getRows(self):
         return self._rows
 
 
+_REL_REF = re.compile(r"(?<![A-Za-z_.$])(\$?[A-Z]{1,3})(\$?)(\d+)(?![\w(])")
+_STRING = re.compile(r'("(?:[^"]|"")*")')
+
+
+class _FakeFormulaParser:
+    """Comme Calc à la copie : décale les lignes relatives, laisse les lignes
+    ancrées par $, les littéraux "…" et les noms de fonction (LOG10) intacts.
+    Comme Calc, printFormula rend la formule sans le « = » initial."""
+
+    def parseFormula(self, formula, address):
+        return formula.lstrip("="), address.Row
+
+    def printFormula(self, tokens, address):
+        text, src_row = tokens
+        delta = address.Row - src_row
+
+        def shift(match):
+            if match.group(2) == "$":
+                return match.group(0)
+            return f"{match.group(1)}{int(match.group(3)) + delta}"
+
+        return "".join(part if part.startswith('"') else _REL_REF.sub(shift, part)
+                       for part in _STRING.split(text))
+
+
 class FakeCalcDoc:
-    """Document Calc factice : ActiveSheet + sélection rectangulaire."""
+    """Document Calc factice : ActiveSheet + sélection d'une plage, ou de
+    plusieurs (Ctrl) écrites « A1:A5,C2:D4 »."""
 
     def __init__(self, sheet, selection_ref="A1:A1"):
         self.sheet = sheet
         self.undo = FakeUndoManager()
-        area = _parse_ref(selection_ref)
+        areas = [_parse_ref(ref) for ref in selection_ref.split(",")]
         controller = SimpleNamespace()
         controller.ActiveSheet = sheet
-        controller.getSelection = lambda: SimpleNamespace(
-            getRangeAddress=lambda: area)
+        if len(areas) == 1:
+            controller.getSelection = lambda: SimpleNamespace(
+                getRangeAddress=lambda: areas[0])
+        else:
+            controller.getSelection = lambda: SimpleNamespace(
+                getRangeAddresses=lambda: areas)
         self.controller = controller
         self.CurrentController = controller
         self.Sheets = MagicMock()
 
     def getUndoManager(self):
         return self.undo
+
+    def createInstance(self, name):
+        assert name == "com.sun.star.sheet.FormulaParser", name
+        return _FakeFormulaParser()

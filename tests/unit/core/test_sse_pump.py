@@ -41,6 +41,27 @@ def test_invalid_json_lines_skipped():
     assert outcome.ok and len(seen) == 1
 
 
+def test_a_stream_cut_before_its_end_is_a_network_error():
+    """La connexion tombe pendant la réponse : la lecture s'arrête sans erreur,
+    mais le flux n'a livré ni `[DONE]` ni `finish_reason`, il a été coupé."""
+    lines = [b'data: {"choices":[{"delta":{"reasoning_content":"Je compare."}}]}',
+             b'data: {"choices":[{"delta":{"content":"Le texte"}}]}']
+    shell = FakeShell(responses=[FakeSSEResponse(None, raw_lines=lines)])
+    seen = []
+    outcome = sse_pump.run_stream(shell, object(), seen.append)
+    assert len(seen) == 2
+    assert not outcome.ok
+    assert isinstance(outcome.error, sse_pump.StreamNetworkError)
+    assert shell.llm_errors and shell.llm_errors[0][0] == 0
+
+
+def test_a_finished_reply_is_complete_without_done():
+    lines = [b'data: {"choices":[{"delta":{"content":"ok"}}]}',
+             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}']
+    shell = FakeShell(responses=[FakeSSEResponse(None, raw_lines=lines)])
+    assert sse_pump.run_stream(shell, object(), lambda e: None).ok
+
+
 def test_http_error_reported_to_shell():
     shell = FakeShell(responses=[_http_error(429)])
     outcome = sse_pump.run_stream(shell, object(), lambda e: None)
@@ -141,6 +162,22 @@ def test_cancel_event_stops_the_stream():
     assert outcome.cancelled is True
     assert not outcome.ok
     assert len(seen) == 1, "aucun chunk ne doit être traité après l'annulation"
+
+
+def test_a_stop_during_an_http_error_reply_is_a_stop():
+    """« Arrêter » pendant l'attente, puis une erreur HTTP : c'est un arrêt,
+    et l'erreur du relais est quand même signalée à la coquille."""
+    shell = FakeShell(responses=[_http_error(429)])
+    cancel = threading.Event()
+
+    def _request():
+        cancel.set()          # le clic arrive pendant l'attente du relais
+        return object()
+
+    outcome = sse_pump.run_stream(shell, _request, lambda e: None, cancel_event=cancel)
+    assert outcome.cancelled is True
+    assert not outcome.ok
+    assert shell.llm_errors and shell.llm_errors[0][0] == 429
 
 
 def test_cancel_before_start_does_no_network():

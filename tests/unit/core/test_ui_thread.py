@@ -7,6 +7,7 @@ faux qui garde les tâches en file et ne les exécute que lorsqu'on le lui deman
 """
 
 import threading
+import time
 
 import pytest
 
@@ -17,37 +18,33 @@ from src.mirai.core.ui_thread import (
     MainThreadDispatcher,
     is_main_thread,
 )
+from tests.stubs.fake_async_callback import FakeAsyncCallback, FakeUnoContext
 
 
-class FakeAsyncCallback:
-    """Imite com.sun.star.awt.AsyncCallback : accumule, exécute sur demande."""
-
-    def __init__(self):
-        self.queued = []
+class RefusingAsyncCallback(FakeAsyncCallback):
+    """AsyncCallback d'un LibreOffice dégradé : chaque tâche est refusée."""
 
     def addCallback(self, task, _data):
-        self.queued.append(task)
-
-    def drain(self):
-        """Joue les tâches en attente — ce que ferait la boucle d'événements."""
-        pending, self.queued = self.queued, []
-        for task in pending:
-            task.run()
+        raise RuntimeError("tâche refusée par la boucle d'événements")
 
 
-class FakeUnoContext:
-    def __init__(self, callback=None, fail=False):
-        self._callback = callback
-        self._fail = fail
+class _DispatcherStoppedUnderAWorker(MainThreadDispatcher):
+    """Dispatcher qui laisse un worker poster à l'instant où la pompe s'éteint.
 
-    def getServiceManager(self):
-        return self
+    Le worker passe juste avant l'écriture de `_pumping = False` et voit donc
+    la pompe encore allumée : une fenêtre trop étroite pour être atteinte de
+    façon fiable par le minutage.
+    """
 
-    def createInstanceWithContext(self, name, _ctx):
-        assert name == "com.sun.star.awt.AsyncCallback"
-        if self._fail:
-            raise RuntimeError("service indisponible")
-        return self._callback
+    worker_action = None
+
+    def __setattr__(self, name, value):
+        if name == "_pumping" and value is False and self.worker_action is not None:
+            action, self.worker_action = self.worker_action, None
+            thread = threading.Thread(target=action)
+            thread.start()
+            thread.join(timeout=5)
+        super().__setattr__(name, value)
 
 
 def _dispatcher(fail=False):
@@ -80,6 +77,26 @@ def test_post_from_a_worker_waits_for_the_pump():
 
     assert seen == [], "la tâche ne doit pas s'exécuter dans le worker"
     dispatcher.drain()
+    assert seen == ["fait"]
+
+
+def test_task_posted_while_the_pump_stops_still_runs():
+    """Une tâche postée pendant l'extinction de la pompe ne reste pas en file.
+
+    Entrelacement reproduit : la pompe vient de constater sa file vide, un
+    worker poste en la voyant encore allumée, puis elle s'éteint.
+    """
+    callback = FakeAsyncCallback()
+    dispatcher = _DispatcherStoppedUnderAWorker(FakeUnoContext(callback))
+    seen = []
+    dispatcher.worker_action = lambda: dispatcher.post(lambda: seen.append("fait"))
+
+    dispatcher.start_pump()
+    for _ in range(10):
+        if not callback.queued:
+            break
+        callback.drain()
+
     assert seen == ["fait"]
 
 
@@ -127,7 +144,30 @@ def test_call_rapporte_le_resultat():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _drain_until(dispatcher, thread)
+    _pump_until(dispatcher.drain, thread)
+    thread.join(timeout=5)
+
+    assert result["value"] == 42
+
+
+def test_isolated_call_from_a_worker_completes_without_other_traffic():
+    """Un call() seul, sans aucun post() autour, doit aboutir.
+
+    La boucle d'événements ne joue que ce qu'AsyncCallback lui a confié : rien
+    d'autre ne vide la file du dispatcher à sa place.
+    """
+    dispatcher, callback = _dispatcher()
+    result = {}
+
+    def worker():
+        try:
+            result["value"] = dispatcher.call(lambda: 6 * 7, timeout=2)
+        except DispatcherTimeout as exc:
+            result["value"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    _pump_until(callback.drain, thread)
     thread.join(timeout=5)
 
     assert result["value"] == 42
@@ -145,10 +185,37 @@ def test_call_propage_lexception_de_fn():
 
     thread = threading.Thread(target=worker)
     thread.start()
-    _drain_until(dispatcher, thread)
+    _pump_until(dispatcher.drain, thread)
     thread.join(timeout=5)
 
     assert isinstance(captured.get("exc"), KeyError)
+
+
+def test_call_relays_an_exception_outside_the_exception_family():
+    """fn lève une BaseException (SystemExit, KeyboardInterrupt) : l'appelant
+    la reçoit au lieu d'attendre sans fin un résultat qui ne viendra pas."""
+    dispatcher, _callback = _dispatcher()
+    captured = {}
+
+    class Aborted(BaseException):
+        pass
+
+    def abort():
+        raise Aborted()
+
+    def worker():
+        try:
+            dispatcher.call(abort, timeout=5)
+        except Aborted as exc:
+            captured["exc"] = exc
+
+    # Démon : si l'exception se perd, le worker reste bloqué sans retenir pytest.
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    _pump_until(dispatcher.drain, thread)
+    thread.join(timeout=10)
+
+    assert isinstance(captured.get("exc"), Aborted)
 
 
 def test_call_leve_timeout_si_personne_ne_draine():
@@ -173,6 +240,82 @@ def test_call_leve_timeout_si_personne_ne_draine():
     assert isinstance(captured.get("exc"), DispatcherTimeout)
 
 
+def test_a_call_given_up_on_is_never_run_later():
+    """Le worker a renoncé sur le délai et annoncé l'échec : la tâche restée
+    en file ne s'exécute plus quand la boucle d'événements la rattrape."""
+    dispatcher, callback = _dispatcher()
+    seen = []
+    captured = {}
+
+    def worker():
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=0.05)
+        except DispatcherTimeout as exc:
+            captured["exc"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=5)
+    callback.drain()
+    dispatcher.drain()
+
+    assert isinstance(captured.get("exc"), DispatcherTimeout)
+    assert seen == []
+
+
+def test_a_call_started_just_before_its_deadline_reports_its_result():
+    """La tâche démarre avant l'expiration du délai et finit après : le worker
+    reçoit son résultat, et non un échec suivi d'une modification."""
+    dispatcher, callback = _dispatcher()
+    result = {}
+
+    def slow():
+        threading.Event().wait(1.5)
+        return 42
+
+    def worker():
+        try:
+            result["value"] = dispatcher.call(slow, timeout=1.0)
+        except DispatcherTimeout as exc:
+            result["value"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(300):
+        if callback.queued:
+            break
+        threading.Event().wait(0.005)
+    callback.drain()
+    thread.join(timeout=5)
+
+    assert result["value"] == 42
+
+
+def test_a_call_whose_pump_cannot_be_armed_fails_at_once():
+    """AsyncCallback refuse la tâche : l'échec est connu tout de suite, le
+    worker n'attend pas tout le délai, et la tâche ne s'exécute plus."""
+    dispatcher = MainThreadDispatcher(FakeUnoContext(RefusingAsyncCallback()))
+    seen = []
+    captured = {}
+
+    def worker():
+        started = time.monotonic()
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=5)
+        except DispatcherTimeout as exc:
+            captured["exc"] = exc
+        captured["elapsed"] = time.monotonic() - started
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=10)
+    dispatcher.drain()
+
+    assert isinstance(captured.get("exc"), DispatcherTimeout)
+    assert captured["elapsed"] < 1
+    assert seen == []
+
+
 def test_call_from_the_main_thread_runs_immediately():
     """Sur le thread principal, aucun détour : ni file, ni attente."""
     dispatcher, _callback = _dispatcher()
@@ -185,6 +328,33 @@ def test_call_leve_closed_apres_fermeture():
 
     with pytest.raises(DispatcherClosed):
         dispatcher.call(lambda: 1, timeout=1)
+
+
+def test_a_call_still_queued_when_the_palette_closes_never_runs():
+    """La palette se ferme pendant qu'une tâche du worker attend la boucle
+    d'événements : la tâche ne s'exécute plus, le worker reçoit DispatcherClosed."""
+    dispatcher, callback = _dispatcher()
+    seen = []
+    captured = {}
+
+    def worker():
+        try:
+            dispatcher.call(lambda: seen.append("écrit"), timeout=5)
+        except DispatcherClosed as exc:
+            captured["exc"] = exc
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    for _ in range(300):
+        if callback.queued:
+            break
+        threading.Event().wait(0.005)
+    dispatcher.close()
+    callback.drain()
+    thread.join(timeout=5)
+
+    assert isinstance(captured.get("exc"), DispatcherClosed)
+    assert seen == []
 
 
 def test_direct_dispatcher_est_synchrone():
@@ -219,11 +389,11 @@ def _raise_key_error():
     raise KeyError("absent")
 
 
-def _drain_until(dispatcher, thread, attempts=300):
-    """Joue le rôle de la boucle d'événements pendant que le worker attend."""
+def _pump_until(step, thread, attempts=300):
+    """Joue la boucle d'événements (`step`) pendant que le worker attend."""
     for _ in range(attempts):
-        dispatcher.drain()
+        step()
         if not thread.is_alive():
-            dispatcher.drain()
+            step()
             return
         threading.Event().wait(0.01)

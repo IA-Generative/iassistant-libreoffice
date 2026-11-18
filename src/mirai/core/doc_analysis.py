@@ -13,6 +13,7 @@ d'échec, l'appelant garde les siennes (cf. `AssistantPalette`).
 """
 
 from ..i18n import t as _t
+from .prompts import DOCUMENT_DATA_RULE
 
 MAX_CHARS = 6000          # au-delà, on tronque : une analyse structurelle n'a
                           # pas besoin du document entier, et le relais plafonne
@@ -31,7 +32,8 @@ SYSTEM_PROMPT = (
     "Règles absolues : une proposition par ligne, préfixée d'un tiret ; "
     f"{MAX_ITEMS} propositions au maximum ; chacune tient en une phrase et dit "
     "QUOI faire, pas ce qui est bien. N'écris rien d'autre : ni introduction, "
-    "ni conclusion, ni numérotation, ni texte réécrit."
+    "ni conclusion, ni numérotation, ni texte réécrit. "
+    + DOCUMENT_DATA_RULE
 )
 
 

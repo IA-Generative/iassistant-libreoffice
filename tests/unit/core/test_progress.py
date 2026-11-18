@@ -102,6 +102,19 @@ def test_render_marks_estimated_counts():
     assert "~" not in rendered
 
 
+def test_a_total_still_partly_estimated_stays_marked():
+    """Le relais a compté un premier appel, le suivant s'écrit encore : le
+    total reste une estimation tant que ce second appel n'est pas compté."""
+    progress = RunProgress()
+    progress.exact_tokens(3)
+    progress.on_text("x" * 8)
+    assert "~5 tk" in progress.render()
+
+    progress.exact_tokens(4)
+    assert progress.tokens == 7
+    assert progress.is_exact
+
+
 def test_render_omits_tokens_before_anything_arrives():
     progress = RunProgress()
     assert "tk" not in progress.render()

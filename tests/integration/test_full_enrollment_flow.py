@@ -18,41 +18,84 @@ All external HTTP calls are intercepted via MockHttpRouter.
 The PKCE callback server IS real (localhost socket started by _wait_for_auth_code).
 webbrowser.open is patched to auto-send the auth code to that server.
 """
+import socket
 import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
-from unittest.mock import patch
+import webbrowser
+from unittest.mock import MagicMock, patch
 
 from tests.integration.mock_http import MockHttpRouter
 from tests.stubs.uno_stubs import install, make_job, make_jwt, read_user_config, seed_user_config
 
 install()
 
+from src.mirai.i18n import t
 
 # Helpers
 
 def _pkce_auto_callback(auth_url: str, delay: float = 0.2):
-    """
-    Extract redirect_uri + state from auth_url, then send the auth callback
-    to the plugin's local HTTP server in a background thread.
-    """
-    parsed = urllib.parse.urlparse(auth_url)
-    params = urllib.parse.parse_qs(parsed.query)
-    redirect_uri = params.get("redirect_uri", ["http://localhost:19876/callback"])[0]
-    state = params.get("state", ["test-state"])[0]
-    callback_url = f"{redirect_uri}?code=FAKE_AUTH_CODE&state={urllib.parse.quote(state)}"
-
+    """Envoie le bon callback depuis un thread, une fois le flux en attente."""
     def _send():
         time.sleep(delay)
         try:
-            urllib.request.urlopen(callback_url, timeout=5)
-        except Exception:
-            pass  # plugin returns 200 OK; urllib may still raise due to response body
+            _send_callback(auth_url)
+        except OSError:
+            pass  # serveur déjà fermé : le flux a retenu un autre callback
 
     threading.Thread(target=_send, daemon=True).start()
+
+
+def _joining_new_threads(action):
+    """Lance `action`, puis attend les threads qu'elle a démarrés. Sans wizard,
+    le flux SSO enrôle le poste dans un thread de fond : il ne doit déborder ni
+    sur la suite du test ni sur le test suivant."""
+    before = set(threading.enumerate())
+    action()
+    for thread in set(threading.enumerate()) - before:
+        thread.join(5)
+
+
+_STATE_OF_THE_URL = object()
+
+
+def _send_callback(auth_url, state=_STATE_OF_THE_URL, **query):
+    """Envoie tout de suite le callback (par défaut le bon code) au serveur local
+    et rend le statut HTTP."""
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(auth_url).query)
+    query = query or {"code": "FAKE_AUTH_CODE"}
+    if state is _STATE_OF_THE_URL:
+        state = params["state"][0]
+    if state is not None:
+        query["state"] = state
+    url = f"{params['redirect_uri'][0]}?{urllib.parse.urlencode(query)}"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def _non_loopback_address():
+    """Adresse IPv4 de la machine hors boucle locale, ou None. Le connect UDP
+    n'envoie aucun paquet."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))
+            address = probe.getsockname()[0]
+        except OSError:
+            return None
+    return None if address.startswith("127.") else address
+
+
+def _free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 # Constants
@@ -125,6 +168,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         and keycloak_allowed_redirect_uri directly from the local config file
         (via _get_config_from_file), so they must live here — not in DM config.
         """
+        redirect_uri = f"http://localhost:{_free_port()}/callback"
         config = {
             "configVersion": 1,
             "enabled": True,
@@ -139,8 +183,10 @@ class TestFullEnrollmentFlow(unittest.TestCase):
             # reste surchargeable par le DM (appel programmatique, relayable).
             "keycloakIssuerUrl": "http://keycloak.test",
             "keycloakRealm": "mirai",
-            "keycloak_redirect_uri": "http://localhost:19876/callback",
-            "keycloak_allowed_redirect_uri": ["http://localhost:19876/callback"],
+            "keycloak_redirect_uri": redirect_uri,
+            "keycloak_allowed_redirect_uri": [redirect_uri],
+            # Plancher du code : un callback manqué échoue en 60 s, pas 180 s.
+            "keycloak_auth_timeout_seconds": 60,
         }
         seed_user_config(self.tmpdir, config)
 
@@ -229,7 +275,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
              self._patch_enrollment_wizard(True), \
              self._patch_show_message(), \
              patch("webbrowser.open", side_effect=fake_browser_open):
-            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+            _joining_new_threads(lambda: self.job._authorization_code_flow(DM_PUBLIC_CONFIG))
 
         self.assertIn("auth_url", captured, "webbrowser.open must have been called")
 
@@ -251,6 +297,154 @@ class TestFullEnrollmentFlow(unittest.TestCase):
                         "access_token must be stored")
         self.assertTrue(self.job._get_config_from_file("refresh_token", ""),
                         "refresh_token must be stored")
+
+    def _run_pkce_flow(self, browser):
+        self.job.config_cache = DM_PUBLIC_CONFIG
+        self.job.config_loaded_at = time.time()
+        with self._patch_urlopen(), \
+             self._patch_confirm(True), \
+             self._patch_enrollment_wizard(True), \
+             self._patch_show_message() as shown, \
+             patch("webbrowser.open", side_effect=browser):
+            _joining_new_threads(lambda: self.job._authorization_code_flow(DM_PUBLIC_CONFIG))
+        return shown
+
+    def _exchanged_codes(self):
+        return [urllib.parse.parse_qs(call["data"].decode())["code"][0]
+                for call in self.router.calls_for("POST", "/protocol/openid-connect/token")]
+
+    def test_02b_callback_sent_as_the_browser_opens_is_received(self):
+        """Avec une session SSO ouverte, Keycloak redirige aussitôt : le serveur
+        de callback écoute déjà quand le navigateur s'ouvre."""
+        self._run_pkce_flow(_send_callback)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02c_callback_without_the_state_of_the_request_is_refused(self):
+        statuses = []
+
+        def browser(url):
+            statuses.append(_send_callback(url, code="FORGED", state="forged-state"))
+            statuses.append(_send_callback(url, code="FORGED", state=None))
+            _pkce_auto_callback(url)
+
+        self._run_pkce_flow(browser)
+        self.assertEqual(statuses, [400, 400])
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02e_log_keeps_no_authorization_parameter(self):
+        lines = []
+        urls = []
+
+        def browser(url):
+            urls.append(url)
+            _send_callback(url)
+
+        with patch("src.mirai.entrypoint.log_to_file",
+                   side_effect=lambda line: lines.append(str(line))):
+            self._run_pkce_flow(browser)
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
+        secrets = ["FAKE_AUTH_CODE", params["state"][0], params["code_challenge"][0]]
+        self.assertTrue(any("PKCE callback received" in line for line in lines))
+        self.assertEqual([line for line in lines if any(s in line for s in secrets)], [])
+
+    def test_02d_callback_server_is_not_reachable_from_the_network(self):
+        address = _non_loopback_address()
+        if address is None:
+            self.skipTest("aucune interface réseau hors boucle locale")
+        reached = []
+
+        def browser(url):
+            redirect = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["redirect_uri"][0]
+            try:
+                socket.create_connection((address, urllib.parse.urlparse(redirect).port),
+                                         timeout=2).close()
+                reached.append(True)
+            except OSError:
+                reached.append(False)
+            _send_callback(url)
+
+        self._run_pkce_flow(browser)
+        self.assertEqual(reached, [False])
+
+    def _run_pkce_flow_with_libreoffice_shell(self, python_browser, shell_execute=None):
+        """Flux PKCE où le service SystemShellExecute de LibreOffice ouvre la page,
+        donc envoie le callback ; rend les URL qu'il a ouvertes et le mock des
+        messages affichés. `shell_execute` remplace l'ouverture par LibreOffice."""
+        opened = []
+        services = self.job.ctx.getServiceManager()
+        others = services.createInstanceWithContext.return_value
+        shell = MagicMock()
+        shell.execute.side_effect = shell_execute or (
+            lambda url, *args: (opened.append(url), _send_callback(url)))
+        # Tout autre service reste le mock partagé, quelle que soit la signature
+        # de l'appel (nom seul, ou nom et contexte).
+        services.createInstanceWithContext.side_effect = lambda name, *args: (
+            shell if name == "com.sun.star.system.SystemShellExecute" else others)
+        shown = self._run_pkce_flow(python_browser)
+        return opened, shown
+
+    def test_02f_without_a_browser_for_python_libreoffice_opens_the_login_page(self):
+        opened, _ = self._run_pkce_flow_with_libreoffice_shell(lambda url: False)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02g_a_failing_python_browser_falls_back_to_libreoffice(self):
+        def browser(url):
+            raise webbrowser.Error("could not locate runnable browser")
+
+        opened, _ = self._run_pkce_flow_with_libreoffice_shell(browser)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02h_login_page_opened_by_python_is_not_opened_again(self):
+        opened, _ = self._run_pkce_flow_with_libreoffice_shell(
+            lambda url: _send_callback(url) == 200)
+        self.assertEqual(opened, [])
+        self.assertEqual(self._exchanged_codes(), ["FAKE_AUTH_CODE"])
+
+    def test_02i_log_keeps_no_authorization_parameter_when_libreoffice_fails(self):
+        """L'exception de LibreOffice cite l'URL complète, state et code_challenge
+        compris : le journal n'en garde que le type."""
+        urls = []
+
+        def browser(url):
+            urls.append(url)
+            return False
+
+        def shell_execute(url, *args):
+            # Le callback part d'abord : le test n'attend pas le délai du flux.
+            _send_callback(url)
+            raise RuntimeError(
+                f"XSystemShellExecute.execute URIS_ONLY with non-absolute URI reference {url}")
+
+        with self.assertLogs(level="INFO") as logs:
+            self._run_pkce_flow_with_libreoffice_shell(browser, shell_execute)
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
+        secrets = [params["state"][0], params["code_challenge"][0]]
+        self.assertEqual([line for line in logs.output if any(s in line for s in secrets)], [])
+        self.assertTrue(any("RuntimeError" in line for line in logs.output))
+
+    def test_02j_when_libreoffice_opens_no_browser_either_the_user_is_told_at_once(self):
+        """Ni Python ni LibreOffice n'ouvrent la page : message immédiat au lieu
+        du délai d'attente."""
+        def shell_execute(url, *args):
+            raise RuntimeError("no https handler")
+
+        started = time.time()
+        opened, shown = self._run_pkce_flow_with_libreoffice_shell(lambda url: False, shell_execute)
+        self.assertLess(time.time() - started, 10)
+        self.assertEqual(opened, [])
+        self.assertEqual(self._exchanged_codes(), [])
+        shown.assert_called_once()
+        self.assertIn(t("msg.no_browser"), shown.call_args.args[1])
+
+    def test_02e_relogin_failure_is_shown(self):
+        """Poste déjà enrôlé : la reconnexion passe sans wizard, son échec
+        s'affiche quand même."""
+        self.job.set_config("enrolled", True)
+        shown = self._run_pkce_flow(lambda url: _send_callback(url, error="access_denied"))
+        shown.assert_called_once()
+        self.assertIn("access_denied", shown.call_args.args[1])
 
     # Steps 5 + 6: Device Management enrollment
 
@@ -287,6 +481,73 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         saved = read_user_config(self.tmpdir)
         self.assertTrue(saved.get("enrolled"), "enrolled flag must be True")
 
+    def _enroll_answers(self, body):
+        self.router = MockHttpRouter()
+        self.router.add("POST", "/enroll", body=body)
+        self._register_routes()
+
+    def _seed_valid_relay_credentials(self):
+        self.job.set_config("relay_client_id", RELAY_CLIENT_ID)
+        self.job.set_config("relay_client_key", RELAY_CLIENT_KEY)
+        self.job.set_config("relay_key_expires_at", int(time.time()) + 3600)
+
+    def _enroll(self):
+        self.job.set_config("access_token", FAKE_ACCESS_TOKEN)
+        self.job.config_cache = DM_PUBLIC_CONFIG
+        self.job.config_loaded_at = time.time()
+        with self._patch_urlopen(), self._patch_show_message():
+            self.job._ensure_device_management_state()
+
+    def test_03b_enroll_without_relay_pair_leaves_the_device_unenrolled(self):
+        self._enroll_answers({})
+        self._enroll()
+        self.assertTrue(self.router.called("POST", "/enroll"))
+        self.assertFalse(read_user_config(self.tmpdir).get("enrolled"))
+
+    def test_03c_valid_relay_credentials_mark_the_device_enrolled(self):
+        self._seed_valid_relay_credentials()
+        self._enroll()
+        self.assertFalse(self.router.called("POST", "/enroll"))
+        self.assertTrue(read_user_config(self.tmpdir).get("enrolled"))
+
+    def _wizard_outcome(self):
+        """Titre final du wizard d'enrôlement, après connexion SSO."""
+        state = {"step": 4, "cancelled": False}
+        titles = []
+
+        def update(title, text, label, step, **kwargs):
+            titles.append(title)
+            if "btn_next" in kwargs:
+                state["step"] += 1
+
+        wizard = (True, MagicMock(), MagicMock(), update, state)
+        self.job.config_cache = DM_PUBLIC_CONFIG
+        self.job.config_loaded_at = time.time()
+        with self._patch_urlopen(), \
+             self._patch_show_message(), \
+             patch.object(self.job, "_show_enrollment_wizard", return_value=wizard), \
+             patch("webbrowser.open", side_effect=_send_callback):
+            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+        return titles[-1]
+
+    def test_03d_wizard_reports_success_with_a_relay_pair(self):
+        self.assertEqual(self._wizard_outcome(), t("enroll.done_title"))
+
+    def test_03e_wizard_reports_failure_without_a_relay_pair(self):
+        self._enroll_answers({})
+        self.assertEqual(self._wizard_outcome(), t("enroll.failed_title"))
+
+    def test_03f_wizard_reports_success_when_relay_credentials_are_still_valid(self):
+        self._seed_valid_relay_credentials()
+        self.assertEqual(self._wizard_outcome(), t("enroll.done_title"))
+        self.assertFalse(self.router.called("POST", "/enroll"))
+
+    def test_03g_wizard_reports_failure_when_the_relay_pair_is_already_expired(self):
+        self._enroll_answers({"relayClientId": RELAY_CLIENT_ID,
+                              "relayClientKey": RELAY_CLIENT_KEY,
+                              "relayKeyExpiresAt": int(time.time()) - 60})
+        self.assertEqual(self._wizard_outcome(), t("enroll.failed_title"))
+
     # Steps 7 + 8: Re-fetch config with relay headers → secrets returned
 
     def test_04_second_config_fetch_uses_relay_headers(self):
@@ -321,7 +582,7 @@ class TestFullEnrollmentFlow(unittest.TestCase):
 
     def test_05_llm_call_uses_secret_token(self):
         """
-        Step 9: make_api_request targets /chat/completions with the LLM secret token.
+        Step 9: make_chat_request targets /chat/completions with the LLM secret token.
         """
         # Simulate post-enrollment state: config cache holds LLM secrets
         self.job.config_cache = DM_SECRET_CONFIG
@@ -329,17 +590,15 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.job.set_config("llm_base_urls", LLM_BASE)
         self.job.set_config("llm_api_tokens", LLM_SECRET_TOKEN)
         self.job.set_config("llm_default_models", "mistral:7b")
-        self.job.set_config("api_type", "chat")
 
         with self._patch_urlopen():
-            req = self.job.make_api_request(
-                prompt="Dis bonjour.",
-                system_prompt="Tu es un assistant.",
+            req = self.job.make_chat_request(
+                [{"role": "system", "content": "Tu es un assistant."},
+                 {"role": "user", "content": "Dis bonjour."}],
                 max_tokens=50,
-                api_type="chat",
             )
 
-        self.assertIsNotNone(req, "make_api_request must return a Request object")
+        self.assertIsNotNone(req, "make_chat_request must return a Request object")
         req_headers = {k.lower(): v for k, v in dict(req.headers).items()}
         auth = req_headers.get("authorization", "")
         self.assertIn(LLM_SECRET_TOKEN, auth,
@@ -381,22 +640,15 @@ class TestFullEnrollmentFlow(unittest.TestCase):
              self._patch_enrollment_wizard(True), \
              self._patch_show_message(), \
              patch("webbrowser.open", side_effect=fake_browser):
-            self.job._authorization_code_flow(DM_PUBLIC_CONFIG)
+            _joining_new_threads(lambda: self.job._authorization_code_flow(DM_PUBLIC_CONFIG))
 
         self.assertIn("url", captured_browser, "Steps 3-4: browser must open for PKCE")
         self.assertTrue(self.router.called("POST", "/protocol/openid-connect/token"),
                         "Steps 3-4: Keycloak /token must be called")
         self.assertTrue(self.job._get_config_from_file("access_token", ""),
                         "Step 4: access_token must be stored")
-        self.router.calls.clear()
 
-        # Steps 5-6: Enrollment
-        self.job.config_cache = DM_PUBLIC_CONFIG
-        self.job.config_loaded_at = time.time()
-
-        with self._patch_urlopen(), self._patch_show_message():
-            self.job._ensure_device_management_state()
-
+        # Steps 5-6: Enrollment, run by the SSO flow in a background thread
         self.assertTrue(self.router.called("POST", "/enroll"),
                         "Step 5: POST /enroll must be called")
         self.assertEqual(self.job._get_config_from_file("relay_client_id", ""), RELAY_CLIENT_ID,
@@ -431,10 +683,10 @@ class TestFullEnrollmentFlow(unittest.TestCase):
         self.job.config_loaded_at = time.time()
         self.job.set_config("llm_base_urls", LLM_BASE)
         self.job.set_config("llm_api_tokens", LLM_SECRET_TOKEN)
-        self.job.set_config("api_type", "chat")
 
         with self._patch_urlopen():
-            req = self.job.make_api_request("Dis bonjour.", max_tokens=20, api_type="chat")
+            req = self.job.make_chat_request([{"role": "user", "content": "Dis bonjour."}],
+                                             max_tokens=20)
 
         req_headers = {k.lower(): v for k, v in dict(req.headers).items()}
         self.assertIn(LLM_SECRET_TOKEN, req_headers.get("authorization", ""),

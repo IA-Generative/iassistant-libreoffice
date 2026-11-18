@@ -146,7 +146,15 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 
 cp -R "$ROOT_DIR/oxt/." "$STAGE_DIR/"
 cp "$ROOT_DIR/main.py" "$STAGE_DIR/main.py"
-cp -R "$ROOT_DIR/src" "$STAGE_DIR/src"
+# De src/, seuls partent les modules Python et les données lues à l'exécution.
+(
+  cd "$ROOT_DIR"
+  find src -name "*.py"
+  ls src/mirai/locales/*.json src/mirai/CAbundle/*.pem
+) | while IFS= read -r rel; do
+  mkdir -p "$STAGE_DIR/$(dirname "$rel")"
+  cp "$ROOT_DIR/$rel" "$STAGE_DIR/$rel"
+done
 cp "$CONFIG_IN_USE" "$STAGE_DIR/config.default.json"
 # Anti-fuite : la config embarquée d'un profil ONLINE doit être transport-only
 # (bootstrap_urls/config_path/enabled). Aucun SSO/keycloak/LLM baké : ils sont servis
@@ -166,7 +174,7 @@ if leaked:
 print("✓ embedded config.default.json: transport-only (no SSO/keycloak/LLM leak)")
 PY
 
-# Anti-fuite (2/2) : aucun nom d'hôte interne dans les fichiers suivis par git (profils, docs, tests, prompts).
+# Anti-fuite (2/2) : aucun nom d'hôte interne dans les fichiers suivis par git (profils, docs, tests).
 python3 - "$ROOT_DIR" <<'PY' || { err "Des noms d'hôtes internes sont présents dans des fichiers suivis par git"; exit 1; }
 import re, subprocess, sys
 
@@ -247,10 +255,9 @@ mkdir -p "$STAGE_DIR/docs"
 [ -f "$ROOT_DIR/README.md" ] && cp "$ROOT_DIR/README.md" "$STAGE_DIR/docs/README.md"
 [ -f "$ROOT_DIR/docs/notice-utilisateur.md" ] && cp "$ROOT_DIR/docs/notice-utilisateur.md" "$STAGE_DIR/docs/notice-utilisateur.md"
 [ -f "$STAGE_DIR/registration/license.txt" ] && cp "$STAGE_DIR/registration/license.txt" "$STAGE_DIR/docs/license.txt"
+[ -f "$ROOT_DIR/LICENSE" ] && cp "$ROOT_DIR/LICENSE" "$STAGE_DIR/LICENSE"
 
 find "$STAGE_DIR" -name ".DS_Store" -delete
-find "$STAGE_DIR" -name "*.pyc" -delete
-find "$STAGE_DIR" -name "__pycache__" -type d -prune -exec rm -rf {} +
 
 log "Creating package: $OUTPUT_PATH"
 (
@@ -264,7 +271,7 @@ log "OK: Package created: $OUTPUT_PATH"
 # Verify DM-required files are present
 _dm_ok=true
 _oxt_files=$(unzip -l "$OUTPUT_PATH" 2>/dev/null)
-for _check in "dm-manifest.json" "dm-config.json" "description.xml" "assets/logo.png" "docs/README.md" "docs/notice-utilisateur.md" "docs/license.txt" "registration/license.txt" "config/calc-functions.json"; do
+for _check in "dm-manifest.json" "dm-config.json" "description.xml" "assets/logo.png" "docs/README.md" "docs/notice-utilisateur.md" "docs/license.txt" "registration/license.txt" "LICENSE" "config/calc-functions.json"; do
   if ! echo "$_oxt_files" | grep -qF "$_check"; then
     warn "Missing in package: $_check"
     _dm_ok=false

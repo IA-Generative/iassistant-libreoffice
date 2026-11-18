@@ -87,3 +87,22 @@ def test_telemetry_passthrough():
     shell = MainJobShell(job)
     shell.telemetry("AssistantRun", {"plugin.action": "assistant.run"})
     assert seen == [("AssistantRun", {"plugin.action": "assistant.run"})]
+
+
+FEEDBACK_LINK = {"id": "beta-feedback", "label": "Donner mon avis sur la bêta",
+                 "url": "https://portail.fake-domain.name"}
+
+
+def test_get_link_reads_the_dm_links_by_role():
+    shell = MainJobShell(_job_with_config(links=[FEEDBACK_LINK]))
+    assert shell.get_link("beta-feedback") == FEEDBACK_LINK
+    assert shell.get_link("search-portal") is None
+    assert MainJobShell(_job_with_config()).get_link("beta-feedback") is None
+
+
+def test_open_link_hands_the_url_to_the_browser():
+    from unittest.mock import patch
+    shell = MainJobShell(_job_with_config())
+    with patch("webbrowser.open", return_value=True) as opened:
+        shell.open_link("https://portail.fake-domain.name")
+    opened.assert_called_once_with("https://portail.fake-domain.name")

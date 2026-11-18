@@ -14,17 +14,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.stubs.helpers import enriched_v2, http_response, make_update_directive
 from tests.stubs.uno_stubs import install, make_job
 
 install()
 
 from src.mirai import entrypoint, feed_rewrite
 from src.mirai.entrypoint import MainJob
-from tests.unit.test_update_features import (
-    _enriched_v2,
-    _json_response,
-    _make_update_directive,
-)
 
 SRC_TAG = "{http://openoffice.org/extensions/description/2006}src"
 XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
@@ -224,9 +220,9 @@ def test_fetch_config_rewrites_before_deciding_anything(installed, target):
     job._persist_bootstrap_config = MagicMock()
     seen = []
     job._schedule_update = MagicMock(side_effect=lambda d: seen.append(_hrefs(_read(installed))[0]))
-    directive = _make_update_directive()
+    directive = make_update_directive()
     directive["target_version"] = target
-    job._urlopen = MagicMock(return_value=_json_response(_enriched_v2(features={}, update=directive)))
+    job._urlopen = MagicMock(return_value=http_response(enriched_v2(features={}, update=directive)))
     job._fetch_config(force=True)
     assert _hrefs(_read(installed))[0] == BASE_1 + f"?version={target}"
     assert seen == ([] if target == "0.0.1.0.31" else [BASE_1 + "?version=0.0.1.0.32"])
@@ -248,9 +244,8 @@ def test_diagnostic_feed_urls_carry_the_same_version(installed):
     assert job._update_feed_urls() == [BASE_1 + "?version=0.0.1.0.32"]
 
 
-def test_feed_rewrite_is_registered_as_technical_telemetry():
+def test_feed_rewrite_telemetry_reports_an_update_action():
     assert MainJob._ACTION_NAMES["FeedRewrite"] == "update"
-    assert "FeedRewrite" in MainJob._TECHNICAL_EVENTS
 
 
 def test_file_mode_and_crlf_are_preserved():
@@ -269,7 +264,6 @@ def test_startup_rewrite_does_not_overwrite_a_directive_target(installed, monkey
     """Le fetch de /config peut aboutir avant le Timer de démarrage (2 s) :
     la cible posée par la directive ne doit pas être écrasée."""
     job = _job()
-    monkeypatch.setattr(MainJob, "_feed_rewrite_started_cls", False)
     job._rewrite_feed_for_directive({"action": "update", "target_version": "0.0.1.0.32"})
     fired = []
 
@@ -292,7 +286,6 @@ def test_startup_rewrite_does_not_overwrite_a_directive_written_during_its_versi
     job = _job()
     fired = []
     monkeypatch.setattr(entrypoint.threading, "Timer", lambda delay, fn: fired.append(fn) or MagicMock())
-    monkeypatch.setattr(MainJob, "_feed_rewrite_started_cls", False)
     job._schedule_feed_rewrite()
 
     def _version_lookup_while_config_lands():
@@ -306,5 +299,4 @@ def test_startup_rewrite_does_not_overwrite_a_directive_written_during_its_versi
 def test_diagnostic_uses_the_bare_address_until_a_rewrite_succeeded():
     job = _job()
     job._failover_ordered_urls = MagicMock(return_value=["https://dm-1.example/"])
-    MainJob._feed_rewrite_last_cls = None
     assert job._update_feed_urls() == [BASE_1]

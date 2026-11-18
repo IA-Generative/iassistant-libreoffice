@@ -9,9 +9,10 @@ Invariant : aucune logique métier ici — uniquement de l'adaptation.
 import json
 import urllib.request
 
-# Clamps max_tokens par modèle. Source unique : make_api_request (coquille)
-# importe cette table. make_chat_request ne l'applique pas ; la façade
-# comble ce trou.
+from .links import find_link
+
+# Clamps max_tokens par modèle. make_chat_request ne les applique pas ; la
+# façade comble ce trou.
 MODEL_TOKEN_LIMITS = {
     "deepseek-r1-distill-llama-70b": 8196,
     "llama-3.3-70b-instruct": 4096,
@@ -45,6 +46,15 @@ class MainJobShell:
 
     def data_dir(self):
         return self._job._data_dir()
+
+    def get_link(self, link_id):
+        """Lien distribué par le DM pour ce rôle ({label, url, hint?, hintUrl?}) ou None."""
+        return find_link(self.get_config("links", []), link_id)
+
+    def open_link(self, url):
+        """Ouvre l'URL dans le navigateur de l'utilisateur (jamais dans le journal)."""
+        # Aucune clé de config à lire : l'URL explicite court-circuite la recherche.
+        self._job._open_url_config("", url=url)
 
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):
         """Request chat/completions authentifiée, clamps réappliqués, corps enrichi.

@@ -48,13 +48,6 @@ Envoyé au chargement de l'extension dans LibreOffice.
 - `event.type`: "extension_loaded"
 - `extension.context`: "libreoffice_writer"
 
-### ExtendSelection
-Envoyé lors de l'utilisation de la génération de texte (CTRL+Q).
-
-**Attributs :**
-- `action`: "extend_selection"
-- `text_length`: Longueur du texte sélectionné
-
 ### EditSelection
 Envoyé lors de l'utilisation de la modification de texte (CTRL+E).
 
@@ -76,17 +69,35 @@ Envoyé lors de l'utilisation de la reformulation (CTRL+L).
 - `action`: "simplify_selection"
 - `text_length`: Longueur du texte sélectionné
 
-### OpenmiraiWebsite
-Envoyé lors de l'accès au site web mirai.
+### CorrectSelection
+Envoyé par le bouton Corriger de la palette, avant l'appel au modèle.
 
 **Attributs :**
-- `action`: "open_website"
+- `plugin.action`: "correct"
+- `action`: "correct_selection"
+- `text_length`: Longueur du texte sélectionné, ou du document sans sélection
+- `tables`: Nombre de tableaux laissés de côté, sans sélection seulement
+
+### TranslateSelection
+Envoyé par le bouton Traduire de la palette, avant l'appel au modèle. La langue cible n'est pas envoyée.
+
+**Attributs :**
+- `plugin.action`: "translate"
+- `action`: "translate_selection"
+- `text_length`: Longueur du texte sélectionné, ou du document sans sélection
+- `tables`: Nombre de tableaux laissés de côté, sans sélection seulement
 
 ### OpenSettings
 Envoyé lors de l'ouverture du dialogue des paramètres.
 
 **Attributs :**
 - `action`: "open_settings"
+
+### LinkClick
+Envoyé au clic sur un lien distribué par le Device Management (pied de la palette).
+
+**Attributs :**
+- `link`: rôle du lien (`search-portal`, `beta-feedback`, suffixe `.hint` pour son complément), jamais l'URL
 
 ## Format des traces
 
@@ -113,7 +124,7 @@ Envoyé lors de l'ouverture du dialogue des paramètres.
             {
               "traceId": "32-char-hex-trace-id",
               "spanId": "16-char-hex-span-id",
-              "name": "ExtendSelection",
+              "name": "SummarizeSelection",
               "kind": 1,
               "startTimeUnixNano": "1700000000000000000",
               "endTimeUnixNano": "1700000000001000000",
@@ -121,7 +132,7 @@ Envoyé lors de l'ouverture du dialogue des paramètres.
                 {"key": "extension.uuid", "value": {"stringValue": "UUID"}},
                 {"key": "extension.name", "value": {"stringValue": "mirai"}},
                 {"key": "extension.version", "value": {"stringValue": "1.0.0"}},
-                {"key": "action", "value": {"stringValue": "extend_selection"}},
+                {"key": "action", "value": {"stringValue": "summarize_selection"}},
                 {"key": "text_length", "value": {"stringValue": "150"}}
               ],
               "status": {"code": 1}

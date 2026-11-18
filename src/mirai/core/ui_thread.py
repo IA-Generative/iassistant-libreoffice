@@ -101,21 +101,23 @@ class MainThreadDispatcher:
             # Déjà au bon endroit : inutile de faire un détour par la file.
             _Task(fn).run()
             return True
-        self._queue.put(fn)
-        # Relancer la pompe si elle s'est éteinte faute de travail. L'armement
-        # depuis un worker n'est pas garanti d'être délivré immédiatement — il
-        # le sera au premier réveil de la boucle — mais tant qu'un run produit
-        # du trafic régulier (fragments, jauge), la pompe reste vivante.
-        if not self._pumping:
-            self._arm_pump_from_worker()
+        self._enqueue(fn)
         return True
 
     def call(self, fn, timeout: float = 30.0):
         """Exécute fn sur le thread principal et rend son résultat.
 
-        À appeler depuis le worker. Lève DispatcherClosed si la palette est
-        fermée, DispatcherTimeout au-delà du délai, et propage telle quelle
-        l'exception levée par fn.
+        À appeler depuis le worker. Arme la pompe si elle est éteinte ; parti
+        d'un worker, cet armement n'est délivré qu'au prochain réveil de la
+        boucle d'événements, et `timeout` couvre cette attente. Lève
+        DispatcherClosed si la palette est fermée, DispatcherTimeout au-delà
+        du délai, et propage telle quelle l'exception levée par fn.
+
+        fn ne s'exécute jamais après un DispatcherTimeout : l'appelant a déjà
+        annoncé l'échec. Une tâche démarrée avant le délai rend son résultat.
+        Une pompe qu'AsyncCallback refuse d'armer fait renoncer tout de suite.
+        Une tâche encore en file quand la palette se ferme ne s'exécute plus
+        non plus : l'appelant reçoit DispatcherClosed.
         """
         if self._closed:
             raise DispatcherClosed("palette fermée")
@@ -128,24 +130,37 @@ class MainThreadDispatcher:
             return fn()
 
         result_queue = queue.Queue(maxsize=1)
+        # Démarrer la tâche et y renoncer s'excluent : le premier qui prend le
+        # verrou décide pour les deux.
+        claim = threading.Lock()
 
-        def _run_and_report():
-            try:
-                result_queue.put(("ok", fn()))
-            except Exception as exc:      # relayée à l'appelant
-                result_queue.put(("error", exc))
-
-        self._queue.put(_run_and_report)
+        armed = self._enqueue(lambda: self._run_and_report(fn, claim, result_queue))
         try:
-            status, payload = result_queue.get(timeout=timeout)
+            status, payload = result_queue.get(timeout=timeout if armed else 0)
         except queue.Empty:
-            raise DispatcherTimeout(
-                f"le thread principal n'a pas répondu en {timeout:g} s "
-                "(pompe arrêtée, ou boîte de dialogue modale ouverte ?)"
-            ) from None
+            if claim.acquire(blocking=False):
+                cause = (f"en {timeout:g} s (pompe arrêtée, ou boîte de dialogue "
+                         "modale ouverte ?)" if armed else ": armement de la pompe refusé")
+                raise DispatcherTimeout(
+                    f"le thread principal n'a pas répondu {cause}") from None
+            status, payload = result_queue.get()    # démarrée à temps : elle finit
         if status == "error":
             raise payload
         return payload
+
+    def _run_and_report(self, fn, claim, result_queue):
+        """La tâche d'un `call()`, jouée par le thread principal."""
+        if not claim.acquire(blocking=False):
+            return                    # l'appelant a renoncé
+        # La palette fermée a refermé le contexte undo du run : le document ne
+        # doit plus bouger.
+        if self._closed:
+            result_queue.put(("error", DispatcherClosed("palette fermée")))
+            return
+        try:
+            result_queue.put(("ok", fn()))
+        except BaseException as exc:  # relayée : l'appelant l'attend sans délai
+            result_queue.put(("error", exc))
 
     def start_pump(self):
         """Démarre le drain de la file. À APPELER DEPUIS LE THREAD PRINCIPAL.
@@ -154,7 +169,8 @@ class MainThreadDispatcher:
         RÉARME elle-même via AsyncCallback. Le réarmement partant du thread
         principal, il est délivré de façon fiable — contrairement à un
         addCallback émis depuis un worker, qui attend le prochain réveil de la
-        boucle. Elle ne tourne que pendant un run : `stop_pump()` l'éteint.
+        boucle. Elle s'éteint dès que la file est vide ; `post()` et `call()`
+        la relancent depuis le worker, `stop_pump()` l'éteint en fin de run.
         """
         if self._pumping or self._closed:
             return
@@ -178,27 +194,47 @@ class MainThreadDispatcher:
             except Exception:
                 pass          # une mise à jour d'affichage ratée n'est pas fatale
 
+    def _enqueue(self, fn):
+        """File la tâche PUIS relit la pompe, pour la relancer si elle s'est éteinte.
+
+        L'ordre compte : `_pump_once` relit la file après avoir baissé le
+        drapeau, et c'est ce qui rattrape une tâche déposée pendant
+        l'extinction. L'armement depuis un worker n'est délivré qu'au prochain
+        réveil de la boucle ; tant qu'un run produit du trafic régulier
+        (fragments, jauge), la pompe reste vivante.
+
+        Rend False si la pompe était éteinte et n'a pas pu être armée.
+        """
+        self._queue.put(fn)
+        if self._pumping:
+            return True
+        return self._arm_pump_from_worker()
+
     def _arm_pump_from_worker(self):
         """Tentative d'armement depuis un thread de fond (best effort)."""
         self._pumping = True
         try:
-            self._arm_pump()
+            return self._arm_pump()
         except Exception:
             self._pumping = False
+            return False
 
     def _arm_pump(self):
+        """Arme un tour de pompe. Rend False si AsyncCallback refuse la tâche."""
         callback = self._async_callback()
         if callback is None:
             self._pumping = False
             self.drain()
-            return
+            return True
         task = _Task(self._pump_once)
         self._pump = task           # référence vivante jusqu'au notify
         try:
             callback.addCallback(task, None)
+            return True
         except Exception as exc:
             self._note(f"pompe : réarmement impossible ({exc})")
             self._pumping = False
+            return False
 
     def _pump_once(self):
         """Un tour de pompe : drainer, puis se réarmer S'IL RESTE DU TRAVAIL.
@@ -206,12 +242,18 @@ class MainThreadDispatcher:
         Se réarmer inconditionnellement monopolise la boucle d'événements :
         LibreOffice passe son temps à traiter des tours de pompe à vide et ne
         répond plus à la souris ni au clavier. La pompe s'éteint donc dès que
-        la file est vide ; c'est `post()` qui la relance à la tâche suivante.
+        la file est vide ; `post()` ou `call()` la relance à la tâche suivante.
         """
         self.drain()
         if self._closed or self._queue.empty():
             self._pumping = False
-            return
+            # Un worker dépose sa tâche PUIS lit `_pumping` : s'il l'a lu juste
+            # avant l'extinction, il n'a pas réarmé. D'où cette relecture. S'il
+            # l'a lu juste après, il a réarmé et on réarme aussi : deux pompes
+            # tournent tant que la file ne se vide pas, puis s'éteignent.
+            if self._closed or self._queue.empty():
+                return
+            self._pumping = True
         self._arm_pump()
 
     def _async_callback(self):

@@ -1,7 +1,8 @@
 """Le catalogue de traduction est complet, coherent et effectivement branche.
 
 L'extension parle cinq langues (fr source, en, es, pt, zh) sans dependance
-externe : `src/mirai/i18n.py` porte le catalogue et la resolution de langue.
+externe : le catalogue vit dans `src/mirai/locales/<langue>.json`, la
+resolution de langue dans `src/mirai/i18n.py`.
 Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 
 1. aucune cle n'est partiellement traduite (parite des cinq locales) ;
@@ -13,9 +14,12 @@ Ces tests verrouillent les quatre proprietes dont depend l'IHM :
 """
 
 import json
+import logging
 import os
+import pathlib
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,25 +32,16 @@ install()
 from src.mirai import entrypoint
 from src.mirai.core import doc_analysis, presets, prompts
 from src.mirai.core.context import ToolContext
-from src.mirai.menu_actions import calc
+from src.mirai.shell.ui_locale import extension_locale
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_LOCALE_DEPENDENT_FILES = (
-    "src/mirai/entrypoint.py",
-    "src/mirai/menu_actions/calc.py",
-    "src/mirai/core/presets.py",
-    "src/mirai/core/suggestions.py",
-    "src/mirai/core/selection_info.py",
-    "src/mirai/core/progress.py",
-    "src/mirai/core/orchestrator.py",
-    "src/mirai/core/doc_analysis.py",
-    "src/mirai/core/entry.py",
-    "src/mirai/core/capabilities.py",
-    "src/mirai/core/clickable.py",
-    "src/mirai/ui/palette.py",
+_LOCALE_DEPENDENT_FILES = sorted(
+    path.relative_to(_REPO_ROOT).as_posix()
+    for path in pathlib.Path(_REPO_ROOT, "src", "mirai").rglob("*.py")
+    if "import t as _t" in path.read_text(encoding="utf-8")
 )
 
 _ADDON_KEYS = (
@@ -56,13 +51,11 @@ _ADDON_KEYS = (
     "addon.test_model",
     "addon.documentation",
     "addon.about",
-    "addon.toolbar",
 )
 
 # (cle, kwargs) — chaque couple doit s'interpoler dans les cinq locales.
 _PLACEHOLDER_CASES = (
     ("common.error", {"detail": "boom"}),
-    ("proxy.test_failed", {"detail": "boom"}),
     ("settings.id_prefix", {"value": "42"}),
     ("settings.token_error_proxy", {"detail": "boom", "url": "http://p"}),
     ("settings.token_error_unreachable", {"detail": "boom", "url": "http://p"}),
@@ -75,27 +68,17 @@ _PLACEHOLDER_CASES = (
     ("update.prompt", {"version": "0.0.2"}),
     ("update.prompt_critical", {"version": "0.0.2"}),
     ("update.blocked_body", {"oxt": "/tmp/mirai_update.oxt", "version": "0.0.2"}),
-    ("resize.ok_format", {"delta": 3, "new_word_count": 120, "sign": "+"}),
-    ("edit.selection_prefix", {"snippet": "texte", "warning": ""}),
-    ("edit.prepare_suggestions", {"dots": "..."}),
-    ("calc.out_new_col", {"letter": "D", "name": "Resultat"}),
-    ("calc.out_col", {"letter": "D"}),
-    ("calc.out_col_header", {"header": "Resultat"}),
-    ("calc.selection_one", {"n": 1, "ref": "A1:A1"}),
-    ("calc.selection_many", {"n": 20, "ref": "A1:D5"}),
-    ("calc.formula.detail", {"formula": "=1+1"}),
-    ("calc.formula.detail_explained", {"explanation": "somme", "formula": "=1+1"}),
-    ("calc.formula.applied", {"formula": "=1+1"}),
-    ("calc.formula.filled_down", {"count": 5}),
-    ("calc.formula.error_line", {"err": "#ERREUR: x"}),
+    ("preset.refused_transform", {"count": 2}),
+    ("palette.tables_left", {"count": 2}),
+    ("caps.refused", {"error": "http_401"}),
+    ("caps.second_turn_refused", {"error": "http_503"}),
+    ("caps.empty", {"error": "empty_response"}),
     ("enroll.auth_waiting", {"dots": "..."}),
     ("enroll.auth_progress", {"dots": "..."}),
     ("enroll.enrolling_progress", {"dots": "..."}),
     ("enroll.error_config_text", {"error": "boom"}),
     ("enroll.failed_text", {"reason": "boom"}),
     ("msg.kc_expired_body", {"redirect_uri": "http://localhost:28443/callback"}),
-    ("msg.quota_body", {"delay": "30 secondes"}),
-    ("msg.delay_seconds", {"seconds": 30}),
     ("msg.action_failed_body", {"action": "OuvrirAssistant", "exc": "boom"}),
     ("msg.action_unavailable_body", {"action": "OuvrirAssistant"}),
     ("preset.resized", {"target": 7}),
@@ -115,6 +98,7 @@ _PLACEHOLDER_CASES = (
     ("palette.journal_rewrite_start", {"first": 1, "last": 3}),
     ("palette.journal_written", {"before": 3, "after": 3}),
     ("palette.document_summary", {"how": "réécrit", "before": 3, "after": 3, "kept": ""}),
+    ("palette.document_composed", {"count": 2}),
     ("palette.err_generic", {"text": "HTTP 500"}),
     ("run.err_generic", {"code": "http_500"}),
     ("entry.test_failed", {"detail": "erreur"}),
@@ -159,6 +143,14 @@ def test_catalog_has_no_obvious_placeholder_typo():
             assert set(re.findall(r"\{(\w+)\}", value)) == reference, (key, code)
 
 
+@pytest.mark.parametrize("code", i18n.SUPPORTED)
+def test_locale_file_declares_each_key_once(code):
+    # json.load garde la derniere valeur d'une cle repetee, sans erreur.
+    pairs = json.loads(_read(f"src/mirai/locales/{code}.json"), object_pairs_hook=list)
+    counts = Counter(key for key, _text in pairs)
+    assert sorted(key for key, count in counts.items() if count > 1) == []
+
+
 # ---------------------------------------------------------------------------
 # t()
 # ---------------------------------------------------------------------------
@@ -184,16 +176,16 @@ def test_missing_locale_falls_back_to_french(monkeypatch):
 
 def test_t_interpolates_placeholders():
     i18n.set_locale("fr")
-    assert "20" in i18n.t("calc.selection_many", n=20, ref="A1:D5")
+    assert "20" in i18n.t("sel.calc_range", count=20, first="A1", last="D5")
 
 
 def test_bad_placeholder_degrades_to_the_raw_template():
     # `t()` avale l'erreur de formatage : on documente ici la degradation
     # (accolade visible) plutôt que de la laisser passer pour un mystere.
     i18n.set_locale("fr")
-    rendered = i18n.t("calc.selection_many", unexpected="x")
+    rendered = i18n.t("sel.calc_range", unexpected="x")
     assert "{" in rendered
-    assert rendered == i18n.CATALOG["calc.selection_many"]["fr"]
+    assert rendered == i18n.CATALOG["sel.calc_range"]["fr"]
 
 
 @pytest.mark.parametrize("key,kwargs", _PLACEHOLDER_CASES)
@@ -280,9 +272,12 @@ def test_extension_speaks_english_when_it_does_not_offer_the_language(libreoffic
     assert i18n.get_locale() == "en"
 
 
-def test_extension_speaks_english_when_libreoffice_cannot_tell_its_language():
-    # Hors LibreOffice, les doublures UNO ne rendent aucune langue lisible.
-    assert i18n.resolve_locale(None) == "en"
+def test_extension_speaks_english_when_libreoffice_cannot_tell_its_language(caplog):
+    ctx = MagicMock()
+    ctx.getServiceManager.side_effect = RuntimeError("configuration unavailable")
+    with caplog.at_level(logging.INFO):
+        assert extension_locale(ctx) == "en"
+    assert "configuration unavailable" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -297,26 +292,6 @@ def test_every_referenced_key_exists_in_the_catalog(relative_path):
     assert sorted(key for key in keys if key not in i18n.CATALOG) == []
 
 
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_calc_fallback_prompts_follow_the_locale(code):
-    job = make_job()
-    i18n.set_locale(code)
-    prompts = job._fallback_calc_prompts()
-    assert len(prompts) == 10
-    assert prompts == [i18n.CATALOG[f"calc.suggest.{position}"][code] for position in range(1, 11)]
-
-
-def test_edit_suggestion_keys_are_distinct_across_locales():
-    keys = [f"edit.suggest.{position}" for position in range(1, 11)]
-    i18n.set_locale("fr")
-    french = [i18n.t(key) for key in keys]
-    i18n.set_locale("en")
-    english = [i18n.t(key) for key in keys]
-    assert all(french)
-    assert all(english)
-    assert french != english
-
-
 # Libelles legitimement identiques en francais et en anglais : noms propres,
 # marques, sigles et termes techniques qui ne se traduisent pas. Toute autre
 # egalite signale une traduction oubliee.
@@ -325,17 +300,12 @@ _IDENTICAL_BY_DESIGN = {
     "about.window_title",  # nom de la marque "MIrAI — IA'ssistant LibreOffice"
     "addon.documentation",  # "📚 Documentation" : mot identique
     "addon.menubar",  # "🤖 MIrAI" : nom de la marque
-    "calc.out_col",  # "  →  col. {letter}" : abreviation technique
     "common.ok",  # "OK" : sigle international
-    "common.suggestions",  # "Suggestions..." : mot identique
-    "edit.suggestions_plain",  # "Suggestions" : mot identique
     "palette.header",  # "  MIrAI — Assistant ({app})" : nom de la marque
     "palette.title",  # "MIrAI — Assistant" : nom de la marque
-    "proxy.title",  # "Proxy" : terme technique identique
     "settings.id_prefix",  # "ID: {value}" : sigle international
     "settings.model_label",  # "Model:" : mot identique
     "settings.models_failed_title",  # "API" : sigle international
-    "settings.proxy_button",  # "Proxy" : terme technique identique
     "settings.reload_dialog_title",  # "Configuration" : mot identique
     "tab.actions",  # "Actions" : mot identique
     "tab.conversation",  # "Conversation" : mot identique
@@ -412,7 +382,7 @@ def test_addons_xcu_is_valid_xml():
 
 def test_addons_xcu_declares_every_locale():
     content = _read("oxt/Addons.xcu")
-    assert content.count("xml:lang=") == 5 * len(_ADDON_KEYS)
+    assert content.count("xml:lang=") == len(i18n.SUPPORTED) * len(_ADDON_KEYS)
     for code in i18n.SUPPORTED:
         assert f'xml:lang="{code}"' in content
 
@@ -448,14 +418,6 @@ def _assert_document_language(system):
     assert i18n.t("llm.answer_language") not in system
 
 
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_shell_requests_keep_the_document_language(code):
-    job = make_job()
-    i18n.set_locale(code)
-    request = job.make_api_request("ping", "", 10)
-    _assert_document_language(json.loads(request.data)["messages"][0]["content"])
-
-
 def _writer_target():
     return FakeWriterDoc(selection_text="The quick brown fox jumps over the lazy dog."), "writer"
 
@@ -468,7 +430,6 @@ def _calc_target():
 @pytest.mark.parametrize(
     "runner,make_target",
     (
-        ("run_extend", _writer_target),
         ("run_summarize", _writer_target),
         ("run_simplify", _writer_target),
         ("run_shorten", _writer_target),
@@ -493,14 +454,6 @@ def _assert_interface_language(system):
 
 
 @pytest.mark.parametrize("code", i18n.SUPPORTED)
-def test_shell_suggestion_requests_follow_the_interface_language(code):
-    job = make_job()
-    i18n.set_locale(code)
-    request = job.make_api_request("ping", "", 10, answer_in_ui_language=True)
-    _assert_interface_language(json.loads(request.data)["messages"][0]["content"])
-
-
-@pytest.mark.parametrize("code", i18n.SUPPORTED)
 def test_document_suggestions_follow_the_interface_language(code):
     i18n.set_locale(code)
     messages = doc_analysis.build_messages("Un paragraphe de démonstration. " * 20)
@@ -511,27 +464,6 @@ def test_document_suggestions_follow_the_interface_language(code):
 def test_conversation_follows_the_interface_language(code):
     i18n.set_locale(code)
     _assert_interface_language(prompts.build_system("writer", None, "native"))
-
-
-def test_formula_explanation_follows_the_interface_language():
-    i18n.set_locale("en")
-    job = MagicMock()
-    calc._explain_formula(job, "=SUM(A1:A3)")
-    system = job.make_chat_request.call_args.args[0][0]["content"]
-    _assert_interface_language(system)
-    assert "EXACTEMENT 3 lignes :\nLigne 1" in system
-
-
-@pytest.mark.parametrize(
-    "relative_path",
-    (
-        "src/mirai/entrypoint.py",
-        "src/mirai/menu_actions/calc.py",
-        "src/mirai/core/prompts.py",
-    ),
-)
-def test_llm_language_directive_is_wired(relative_path):
-    assert '_t("llm.answer_language")' in _read(relative_path)
 
 
 def test_no_absolute_french_only_rule_remains():

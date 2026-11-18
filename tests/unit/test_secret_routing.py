@@ -195,8 +195,6 @@ def test_disabled_proxy_never_reads_its_credentials(tmp_path):
     cfg = job._get_proxy_config()
     assert store.reads == []
     assert (cfg["username"], cfg["password"]) == ("", "")
-    dialog = job._get_proxy_config(with_credentials=True)
-    assert (dialog["username"], dialog["password"]) == ("u", "pw")
     job.set_config("proxy_enabled", True)
     assert job._get_proxy_config()["password"] == "pw"
 

@@ -19,7 +19,6 @@ install()
 
 
 OCP = "https://bootstrap.apps.ocp.internal.example"
-DGX = "https://gpu.internal.example/bootstrap"
 SCW = "https://bootstrap.fake-domain.name"
 
 
@@ -30,32 +29,6 @@ def _job_with_config(values):
         side_effect=lambda k, d=None, **kw: values.get(k, d)
     )
     return job
-
-
-def test_insecure_match_base_and_full_url():
-    job = _job_with_config({"bootstrap_insecure_urls": [OCP]})
-    assert job._is_insecure_bootstrap_url(OCP) is True
-    # The active URL is a base; config fetch passes base + path — both must match.
-    assert job._is_insecure_bootstrap_url(OCP + "/config/x?profile=prod") is True
-
-
-def test_verified_hosts_not_matched():
-    job = _job_with_config({"bootstrap_insecure_urls": [OCP]})
-    assert job._is_insecure_bootstrap_url(DGX) is False
-    assert job._is_insecure_bootstrap_url(SCW) is False
-
-
-def test_no_list_means_never_insecure():
-    job = _job_with_config({})
-    assert job._is_insecure_bootstrap_url(OCP) is False
-
-
-def test_bare_host_entry_tolerated():
-    # Entry written without a scheme still matches by host.
-    job = _job_with_config(
-        {"bootstrap_insecure_urls": ["bootstrap.apps.ocp.internal.example"]}
-    )
-    assert job._is_insecure_bootstrap_url(OCP) is True
 
 
 def test_context_insecure_for_ocp():

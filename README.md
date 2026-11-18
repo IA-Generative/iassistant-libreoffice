@@ -77,8 +77,8 @@ Analyse la plage sélectionnée et insère un résumé des tendances et anomalie
 ### Télémétrie
 
 Chaque action génère une trace OpenTelemetry avec :
-- `plugin.action` : nom condensé (`extend`, `edit`, `summarize`, `formula`…)
-- `trigger.source` : origine (`menu`, `toolbar`, `key`, `auto`)
+- `plugin.action` : nom condensé (`edit`, `summarize`, `formula`…)
+- `trigger.source` : origine (`menu`, `key`, `auto`)
 - Header `X-Client-UUID` envoyé pour identification pré-enrollment
 
 ---
@@ -131,7 +131,7 @@ git checkout vX.Y.Z
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
   --config config/profiles/config.default.production.json \
-  --strategy canary
+  --strategy immediate
 ```
 
 L'endpoint unifié `POST /api/plugins/{slug}/deploy` gère automatiquement :
@@ -142,7 +142,10 @@ L'endpoint unifié `POST /api/plugins/{slug}/deploy` gère automatiquement :
 
 ### Stratégies de rollout
 
-**`canary`** (défaut) — déploiement progressif automatique :
+Tant que device-management#49 (version minimale du plugin) n'est pas livré,
+toute release part en `immediate` pour tout le parc : c'est le défaut du script.
+
+**`canary`** — déploiement progressif automatique :
 
 | Palier | Pourcentage | Durée | Description |
 |--------|-------------|-------|-------------|
@@ -152,13 +155,13 @@ L'endpoint unifié `POST /api/plugins/{slug}/deploy` gère automatiquement :
 
 Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe (le même device est toujours dans le même palier). Les paliers avancent automatiquement en fonction du temps écoulé depuis la création de la campagne.
 
-**`immediate`** — déploiement à 100% immédiatement. Tous les devices reçoivent la mise à jour au prochain appel config.
+**`immediate`** (défaut) — déploiement à 100% immédiatement. Tous les devices reçoivent la mise à jour au prochain appel config.
 
 ### Mise à jour automatique côté plugin
 
 1. Le plugin appelle `/config/{slug}/config.json` au démarrage et à chaque action
 2. Le DM compare la version du plugin avec la campagne active
-3. Si une mise à jour est disponible, le plugin choisit la route. **Native** si le feed `<update-information>` de l'extension installée annonce exactement la version cible : LibreOffice télécharge alors l'OXT lui-même, avec sa pile HTTP, rien ne transite par le plugin. Sinon **dirigée** : le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé en ordre *last-good d'abord*, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
+3. Si une mise à jour est disponible, le plugin choisit la route. **Native** si le feed `<update-information>` de l'extension installée annonce exactement la version cible : LibreOffice télécharge alors l'OXT lui-même, avec sa pile HTTP, rien ne transite par le plugin. Sinon **dirigée** : le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé dans l'ordre annoncé par le DM puis celui de l'OXT, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
 4. Route dirigée : vérifie le checksum SHA-256. Route native : pas de hash, la confiance repose sur TLS vers le DM
 5. **Installe la mise à jour**, avec repli en cascade — un seul primitif, `addExtension` sur le thread principal :
    1. **Route native pilotée** — si le feed `<update-information>` de l'extension installée annonce exactement la version cible, le plugin ouvre le dialogue natif « Mise à jour des extensions » (`PackageManagerDialog`, `SHOW_UPDATE_DIALOG`) : LibreOffice télécharge et installe lui-même, avec sa pile HTTP ; le plugin ferme ensuite LibreOffice proprement, en réessayant tant que la fenêtre de mise à jour est ouverte ; s'il doit y renoncer, la nouvelle version s'active au prochain démarrage. _(#5, #9)_
@@ -199,7 +202,7 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 
 ### Via l'interface
 
-**Menu MIrAI → Paramètres** : URL du backend, modèle par défaut, token API, proxy.
+**Menu MIrAI → Paramètres** : URL du backend, modèle par défaut, token API.
 
 ### Fichiers de configuration
 
@@ -227,18 +230,13 @@ Documentation complète : [docs/DEPLOY.md](docs/DEPLOY.md)
 ```
 src/mirai/
 ├── entrypoint.py              # MainJob, UNO, mise à jour auto, télémétrie
-├── security_flow.py           # SecureBootstrapFlow (enrollment, tokens, relay)
-├── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
-└── menu_actions/
-    ├── writer.py              # Edit, Summarize, Simplify, Resize
-    ├── calc.py                # Transform, Formula, Analyze
-    └── shared.py              # Utilitaires partagés
+└── calc_prompt_function.py    # Fonction Calc add-in (XPromptFunction)
 
 oxt/                           # Fichiers statiques packagés dans l'OXT
-├── Addons.xcu                 # Menus et toolbar
+├── Addons.xcu                 # Menu MIrAI
 ├── Accelerators.xcu           # Raccourcis clavier
 ├── Jobs.xcu                   # Job d'initialisation
-├── icons/                     # Icônes toolbar
+├── assets/                    # Logo et icône du bouton de mise à jour
 └── META-INF/manifest.xml
 
 config/profiles/               # Profils de configuration
@@ -277,7 +275,7 @@ python3 -m pytest tests/unit/ -v
 # Déployer en intégration
 ./scripts/deploy-release.sh \
   --bootstrap-url https://bootstrap.fake-domain.name \
-  --strategy canary
+  --strategy immediate
 ```
 
 ---
@@ -290,13 +288,14 @@ python3 -m pytest tests/unit/ -v
 |---|---|---|
 | `ExtensionLoaded` | `launch` | Démarrage du plugin |
 | `ExtensionUpdated` | `update` | Après mise à jour |
-| `BootstrapConfig` | `bootstrap` | Fetch config DM |
 | `EnrollSuccess` | `enroll.ok` | Enrollment réussi |
 | `EnrollFailed` | `enroll.fail` | Enrollment échoué |
 | `EditSelection` | `edit` | Modifier la sélection |
 | `ResizeSelection` | `resize` | Ajuster la longueur |
 | `SummarizeSelection` | `summarize` | Résumer |
 | `SimplifySelection` | `simplify` | Reformuler |
+| `CorrectSelection` | `correct` | Corriger |
+| `TranslateSelection` | `translate` | Traduire |
 | `TransformToColumn` | `transform` | Transformer (Calc) |
 | `GenerateFormula` | `formula` | Générer formule (Calc) |
 | `AnalyzeRange` | `analyze` | Analyser plage (Calc) |
@@ -342,8 +341,26 @@ sequenceDiagram
   DM-->>P: update directive (target_version, artifact_url, checksum)
   P->>DM: GET /catalog/{slug}/download
   DM-->>P: fichier .oxt
-  P->>P: quit LO → unopkg remove → add → relaunch
+  P->>P: addExtension (thread principal) → fermeture de LO, réouverture manuelle
 ```
+
+### Passation entre DM
+
+Le DM sert dans `/config` la liste `bootstrapUrls` (variable `DM_BOOTSTRAP_URLS`). Le plugin la
+garde dans `settings.json` (`dm_bootstrap_urls`) et l'essaie avant la liste embarquée dans l'OXT ;
+le dernier DM ayant répondu n'est plus qu'un repli en queue. Seules les adresses `https` de la
+liste sont suivies, et les adresses `http` quand l'OXT en embarque une (banc local) : une faute de
+frappe dans `DM_BOOTSTRAP_URLS` ne fait pas passer le parc en clair. Pour passer un parc d'un DM à un
+autre, l'ancien DM place le nouveau en tête de cette liste (et le nouveau annonce la même liste) :
+dès la récupération qui lui apporte la liste, chaque poste interroge le nouveau DM, efface la
+paire relais, son émetteur (`relay_dm_base`), le `llmToken` et la clé de télémétrie de l'ancien,
+et se ré-enrôle en silence tant que sa session Keycloak est vivante ; sinon l'assistant
+d'enrôlement s'ouvre de lui-même. Le premier DM de la liste est réessayé une fois avant le repli :
+un raté passager ne change pas de DM. Un repli vers le DM suivant quand le premier ne répond
+toujours pas est aussi une passation ; le DM qui n'a pas répondu passe en queue jusqu'au
+redémarrage de LibreOffice, où son retour en tête est une autre passation. Limite connue : le flux de mise à
+jour natif (`<update-information>`) reste celui de l'OXT ; après une passation, la route dirigée
+livre la mise à jour une fois la route native en échec.
 
 ---
 
@@ -367,7 +384,14 @@ sequenceDiagram
 
 ## License
 
-- Voir `registration/license.txt`
+MIrAI est distribué sous [Mozilla Public License 2.0](LICENSE).
+Copyright (c) 2025-2026 Ministère de l'Intérieur.
 
-Dépôt de référence :
-- [IA-Generative/AssistantMiraiLibreOffice](https://github.com/IA-Generative/AssistantMiraiLibreOffice) — ce dépôt
+L'extension dérive de [localwriter](https://github.com/balisujohn/localwriter)
+de John Balis (Copyright (c) 2024 John Balis, MPL 2.0), lui-même dérivé d'un
+changement LibreOffice de The Document Foundation (MPL 2.0). Les fichiers
+hérités restent sous MPL 2.0 et conservent leurs mentions d'origine ; du
+code de dialogue repris d'une boîte de saisie du wiki de The Document
+Foundation est sous CC BY-SA 3.0, avec sa mention dans le source.
+
+Dépôt de référence : [IA-Generative/iassistant-libreoffice](https://github.com/IA-Generative/iassistant-libreoffice)

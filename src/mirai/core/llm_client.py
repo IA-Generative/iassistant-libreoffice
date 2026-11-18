@@ -17,10 +17,13 @@ import re
 
 from . import sse_pump, telemetry_steps
 from .progress import NullProgress
-from .text_filters import strip_think_blocks
+from .text_filters import after_leading_think, strip_think_blocks
 from .tool_calls import ToolCall
 
 DEFAULT_STEP_MAX_TOKENS = 4000
+
+# Statuts par lesquels un relais rejette un corps portant `tools`.
+TOOLS_REJECTED = ("http_400", "http_404", "http_422")
 
 _FENCE_RE = re.compile(r"```[a-zA-Z]*\n?|```")
 
@@ -31,7 +34,7 @@ class StepResult:
     tool_calls: list = dataclasses.field(default_factory=list)
     finish_reason: str = ""
     streamed: bool = False    # True si le texte a déjà été poussé au sink
-    error: str = ""           # "http_429", "network_error"… — étape interrompue
+    error: str = ""           # "http_429", "network_error", "cancelled"… — étape interrompue
     raw_json: str = ""        # réponse JSON brute (mode json, ré-encodage fidèle)
     reasoning_chars: int = 0  # raisonnement reçu — sert à diagnostiquer un
                               # budget épuisé avant la réponse (cf. step())
@@ -168,7 +171,7 @@ class LLMClient:
 
         # Auto-détection : le relais rejette la requête portant des tools →
         # bascule définitive en mode JSON et re-tentative immédiate.
-        if (result.error in ("http_400", "http_404", "http_422")
+        if (result.error in TOOLS_REJECTED
                 and mode == "native" and self.configured_mode == "auto"):
             self.shell.log("[llm] tools natifs rejetés — bascule en mode json")
             try:
@@ -254,17 +257,22 @@ class LLMClient:
         finish = [""]
         reasoning_chars = [0]
         chunks = [0]                  # chunks SSE effectivement traités
+        counted = [0]                 # jetons de ce flux déjà comptés par le relais
 
         def _handle_text(content):
             text_parts.append(content)
             if on_text_delta is None:
                 return
-            if not withhold:
-                live[0] = True
-                on_text_delta(content)
-                return
             if live[0]:
                 on_text_delta(content)
+                return
+            if not withhold:
+                # Un modèle qui raisonne dans le contenu commence par un bloc
+                # <think> : rien n'en sort, le flux démarre après lui.
+                visible = after_leading_think("".join(text_parts))
+                if visible is not None:
+                    live[0] = True
+                    on_text_delta(visible)
                 return
             if not decided[0]:
                 accumulated = "".join(text_parts).lstrip()
@@ -280,16 +288,8 @@ class LLMClient:
         def _on_event(event):
             chunks[0] += 1
             chunk = event.chunk
-            # Le relais peut envoyer un bloc `usage` en fin de flux — on le LIT
-            # s'il vient, sans jamais le réclamer : ajouter `stream_options` au
-            # corps ferait rejeter la requête par certains relais.
-            usage = chunk.get("usage")
-            if isinstance(usage, dict) and usage.get("completion_tokens"):
-                progress.exact_tokens(int(usage["completion_tokens"]))
             choices = chunk.get("choices") or []
-            if not choices:
-                return
-            choice = choices[0]
+            choice = choices[0] if choices else {}
             delta = choice.get("delta") or {}
             for fragment in delta.get("tool_calls") or []:
                 index = int(fragment.get("index", 0))
@@ -314,6 +314,17 @@ class LLMClient:
                 progress.on_reasoning(reasoning)
             if choice.get("finish_reason"):
                 finish[0] = choice["finish_reason"]
+            # Le relais peut envoyer un bloc `usage` en fin de flux — on le LIT
+            # s'il vient, sans jamais le réclamer : ajouter `stream_options` au
+            # corps ferait rejeter la requête par certains relais. Son décompte
+            # est cumulé sur la réponse et inclut le texte de son chunk : la
+            # jauge, qui additionne les appels du run, n'en reçoit que la part
+            # nouvelle, une fois ce texte lu.
+            usage = chunk.get("usage")
+            if isinstance(usage, dict) and usage.get("completion_tokens"):
+                total = int(usage["completion_tokens"])
+                progress.exact_tokens(total - counted[0])
+                counted[0] = total
 
         outcome = sse_pump.run_stream(self.shell, _build_request, _on_event,
                                       cancel_event=cancel_event)
@@ -330,6 +341,8 @@ class LLMClient:
             pass
 
         if not outcome.ok:
+            if outcome.cancelled:
+                return StepResult(error="cancelled")
             if isinstance(outcome.error, sse_pump.StreamHttpError):
                 return StepResult(error=f"http_{outcome.error.status}",
                                   finish_reason=finish[0],

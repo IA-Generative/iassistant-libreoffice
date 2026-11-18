@@ -66,9 +66,9 @@ def _writer_suggestions(selected_text: str, has_paragraph: bool):
     elif length > 0:
         items.append(Suggestion("suggestion.w_lengthen_phrase", preset_id="lengthen"))
     elif has_paragraph:
-        # Sans sélection les actions ciblent le paragraphe courant : proposer
+        # Sans sélection les actions portent sur tout le document : proposer
         # autre chose que « sélectionnez du texte » serait décourageant.
-        items.append(Suggestion("suggestion.w_simplify_paragraph", preset_id="simplify"))
+        items.append(Suggestion("suggestion.w_simplify_document", preset_id="simplify"))
 
     items.extend((
         Suggestion("suggestion.w_spellcheck",

@@ -15,7 +15,8 @@
 #   --bootstrap-url <url>    Bootstrap server URL (required)
 #   --slug <slug>            Plugin slug (default: mirai-libreoffice)
 #   --version <ver>          Version string (default: auto-detected from package)
-#   --strategy <s>           Rollout strategy: immediate|canary (default: canary)
+#   --strategy <s>           Rollout strategy: immediate|canary (default: immediate;
+#                            canary waits for device-management#49)
 #   --urgency <u>            Urgency: low|normal|critical (default: normal)
 #   --admin-token <tok>      Admin API token (default: $DM_ADMIN_TOKEN env var)
 #   --cohort-id <id>         Target cohort ID (default: none = all devices)
@@ -32,7 +33,7 @@ OXT_PATH="$ROOT_DIR/dist/mirai.oxt"
 BOOTSTRAP_URL=""
 SLUG="mirai-libreoffice"
 VERSION=""
-STRATEGY="canary"
+STRATEGY="immediate"
 URGENCY="normal"
 ADMIN_TOKEN="${DM_ADMIN_TOKEN:-}"
 COHORT_ID=""

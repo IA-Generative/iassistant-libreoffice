@@ -13,12 +13,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.stubs.helpers import http_response
 from tests.stubs.uno_stubs import install, make_job
 
 install()
 
 from src.mirai import entrypoint
 from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 TARGET = "0.0.1.0.32"
 CURRENT = "0.0.1.0.31"
@@ -137,10 +139,15 @@ def test_load_update_state_returns_empty_when_missing_or_corrupt():
 
 
 def _schedule_and_wait(job, directive, seconds=2):
+    """Vrai si la planification a lancé l'installation ; attend la fin du
+    worker plutôt qu'un délai."""
     done = threading.Event()
     job._perform_update = lambda d: done.set()
+    before = set(threading.enumerate())
     job._schedule_update(directive)
-    return done.wait(seconds)
+    for thread in set(threading.enumerate()) - before:
+        thread.join(seconds)
+    return done.is_set()
 
 
 def test_schedule_update_skips_target_in_cooldown():
@@ -389,8 +396,7 @@ def _routing_job(feed_offers=True, native_result=True):
     job._perform_native_update = MagicMock(return_value=native_result)
     job._wait_before_prompting = MagicMock()
     job.get_ssl_context = MagicMock()
-    job._urlopen = MagicMock()
-    job._urlopen.return_value.__enter__.return_value.read.return_value = b"oxt-bytes"
+    job._urlopen = MagicMock(return_value=http_response(b"oxt-bytes"))
     job._failover_ordered_urls = MagicMock(return_value=["https://dm.example"])
     return job
 
@@ -445,19 +451,6 @@ def test_directed_route_postponed_sets_cooldown():
     assert state["route"] == "directed"
     assert state["postponed_until"] >= before + entrypoint._UPDATE_POSTPONE_SECONDS - 1
     assert "UpdatePostponed" in _events(job)
-
-
-UPDATE_EVENTS = {
-    "UpdateStaged", "UpdateAccepted", "UpdatePostponed", "UpdateInstalledPendingRestart",
-    "UpdateInstallFailed", "UpdateNativeDialogShown", "ExtensionUpdated", "NativeFeedCheck",
-    "UpdateCloseDeferred",
-}
-
-
-def test_update_events_are_technical():
-    """Sans cela, le pipeline sécurisé jette ces spans avant la liaison
-    utilisateur : l'entonnoir de campagne serait aveugle sur une partie du parc."""
-    assert UPDATE_EVENTS <= MainJob._TECHNICAL_EVENTS
 
 
 def test_action_names_cover_native_dialog_event():
@@ -589,9 +582,9 @@ def test_close_after_inprocess_update_treats_veto_with_modified_document_as_refu
     job._terminate_on_main_thread.assert_not_called()
 
 
-def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch):
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
+def test_close_after_inprocess_update_gives_up_after_deadline(monkeypatch, fast_clock):
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 1)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 30)
     job, desktop = _close_job([False] * 50)
     assert job._close_after_inprocess_update() is False
     assert desktop.terminate.call_count >= 2
@@ -643,15 +636,17 @@ def test_run_on_main_thread_exposes_action_duration():
     assert job._last_main_thread_action_s >= 0.04
 
 
-def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch):
+def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch, fast_clock):
     """Callback jamais démarré (thread principal occupé) → on réessaie, JAMAIS de SIGTERM."""
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
-    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 0.05)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 1)
+    monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 30)
     job, _dialog, async_cb = _job_with_services(run_callback=False)
     job._terminate_on_main_thread = MagicMock()
     job._run_on_main_thread = MagicMock(return_value=(False, "timeout"))
     assert job._close_after_inprocess_update() is False
-    assert job._run_on_main_thread.call_count >= 2
+    attempts = [c for c in job._run_on_main_thread.call_args_list
+                if c.args[2] == "_close_after_inprocess_update"]
+    assert len(attempts) >= 2
     job._terminate_on_main_thread.assert_not_called()
 
 
@@ -713,7 +708,6 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     """addExtension encore en vol sur le thread principal : ni rapport failed, ni
     bannissement de la cible, ni boîte « mise à jour bloquée » — l'étape
     installed_inprocess laisse la réconciliation trancher au redémarrage."""
-    MainJob._update_launch_blocked_cls.discard(TARGET)
     job = _accepting_job()
     job._notify_update_blocked = MagicMock()
 
@@ -727,7 +721,7 @@ def test_install_in_flight_is_not_reported_as_a_failure():
     assert _state(job)["stage"] == "installed_inprocess"
     job._notify_update_blocked.assert_not_called()
     assert not [c for c in job._report_update_status.call_args_list if c.args[1] == "failed"]
-    assert TARGET not in MainJob._update_launch_blocked_cls
+    assert TARGET not in shell_runtime.get().update_launch_blocked
     assert "UpdateInstallFailed" not in _events(job)
 
 
@@ -811,16 +805,14 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
     monkeypatch.setattr(entrypoint, "_PROMPT_WIZARD_WAIT_SECONDS", 5)
     monkeypatch.setattr(entrypoint, "_PROMPT_POLL_SECONDS", 0.02)
     job = _job()
-    previous = MainJob._enrollment_wizard_active_cls
-    MainJob._enrollment_wizard_active_cls = False
 
     def _open_then_close():
         time.sleep(0.05)
-        with MainJob._enrollment_wizard_lock_cls:
-            MainJob._enrollment_wizard_active_cls = True
+        with shell_runtime.get().enrollment_wizard_lock:
+            shell_runtime.get().enrollment_wizard_active = True
         time.sleep(0.25)
-        with MainJob._enrollment_wizard_lock_cls:
-            MainJob._enrollment_wizard_active_cls = False
+        with shell_runtime.get().enrollment_wizard_lock:
+            shell_runtime.get().enrollment_wizard_active = False
 
     wizard = threading.Thread(target=_open_then_close, daemon=True)
     wizard.start()
@@ -828,10 +820,9 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
         t0 = time.time()
         job._wait_before_prompting()
         assert time.time() - t0 >= 0.25, "doit attendre la fermeture de l'assistant ouvert pendant la grâce"
-        assert MainJob._enrollment_wizard_active_cls is False
+        assert shell_runtime.get().enrollment_wizard_active is False
     finally:
         wizard.join(2)
-        MainJob._enrollment_wizard_active_cls = previous
 
 
 def _fake_cache(versions):

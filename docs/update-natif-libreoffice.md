@@ -8,8 +8,8 @@ Réfs : issue plugin [#5](https://github.com/IA-Generative/AssistantMiraiLibreOf
 
 Toutes les routes convergent vers **`ExtensionManager.addExtension` exécuté sur le
 thread principal de soffice** — le code exact du Gestionnaire des extensions, la
-seule voie validée comme fiable sur plusieurs cycles. Aucune route par défaut ne
-spawne de processus enfant (immunisé WinError 5 / AppLocker / Defender ASR).
+seule voie validée comme fiable sur plusieurs cycles. Aucune route ne spawne de
+processus enfant (immunisé WinError 5 / AppLocker / Defender ASR).
 
 | Route | Déclencheur | Téléchargement + installation | Cohorte/canary |
 |---|---|---|---|
@@ -184,8 +184,6 @@ un canary au reste du parc.
   plugin : si elle échoue, la route manuelle prend le relais. L'API bas niveau
   `removePackage`/`addPackage` n'est pas utilisée : elle ajoute le paquet sans
   l'enregistrer et laisse l'ancien enregistrement orphelin.
-- **Scripts `.bat`/`.sh` désactivés par défaut** (spawn d'enfant = WinError 5 +
-  cycle unopkg corrupteur). Réactivation diagnostic : `MIRAI_UPDATE_ALLOW_SCRIPT=1`.
 - **Rapport DM véridique** : `deferred` au staging, `installed` seulement quand
   la nouvelle version est **réellement active** (réconciliation au démarrage
   suivant, `_reconcile_update_state`), qui purge aussi `pending_update` et lève

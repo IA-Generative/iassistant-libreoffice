@@ -12,11 +12,13 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.stubs.uno_stubs import install, make_job, make_jwt, seed_user_config
 
 install()
 
-from src.mirai.entrypoint import MainJob
+from src.mirai.shell import runtime as shell_runtime
 
 
 def _enrolled(**extra):
@@ -38,10 +40,18 @@ def _enrolled(**extra):
 _REAL_TIMER = threading.Timer
 
 
-def _fast_timer(delay, fn):
-    t = _REAL_TIMER(0.01, fn)
-    t.daemon = True
-    return t
+def _schedule_and_join(job):
+    """Planifie la vérification d'enrôlement et attend son Timer, sans délai."""
+    timers = []
+
+    def immediate_timer(_delay, fn):
+        timers.append(_REAL_TIMER(0, fn))
+        return timers[-1]
+
+    with patch('threading.Timer', side_effect=immediate_timer):
+        job._schedule_enrollment_check()
+    for timer in timers:
+        timer.join(5)
 
 
 class _EnrollmentCase(unittest.TestCase):
@@ -121,10 +131,6 @@ class TestNeedsFirstEnrollment(_EnrollmentCase):
 class TestEnrollmentDismissedFlag(_EnrollmentCase):
     """Test _enrollment_dismissed flag behaviour."""
 
-    def test_initial_dismissed_is_false(self):
-        """Flag should start as False."""
-        self.assertFalse(MainJob._enrollment_dismissed_cls)
-
     def test_trigger_sets_dismissed_on_enrollment_cancel(self):
         """When enrollment is needed and _run_first_enrollment returns False,
         _enrollment_dismissed should become True."""
@@ -133,19 +139,17 @@ class TestEnrollmentDismissedFlag(_EnrollmentCase):
 
         # Mock _run_first_enrollment to simulate cancel
         with patch.object(self.job, '_run_first_enrollment', return_value=False):
-            with patch.object(self.job, '_schedule_config_refresh'):
-                self.job.trigger("test_action")
+            self.job.trigger("test_action")
 
-        self.assertTrue(MainJob._enrollment_dismissed_cls)
+        self.assertTrue(shell_runtime.get().enrollment_dismissed)
 
     def test_trigger_skips_enrollment_when_dismissed(self):
         """Once dismissed, trigger should NOT call _run_first_enrollment again."""
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
-        MainJob._enrollment_dismissed_cls = True
+        shell_runtime.get().enrollment_dismissed = True
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch.object(self.job, '_schedule_config_refresh'):
-                self.job.trigger("test_action")
+            self.job.trigger("test_action")
 
         mock_enroll.assert_not_called()
 
@@ -154,8 +158,7 @@ class TestEnrollmentDismissedFlag(_EnrollmentCase):
         seed_user_config(self.config_dir, _enrolled())
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch.object(self.job, '_schedule_config_refresh'):
-                self.job.trigger("test_action")
+            self.job.trigger("test_action")
 
         mock_enroll.assert_not_called()
 
@@ -169,12 +172,7 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
 
         with patch.object(self.job, '_run_first_enrollment', return_value=True) as mock_enroll:
-            # Use a very short timer for testing
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            # Wait for the timer to fire
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
             mock_enroll.assert_called_once()
 
     def test_timer_skips_when_already_enrolled(self):
@@ -182,22 +180,16 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         seed_user_config(self.config_dir, _enrolled())
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
             mock_enroll.assert_not_called()
 
     def test_timer_skips_when_dismissed(self):
         """Timer should NOT call _run_first_enrollment when dismissed."""
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
-        MainJob._enrollment_dismissed_cls = True
+        shell_runtime.get().enrollment_dismissed = True
 
         with patch.object(self.job, '_run_first_enrollment') as mock_enroll:
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
-
-            time.sleep(0.1)
+            _schedule_and_join(self.job)
             mock_enroll.assert_not_called()
 
     def test_timer_sets_dismissed_on_cancel(self):
@@ -205,22 +197,19 @@ class TestScheduleEnrollmentCheck(_EnrollmentCase):
         seed_user_config(self.config_dir, {"enrolled": False, "access_token": ""})
 
         with patch.object(self.job, '_run_first_enrollment', return_value=False):
-            with patch('threading.Timer', side_effect=_fast_timer):
-                self.job._schedule_enrollment_check()
+            _schedule_and_join(self.job)
 
-            time.sleep(0.1)
-
-        self.assertTrue(MainJob._enrollment_dismissed_cls)
+        self.assertTrue(shell_runtime.get().enrollment_dismissed)
 
 
+@pytest.mark.usefixtures("fast_clock")
 class TestRunFirstEnrollment(_EnrollmentCase):
     """Test _run_first_enrollment orchestration."""
 
     def test_returns_false_when_config_fetch_fails(self):
         """If config fetch returns None, enrollment should fail."""
-        with patch.object(self.job, '_schedule_config_refresh'):
-            with patch.object(self.job, '_fetch_config', return_value=None):
-                result = self.job._run_first_enrollment()
+        with patch.object(self.job, '_fetch_config', return_value=None):
+            result = self.job._run_first_enrollment()
         self.assertFalse(result)
 
     def test_returns_true_when_auth_succeeds(self):
@@ -228,21 +217,42 @@ class TestRunFirstEnrollment(_EnrollmentCase):
         fake_config = {"config": {"keycloakIssuerUrl": "http://test"}}
         fake_token = make_jwt({"exp": int(time.time()) + 3600})
 
-        with patch.object(self.job, '_schedule_config_refresh'):
-            with patch.object(self.job, '_fetch_config', return_value=fake_config):
-                with patch.object(self.job, '_ensure_access_token', return_value=fake_token):
-                    result = self.job._run_first_enrollment()
+        with patch.object(self.job, '_fetch_config', return_value=fake_config):
+            with patch.object(self.job, '_ensure_access_token', return_value=fake_token):
+                result = self.job._run_first_enrollment()
         self.assertTrue(result)
 
     def test_returns_false_when_auth_fails(self):
         """Config fetch OK but auth returns None → enrollment fails."""
         fake_config = {"config": {"keycloakIssuerUrl": "http://test"}}
 
-        with patch.object(self.job, '_schedule_config_refresh'):
-            with patch.object(self.job, '_fetch_config', return_value=fake_config):
-                with patch.object(self.job, '_ensure_access_token', return_value=None):
-                    result = self.job._run_first_enrollment()
+        with patch.object(self.job, '_fetch_config', return_value=fake_config):
+            with patch.object(self.job, '_ensure_access_token', return_value=None):
+                result = self.job._run_first_enrollment()
         self.assertFalse(result)
+
+    def test_waits_for_the_fetch_in_flight_instead_of_giving_up(self):
+        """DM lent : le fetch lancé avant le wizard dure 2 s. Le fetch forcé du
+        wizard l'attend au lieu d'être refusé par le garde de récursion."""
+        from src.mirai import entrypoint
+        clock = entrypoint.time
+        start = clock.time()
+        real_sleep = clock.sleep
+
+        def sleep(seconds):
+            real_sleep(seconds)
+            if clock.time() - start >= 2:
+                self.job._fetching_config = False
+
+        def fetch_config(force=False):
+            # Comme _fetch_config : refusé tant qu'un fetch est en vol.
+            return None if self.job._fetching_config else {"config": {}}
+
+        self.job._fetching_config = True
+        with patch.object(clock, "sleep", side_effect=sleep), \
+                patch.object(self.job, "_fetch_config", side_effect=fetch_config), \
+                patch.object(self.job, "_ensure_access_token", return_value="token"):
+            self.assertTrue(self.job._run_first_enrollment())
 
 
 if __name__ == "__main__":

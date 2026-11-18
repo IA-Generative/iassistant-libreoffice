@@ -28,6 +28,37 @@ class FakeSSEResponse:
         return iter(self._lines)
 
 
+class StoppedSSEResponse(FakeSSEResponse):
+    """Flux pendant lequel l'utilisateur clique sur « Arrêter » : l'événement
+    d'annulation est armé juste après la livraison du premier chunk."""
+
+    def __init__(self, chunks, cancel_event):
+        super().__init__(chunks)
+        self._cancel_event = cancel_event
+
+    def __iter__(self):
+        for index, line in enumerate(self._lines):
+            if index == 1:
+                self._cancel_event.set()
+            yield line
+
+
+class ProbedSSEResponse(FakeSSEResponse):
+    """Flux pendant lequel `during()` s'exécute juste après la livraison du
+    premier chunk : ce que voit, ou ce que fait, l'utilisateur pendant que le
+    modèle écrit."""
+
+    def __init__(self, chunks, during):
+        super().__init__(chunks)
+        self._during = during
+
+    def __iter__(self):
+        for index, line in enumerate(self._lines):
+            if index == 1:
+                self._during()
+            yield line
+
+
 def text_chunks(*texts, finish="stop"):
     """Chunks SSE simulant un texte streamé delta par delta."""
     chunks = [{"choices": [{"delta": {"content": t}}]} for t in texts]
@@ -75,6 +106,7 @@ class FakeShell:
         self.telemetry_events = []   # (span, attrs)
         self.llm_errors = []         # (status, body)
         self.logs = []
+        self.opened_urls = []        # URL ouvertes dans le navigateur
         self._config_dir = config_dir
         self.recover_auth_calls = 0
         self._recover_auth_result = recover_auth_result
@@ -88,6 +120,13 @@ class FakeShell:
 
     def data_dir(self):
         return self._config_dir
+
+    def get_link(self, link_id):
+        from src.mirai.core.links import find_link
+        return find_link(self.config.get("links", []), link_id)
+
+    def open_link(self, url):
+        self.opened_urls.append(url)
 
     # Transport
     def build_chat_request(self, messages, max_tokens=2000, extra_body=None):

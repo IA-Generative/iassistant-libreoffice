@@ -25,7 +25,7 @@ Extension LibreOffice intégrant un assistant IA directement dans **Writer** et 
 
 MIrAI est un assistant d'écriture intégré à LibreOffice. Il vous aide à rédiger, reformuler, résumer et corriger vos documents sans quitter votre traitement de texte. Vous sélectionnez du texte, vous choisissez une action dans le menu MIrAI (ou via un raccourci clavier), et l'IA vous propose un résultat en quelques secondes.
 
-Dans **Writer**, vous pouvez par exemple : continuer un brouillon, reformuler un paragraphe en langage simple, résumer un long rapport, ou ajuster la longueur d'un passage. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
+Dans **Writer**, vous pouvez par exemple : reformuler un paragraphe en langage simple, résumer un long rapport, ajuster la longueur d'un passage, corriger ses fautes ou le traduire. Dans **Calc**, vous pouvez transformer une colonne entière (traduire, classifier…), générer des formules en langage naturel ou analyser des tendances dans vos données.
 
 Toutes les modifications sont annulables d'un simple Ctrl+Z.
 
@@ -87,22 +87,7 @@ Si l'assistant d'enrôlement ne s'affiche pas, la configuration a été fournie 
 
 Toutes les fonctionnalités Writer sont accessibles depuis le menu **🤖 MIrAI 🤖** ou par raccourci clavier. Elles agissent sur le **texte sélectionné** dans votre document.
 
-### 3.1 ✨ Générer la suite 
-
-Génère la continuation naturelle du texte sélectionné. L'IA écrit la suite comme si elle en était l'auteur.
-
-> 🟢 **Novice** — Mode d'emploi :
->
-> 1. Sélectionnez un passage de texte (un début de phrase, un paragraphe…)
-> 2. Ouvrez l'assistant (**Ctrl+Alt+Espace**, macOS **Ctrl+Opt+Espace**) puis cliquez sur **Générer la suite**
-> 3. Le texte généré apparaît directement après votre sélection, entre des marqueurs `---début-du-texte-généré---` et `---fin-du-texte-généré---`
-> 4. Relisez le résultat et supprimez les marqueurs si le texte vous convient
->
-> *Exemple : sélectionnez "Le projet vise à améliorer" et l'IA complétera avec la suite logique de votre texte.*
-
-> 🔵 **Expert** — Le prompt système injecte une directive de continuation directe (pas de question, pas de reformulation). Si le modèle répond par une question malgré tout, un **retry automatique** est déclenché avec un prompt renforcé. Le budget de tokens est configurable via `extend_selection_max_tokens` (défaut : 15 000). Le prompt système additionnel peut être personnalisé via `extend_selection_system_prompt`.
-
-### 3.2 🖊️ Modifier la sélection 
+### 3.1 🖊️ Modifier la sélection 
 
 Ouvre une boîte de dialogue pour donner une instruction libre à l'IA sur le texte sélectionné.
 
@@ -122,7 +107,6 @@ Ouvre une boîte de dialogue pour donner une instruction libre à l'IA sur le te
 La fenêtre de modification contient :
 - Un **champ de saisie** pour votre instruction
 - Un bouton **Envoyer** pour lancer le traitement
-- Un lien **Ouvrir prompt.txt** pour accéder au fichier de prompt personnalisable
 
 #### Suggestions contextuelles IA
 
@@ -134,9 +118,9 @@ Sous le champ de saisie, une liste de **suggestions** s'affiche automatiquement.
 
 Si la génération IA échoue, des suggestions génériques sont proposées (correction, reformulation, simplification…).
 
-> 🔵 **Expert** — Les suggestions sont générées via un appel LLM séparé (max 600 tokens). Le prompt impose une liste numérotée de 8 instructions en français. Les blocs `<think>` et les lignes non numérotées sont filtrés pour éviter que le raisonnement du modèle n'apparaisse dans les suggestions. Le prompt système de la modification est configurable via `edit_selection_system_prompt`.
+> 🔵 **Expert** — Les suggestions sont générées via un appel LLM séparé (max 600 tokens). Le prompt impose une liste numérotée de 8 instructions en français. Les blocs `<think>` et les lignes non numérotées sont filtrés pour éviter que le raisonnement du modèle n'apparaisse dans les suggestions.
 
-### 3.3 📏 Ajuster la longueur 
+### 3.2 📏 Ajuster la longueur 
 
 Ouvre un mini-dialogue flottant avec deux boutons **−** et **+** pour réduire ou développer le texte sélectionné.
 
@@ -169,7 +153,7 @@ Après chaque clic, re-sélectionnez le nouveau texte et cliquez à nouveau. Cha
 
 > 🔵 **Expert** — Le prompt inclut le nombre de mots de l'original et un objectif précis (ex. : "57 mots maximum" pour une réduction). Le résultat est appliqué via `rng.setString()` (remplacement en place, pas d'insertion après). Les blocs `<think>` sont filtrés avec trois passes regex (blocs complets, `</think>` en début, `<think>` non fermé en fin). La zone de prévisualisation affiche le flux brut y compris le raisonnement pour transparence, mais seul le texte nettoyé est écrit dans le document.
 
-### 3.4 📝 Résumer la sélection 
+### 3.3 📝 Résumer la sélection 
 
 Génère un résumé concis du texte sélectionné.
 
@@ -184,7 +168,7 @@ Génère un résumé concis du texte sélectionné.
 
 > 🔵 **Expert** — Le prompt impose un résumé "ultra-concis" dans la même langue que l'original. Le budget de tokens est configurable via `summarize_selection_max_tokens`. Des stop phrases (`[END]`, `---END---`) sont détectées en streaming pour couper le flux si le modèle tente d'ajouter du contenu superflu.
 
-### 3.5 💬 Reformuler la sélection 
+### 3.4 💬 Reformuler la sélection 
 
 Réécrit le texte sélectionné en langage clair et accessible, en conservant le sens.
 
@@ -198,6 +182,36 @@ Réécrit le texte sélectionné en langage clair et accessible, en conservant l
 > *Exemple : sélectionnez un article juridique, Ctrl+Alt+Espace, et obtenez une version compréhensible par tous.*
 
 > 🔵 **Expert** — Le prompt système demande des phrases courtes, des mots courants, la voix active. La détection de questions conversationnelles est active (patterns : "voulez-vous", "souhaitez-vous", "would you like"…). Si le modèle pose une question, un message d'avertissement remplace le résultat. Le budget de tokens est configurable via `simplify_selection_max_tokens`.
+
+### 3.5 ✏️ Corriger
+
+Corrige l'orthographe, la grammaire, la conjugaison et la ponctuation, sans reformuler.
+
+> 🟢 **Novice** — Mode d'emploi :
+>
+> 1. Sélectionnez le passage à corriger, ou ne sélectionnez rien pour corriger tout le document
+> 2. Ouvrez l'assistant (**Ctrl+Alt+Espace**, macOS **Ctrl+Opt+Espace**) puis cliquez sur **Corriger**
+> 3. Les fautes sont corrigées à leur place ; les autres mots gardent leur mise en forme (gras, italique, liens)
+> 4. Si le texte ne contient aucune faute, l'assistant le dit et ne modifie rien
+>
+> Cochez **Ajouter à la suite** pour obtenir le texte corrigé après le vôtre, entre `---début-du-texte-corrigé---` et `---fin-du-texte-corrigé---`, sans toucher à l'original.
+
+> 🔵 **Expert** — Le texte corrigé est comparé mot à mot à l'original, et seuls les caractères qui changent sont réécrits. Le modèle rend une ligne par ligne envoyée ; s'il en rend un autre nombre, rien n'est écrit. Une note, un commentaire, un champ ou une image ancrée comme caractère ne sont jamais effacés : un passage qu'une correction abîmerait n'est pas modifié, l'assistant le dit et le résultat reste affiché dans la palette. Le modèle voit le numéro d'une note collé au mot qui la porte : s'il le retire en corrigeant ce mot, le mot est corrigé et la note reste. Sans sélection, chaque paragraphe non vide, titres compris, part sur sa propre ligne, et un paragraphe dans ce cas reste tel quel ; le bilan en donne le nombre.
+
+### 3.6 🌐 Traduire
+
+Traduit le passage sélectionné, ou tout le document.
+
+> 🟢 **Novice** — Mode d'emploi :
+>
+> 1. Sélectionnez le passage à traduire, ou ne sélectionnez rien pour traduire tout le document
+> 2. Ouvrez l'assistant puis cliquez sur **Traduire** : le texte est traduit dans la langue de LibreOffice
+> 3. Pour une autre langue, tapez-la d'abord dans le champ de saisie (« anglais », « allemand »…), puis cliquez sur **Traduire**
+> 4. Si le texte est déjà dans la langue demandée, l'assistant le dit et ne modifie rien : tapez la langue voulue et cliquez à nouveau
+>
+> La traduction remplace le texte d'origine ; cochez **Ajouter à la suite** pour l'obtenir après lui, entre `---début-de-la-traduction---` et `---fin-de-la-traduction---`.
+
+> 🔵 **Expert** — Sans langue tapée, la langue cible est celle de l'interface de l'extension : celle de LibreOffice quand l'extension la propose (français, anglais, espagnol, portugais, chinois), l'anglais sinon. Sans sélection, titres et paragraphes sont traduits chacun à sa place et gardent leur style ; un paragraphe déjà dans la langue cible reste tel quel. La traduction s'écrit ligne à ligne : chaque paragraphe sélectionné garde sa place et son style, une ligne inchangée garde sa mise en forme, et une ligne traduite prend celle de son premier caractère, si bien que le gras ou l'italique d'un mot isolé est perdu. Comme pour Corriger, un passage dont la traduction effacerait une note, un commentaire, un champ ou une image n'est pas modifié.
 
 ---
 
@@ -219,7 +233,7 @@ Applique une instruction IA sur une plage de cellules et écrit les résultats d
 >
 > *Exemple : vous avez 50 descriptions de produits en français ? Sélectionnez la colonne, Ctrl+Alt+Espace, tapez "Traduire en anglais", et la traduction apparaît à côté.*
 
-> 🔵 **Expert** — L'extension détecte automatiquement la première colonne libre à droite de la sélection. L'en-tête de la colonne de résultat reprend le style de la ligne d'en-tête existante. Le traitement est séquentiel (cellule par cellule) avec le contexte de chaque ligne.
+> 🔵 **Expert** — L'extension détecte automatiquement la première colonne libre à droite de la sélection. L'en-tête de la colonne de résultat reprend le style de la ligne d'en-tête existante. Le traitement est séquentiel (cellule par cellule) avec le contexte de chaque ligne. Transformer traite au plus 500 lignes et 50 000 cellules à la fois : au-delà, rien n'est lu ni écrit, et l'assistant demande une sélection plus petite.
 
 ### 4.2 🧮 Générer une formule (Ctrl+Alt+Espace)
 
@@ -248,7 +262,7 @@ Analyse une plage de cellules et produit un résumé des tendances, anomalies et
 >
 > *Exemple : sélectionnez un tableau trimestriel, Ctrl+Alt+Espace, et obtenez "Hausse de 12% au T3, baisse notable en juillet, valeur aberrante en cellule C7".*
 
-> 🔵 **Expert** — Le résultat est inséré deux lignes sous la sélection. La cellule de résultat est fusionnée sur la largeur de la sélection pour une meilleure lisibilité.
+> 🔵 **Expert** — Le résultat est inséré deux lignes sous la sélection. La cellule de résultat est fusionnée sur la largeur de la sélection pour une meilleure lisibilité. Un tableau plus long que `document_chunk_max_chars` (20 000 caractères par défaut) n'est envoyé qu'en partie, ses premières lignes : le modèle le sait, la cellule de résultat le dit en première ligne, et l'assistant annonce combien de lignes ont été analysées.
 
 ---
 
@@ -261,7 +275,6 @@ Accessible depuis le menu **🤖 MIrAI 🤖 → ⚙️ Paramètres**. Vous pouve
 - **URL du backend** — L'adresse du serveur IA
 - **Modèle par défaut** — Le modèle de langage à utiliser
 - **Token API** — Votre clé d'authentification
-- **Proxy** — Si votre réseau nécessite un proxy
 
 Dans la plupart des cas, ces paramètres sont préconfigurés par votre administrateur via le Device Management.
 
@@ -283,7 +296,7 @@ Au premier lancement, les réglages sont initialisés depuis `config.default.jso
 
 #### Vos données
 
-L'extension ne garde sur votre poste que ses réglages, votre conversation et son journal, dans ce dossier. Aucun mot de passe ni jeton n'y est écrit (hors flux de télémétrie sécurisée hérité, inactif en pratique, voir donnees-locales.md) : ils sont confiés au coffre de votre système (Gestionnaire d'identification sous Windows, trousseau sous macOS). Sous Linux, ils ne sont gardés qu'en mémoire : l'assistant de connexion s'affiche à chaque session LibreOffice. Si vous désinstallez l'extension depuis le Gestionnaire des extensions de LibreOffice, tout est effacé ; redémarrez ensuite LibreOffice. Détails pour votre support : [donnees-locales.md](donnees-locales.md).
+L'extension ne garde sur votre poste que ses réglages, votre conversation et son journal, dans ce dossier. Aucun mot de passe ni jeton n'y est écrit : ils sont confiés au coffre de votre système (Gestionnaire d'identification sous Windows, trousseau sous macOS). Sous Linux, ils ne sont gardés qu'en mémoire : l'assistant de connexion s'affiche à chaque session LibreOffice. Si vous désinstallez l'extension depuis le Gestionnaire des extensions de LibreOffice, tout est effacé ; redémarrez ensuite LibreOffice. Détails pour votre support : [donnees-locales.md](donnees-locales.md).
 
 Pour construire un OXT avec un profil spécifique :
 
@@ -293,16 +306,21 @@ Pour construire un OXT avec un profil spécifique :
 
 ### 5.3 🔵 Proxy et certificats SSL
 
-Le proxy se règle depuis **🤖 MIrAI 🤖 → ⚙️ Paramètres**, bouton **Proxy**. Les réglages sont enregistrés dans `mirai/settings.json` ; le mot de passe du proxy, lui, va dans le coffre du système (voir [Vos données](#vos-données)) :
+Le proxy se règle dans `mirai/settings.json`, LibreOffice fermé ; le Device Management ne le pilote pas. Pour tout un parc, l'administrateur peut placer ces clés, sauf le mot de passe, dans le profil de build de l'OXT (voir 5.2) ; une valeur de `settings.json` l'emporte.
 
 ```json
 {
-  "proxy_enabled": false,
+  "proxy_enabled": true,
   "proxy_url": "proxy.example.local:8080",
-  "proxy_allow_insecure_ssl": true,
-  "proxy_username": ""
+  "proxy_username": "jdupont",
+  "proxy_password": "votre-mot-de-passe"
 }
 ```
+
+- **Mot de passe** : il n'est pris en compte qu'au démarrage suivant de LibreOffice, où il quitte le fichier pour le coffre du système (Windows, macOS). Sous Linux, il n'est gardé qu'en mémoire : réécrivez-le dans le fichier avant chaque session (voir [Vos données](#vos-données)).
+- **Retirer un mot de passe rangé** : un `proxy_password` vide ne l'efface pas du coffre. Supprimez l'entrée `proxy_password` du service `MIrAI-LibreOffice` (noms exacts et commandes : [donnees-locales.md](donnees-locales.md)).
+- **JSON valide** : un fichier invalide est ignoré, puis remplacé à la prochaine écriture de l'extension ; les réglages qu'il portait sont perdus.
+- **`proxy_allow_insecure_ssl`** : à `true`, il coupe la vérification des certificats pour toutes les connexions de l'extension, pas seulement celles qui passent par le proxy. Réservé au diagnostic.
 
 Un bundle de certificats CA peut être spécifié via `ca_bundle_path`. Par défaut, le bundle Scaleway est inclus dans l'extension.
 
@@ -312,8 +330,6 @@ Chaque fonctionnalité dispose d'un prompt système configurable via `config.jso
 
 | Clé de configuration | Fonctionnalité |
 |---------------------|----------------|
-| `extend_selection_system_prompt` | Générer la suite |
-| `edit_selection_system_prompt` | Modifier la sélection |
 | `summarize_selection_system_prompt` | Résumer la sélection |
 | `simplify_selection_system_prompt` | Reformuler la sélection |
 | `systemPrompt` | Prompt système global (ajouté à toutes les requêtes) |
@@ -322,12 +338,10 @@ Les budgets de tokens sont également configurables :
 
 | Clé | Défaut |
 |-----|--------|
-| `extend_selection_max_tokens` | 15 000 |
-| `edit_selection_max_new_tokens` | 15 000 |
 | `summarize_selection_max_tokens` | 15 000 |
 | `simplify_selection_max_tokens` | 15 000 |
 
-Un fichier `prompt.txt` placé à côté du document est détecté automatiquement et peut être ouvert depuis la boîte de dialogue d'édition.
+Sans sélection, la demande libre et les actions rapides de Writer portent sur tout le document. `document_chunk_max_chars` (20 000 caractères par défaut) borne chaque envoi au modèle : en deçà, la demande libre et Résumer partent d'un seul appel ; au-delà, le document est envoyé section par section, et le résumé se fait par étapes. Simplifier, Raccourcir et Allonger vont toujours section par section ; Corriger et Traduire envoient chaque paragraphe sur sa propre ligne, titres compris. Le texte des tableaux n'est ni envoyé au modèle ni réécrit : le bilan dit combien de tableaux l'action a laissés de côté, et sur un document fait de tableaux seuls, les actions rapides le disent sans appeler le modèle ; Simplifier, Raccourcir et Allonger le disent aussi d'un document fait de titres et de tableaux. Les tableaux restent en place : le texte de part et d'autre d'un tableau est réécrit séparément, et en mode remplacement, la demande libre, sur un document dont un tableau coupe le texte, est appliquée morceau par morceau, ce que la palette signale.
 
 ---
 
@@ -346,7 +360,6 @@ Un fichier `prompt.txt` placé à côté du document est détecté automatiqueme
 > - **Choix du modèle** — Les modèles plus grands (70B+) produisent des résultats de meilleure qualité mais sont plus lents. Les modèles de raisonnement (deepseek-r1) ajoutent une latence due à la phase de réflexion, mais leurs balises `<think>` sont filtrées automatiquement.
 > - **Température** — Configurable via le backend. Une température basse (0.3-0.5) convient pour la correction et la reformulation, une température plus haute (0.7-1.0) pour la génération créative.
 > - **Limites de tokens** — Si le résultat est tronqué, augmentez le budget de tokens dans la configuration. Attention : certains modèles ont des limites de contexte strictes.
-> - **prompt.txt** — Placez un fichier `prompt.txt` à côté de votre document pour injecter des instructions persistantes dans le dialogue d'édition.
 
 ---
 
@@ -366,10 +379,10 @@ Un fichier `prompt.txt` placé à côté du document est détecté automatiqueme
 **"Erreur de connexion"**
 - Vérifiez votre accès réseau
 - Vérifiez l'URL du backend dans Paramètres
-- Si vous êtes derrière un proxy, configurez-le dans les paramètres
+- Si vous êtes derrière un proxy, réglez-le dans `mirai/settings.json` (voir [Proxy et certificats SSL](#53--proxy-et-certificats-ssl))
 
-**"Token invalide"**
-- Une boîte de dialogue vous proposera d'ouvrir les paramètres pour vérifier votre token API
+**"Votre poste n'est pas authentifié auprès du service IA"**
+- La fenêtre de l'assistant affiche ce message quand le service IA refuse votre jeton, après une tentative de renouvellement. Ouvrez MIrAI → Paramètres pour vous reconnecter.
 
 > 🔵 **Expert** — Diagnostic avancé :
 >

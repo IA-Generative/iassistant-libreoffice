@@ -59,7 +59,6 @@ done
 
 if [ -z "$UNOPKG" ]; then
   echo "    unopkg introuvable -> installation MANUELLE requise."
-  echo "    Voir tests/TEST-MANUEL-utilisateur.md (section LibreOffice)."
   echo "SMOKE-DEPLOY PARTIEL (plugin buildé, non installé)"
   exit 0
 fi
@@ -95,4 +94,3 @@ fi
 
 echo ""
 echo "SMOKE-DEPLOY OK (plugin LibreOffice installé)"
-echo "Recette utilisateur : tests/TEST-MANUEL-utilisateur.md"

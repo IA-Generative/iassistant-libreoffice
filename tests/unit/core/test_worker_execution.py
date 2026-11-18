@@ -5,16 +5,22 @@ run, **rien** ne touche UNO depuis le thread de fond, et le thread principal
 n'est jamais immobilisé.
 """
 
-import queue
 import threading
 
+import pytest
+
+from src.mirai.core import presets
 from src.mirai.core.context import ToolContext
 from src.mirai.core.orchestrator import Orchestrator, RunObserver
 from src.mirai.core.registry import ToolRegistry
-from src.mirai.core.sinks import PaletteSink, WriterInsertSink, WriterReplaceSink
+from src.mirai.core.sinks import PaletteSink
 from src.mirai.core.tool_calls import ToolCall, ToolResult, ToolSpec
-from src.mirai.core.ui_thread import DirectDispatcher
-from tests.stubs.fake_shell import FakeShell
+from src.mirai.core.ui_thread import DirectDispatcher, DispatcherTimeout
+from src.mirai.i18n import t as _t
+from tests.stubs.fake_docs import FakeWriterDoc
+from tests.stubs.fake_shell import FakeShell, FakeSSEResponse, text_chunks
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
+from tests.stubs.thread_pinned_dispatcher import ThreadPinnedDispatcher
 
 
 class RecordingDispatcher(DirectDispatcher):
@@ -33,32 +39,43 @@ class RecordingDispatcher(DirectDispatcher):
         return super().call(fn, timeout=timeout)
 
 
-class FakeDoc:
-    """Document minimal qui refuse d'être touché hors thread principal."""
+class HeldMainThread(DirectDispatcher):
+    """Thread principal retenu par une boîte de dialogue modale.
 
-    def __init__(self, allowed_thread):
-        self.allowed = allowed_thread
-        self.violations = []
+    Comme le vrai dispatcher : un call() qui dépasse son délai renonce sans
+    jamais exécuter sa tâche, un post() attend que la main revienne.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.held = False
+        self._posted = []
+
+    def call(self, fn, timeout=30.0):
+        if self.held:
+            raise DispatcherTimeout("le thread principal n'a pas répondu")
+        return super().call(fn, timeout=timeout)
+
+    def post(self, fn):
+        if self.held:
+            self._posted.append(fn)
+            return True
+        return super().post(fn)
+
+    def release(self):
+        self.held = False
+        for fn in self._posted:
+            fn()
+
+
+class FakeDoc:
+    """Document minimal : texte écrit."""
+
+    def __init__(self):
         self.text = ""
 
-    def _check(self):
-        current = threading.current_thread()
-        if current is not self.allowed:
-            self.violations.append(current.name)
-
     def write(self, chunk):
-        self._check()
         self.text += chunk
-
-    def getUndoManager(self):
-        self._check()
-        return self
-
-    def enterUndoContext(self, _label):
-        self._check()
-
-    def leaveUndoContext(self):
-        self._check()
 
 
 class _StepResult:
@@ -92,13 +109,14 @@ class ScriptedLLM:
         return [{"role": "tool", "content": r.content} for r in results]
 
 
-def _registry(on_call=None):
+def _registry(on_call=None, mutates=False):
     registry = ToolRegistry()
     registry.register(ToolSpec(
         name="writer_insert_text", description="test", apps=("writer",),
         parameters={"type": "object", "properties": {}},
         handler=on_call or (
-            lambda ctx, args: ToolResult(call_id="", ok=True, content="ok"))))
+            lambda ctx, args: ToolResult(call_id="", ok=True, content="ok")),
+        mutates=mutates))
     return registry
 
 
@@ -127,107 +145,36 @@ def test_tools_are_executed_through_the_dispatcher():
     assert dispatcher.calls, "l'exécution du tool doit passer par dispatcher.call"
 
 
-def test_undo_context_is_closed_through_the_dispatcher():
-    dispatcher = RecordingDispatcher()
-    ctx = _context(FakeShell(), dispatcher)
-    llm = ScriptedLLM([_StepResult(text="ok")])
+def test_a_run_ending_while_the_main_thread_is_held_closes_its_undo_context_later():
+    """Une boîte de dialogue modale retient le thread principal quand le run
+    se termine : le contexte undo se referme à son retour au lieu de rester
+    ouvert pour le reste de la session."""
+    dispatcher = HeldMainThread()
+    fake = FakeWriterDoc()
 
-    Orchestrator(llm, _registry(), ctx, dispatcher=dispatcher).run_agentic(
-        "x", PaletteSink())
+    def write_then_dialog(_ctx, _args):
+        dispatcher.held = True
+        return ToolResult(call_id="", ok=True, content="ok")
 
-    assert dispatcher.calls, "undo_end doit passer par le dispatcher"
+    llm = ScriptedLLM([
+        _StepResult(tool_calls=[ToolCall(id="1", name="writer_insert_text",
+                                         arguments={})]),
+        _StepResult(text="Fini."),
+    ])
+    ctx = _context(FakeShell(), dispatcher, doc=fake)
+    Orchestrator(llm, _registry(write_then_dialog, mutates=True), ctx,
+                 dispatcher=dispatcher).run_agentic("x", PaletteSink())
+    dispatcher.release()
 
-
-class ThreadPinnedDispatcher:
-    """Dispatcher qui exécute réellement sur UN thread désigné.
-
-    Il tient le rôle du thread principal de LibreOffice : une file, un thread
-    de service, et des appels qui attendent leur résultat. C'est ce qui permet
-    de prouver le marshalling au lieu de le supposer.
-    """
-
-    def __init__(self):
-        self._queue = queue.Queue()
-        self._closed = False
-        self.thread = threading.Thread(target=self._serve, name="main-uno",
-                                       daemon=True)
-        self.thread.start()
-
-    def _serve(self):
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            fn, result_queue = item
-            try:
-                value = fn()
-                if result_queue is not None:
-                    result_queue.put(("ok", value))
-            except Exception as exc:
-                if result_queue is not None:
-                    result_queue.put(("error", exc))
-
-    def post(self, fn):
-        if self._closed:
-            return False
-        self._queue.put((fn, None))
-        return True
-
-    def call(self, fn, timeout=30.0):
-        if self._closed:
-            raise RuntimeError("fermé")
-        result_queue = queue.Queue(maxsize=1)
-        self._queue.put((fn, result_queue))
-        status, payload = result_queue.get(timeout=timeout)
-        if status == "error":
-            raise payload
-        return payload
-
-    def close(self):
-        self._closed = True
-        self._queue.put(None)
+    assert fake.undo.entered and fake.undo.left == 1
 
 
-def test_writer_sink_never_touches_the_document_from_a_worker():
-    """Le test qui donne son sens à la refonte.
 
-    Le run tourne dans un thread worker ; le document note tout accès venu
-    d'ailleurs que du thread principal simulé. La liste des violations doit
-    rester vide — c'est exactement la garantie que l'ancien code n'avait pas.
-    """
-    dispatcher = ThreadPinnedDispatcher()
-    doc = FakeDoc(allowed_thread=dispatcher.thread)
-    ctx = _context(FakeShell(), dispatcher, doc=doc)
-
-    class DocSink(WriterInsertSink):
-        def _start_on_main(self):
-            self._started = True
-
-        def _insert_on_main(self, text):
-            doc.write(text)
-
-    sink = DocSink(ctx, "", "")
-
-    def worker():
-        sink.stream_delta("bon")
-        sink.stream_delta("jour")
-
-    thread = threading.Thread(target=worker, name="mirai-run")
-    thread.start()
-    thread.join(timeout=5)
-    dispatcher.close()
-
-    assert doc.text == "bonjour"
-    assert doc.violations == [], (
-        "le document a été touché depuis un thread de fond : "
-        f"{doc.violations}")
-
-
-def test_undo_context_is_opened_on_the_main_thread():
+def test_undo_context_is_opened_on_the_main_thread(thread_guard):
     """enterUndoContext depuis un worker = écriture VCL sans SolarMutex."""
     dispatcher = ThreadPinnedDispatcher()
-    doc = FakeDoc(allowed_thread=dispatcher.thread)
-    ctx = _context(FakeShell(), dispatcher, doc=doc)
+    fake = FakeWriterDoc()
+    ctx = _context(FakeShell(), dispatcher, doc=thread_guard(fake, dispatcher.thread))
 
     def worker():
         ctx.undo_begin("Test")
@@ -238,7 +185,92 @@ def test_undo_context_is_opened_on_the_main_thread():
     thread.join(timeout=5)
     dispatcher.close()
 
-    assert doc.violations == [], f"undo touché hors thread principal : {doc.violations}"
+    assert fake.undo.entered == ["Test"]
+    assert fake.undo.left == 1
+
+
+# Presets Writer : lancés comme par la palette, dans un worker
+
+def _in_worker(fn):
+    """Exécute fn dans un thread « mirai-run » et rend son résultat."""
+    outcome = {}
+
+    def target():
+        try:
+            outcome["value"] = fn()
+        except Exception as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=target, name="mirai-run")
+    thread.start()
+    thread.join(timeout=10)
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+def _run_guarded(thread_guard, fake, shell, run):
+    """Lance run(ctx) dans un worker ; document et contrôleur n'acceptent que
+    le thread principal simulé."""
+    dispatcher = ThreadPinnedDispatcher()
+    ctx = ToolContext(thread_guard(fake, dispatcher.thread),
+                      thread_guard(fake.controller, dispatcher.thread, "controller"),
+                      "writer", shell, dispatcher=dispatcher)
+    try:
+        return _in_worker(lambda: run(ctx))
+    finally:
+        dispatcher.close()
+
+
+WRITER_PRESETS = pytest.mark.parametrize("runner", ["run_summarize", "run_simplify",
+                                                   "run_shorten", "run_lengthen"])
+APPEND_MODES = pytest.mark.parametrize("append_mode", [True, False],
+                                       ids=["append", "replace"])
+
+
+@WRITER_PRESETS
+@APPEND_MODES
+def test_writer_presets_on_a_selection_touch_the_document_only_on_the_main_thread(
+        thread_guard, runner, append_mode):
+    selection = "Un texte administratif sélectionné."
+    fake = FakeWriterDoc(selection_text=selection)
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
+
+    _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
+        ctx, shell, "", None, append_mode=append_mode))
+
+    assert selection in shell.requests[0]["messages"][-1]["content"]
+    assert "Texte produit." in (fake.inserted if append_mode else fake.replaced)
+    assert fake.undo.entered and fake.undo.left == 1
+
+
+@WRITER_PRESETS
+@APPEND_MODES
+def test_writer_presets_on_the_whole_document_touch_it_only_on_the_main_thread(
+        thread_guard, runner, append_mode):
+    fake = FakeBodyDoc(["Titre", "Un paragraphe administratif dense."],
+                       ["Heading 1", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
+
+    _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
+        ctx, shell, "", None, append_mode=append_mode))
+
+    assert "Un paragraphe administratif dense." in shell.requests[0]["messages"][-1]["content"]
+    assert "Texte produit." in fake.paragraphs
+    assert fake.undo.entered and fake.undo.left == 1
+
+
+@WRITER_PRESETS
+def test_writer_presets_count_the_tables_of_the_document_on_the_main_thread(
+        thread_guard, runner):
+    fake = FakeBodyDoc(["Titre", TABLE, "Un paragraphe administratif dense."],
+                       ["Heading 1", "", "Standard"])
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Texte ", "produit."))])
+
+    message = _run_guarded(thread_guard, fake, shell, lambda ctx: getattr(presets, runner)(
+        ctx, shell, "", None))
+
+    assert message.endswith(_t("palette.tables_left", count=1))
 
 
 # Annulation
@@ -309,47 +341,6 @@ def test_closed_dispatcher_interrupts_the_run():
     except DispatcherClosed:
         return
     raise AssertionError("un dispatcher fermé doit lever DispatcherClosed")
-
-
-def test_replace_sink_writes_on_the_main_thread():
-    """Le remplacement de la sélection ne doit jamais partir du worker."""
-    dispatcher = ThreadPinnedDispatcher()
-    written = {}
-
-    class _Target:
-        def setString(self, text):
-            written["text"] = text
-            written["thread"] = threading.current_thread()
-
-    target = _Target()
-
-    class _Selection:
-        def getByIndex(self, _index):
-            return target
-
-    class _Controller:
-        def getSelection(self):
-            return _Selection()
-
-        def select(self, _range):
-            pass
-
-    ctx = _context(FakeShell(), dispatcher)
-    ctx.controller = _Controller()
-    sink = WriterReplaceSink(ctx)
-
-    def worker():
-        sink.stream_delta("texte final")
-        sink.finish("", streamed=True)
-
-    thread = threading.Thread(target=worker, name="mirai-run")
-    thread.start()
-    thread.join(timeout=5)
-    dispatcher.close()
-
-    assert written["text"] == "texte final"
-    assert written["thread"] is dispatcher.thread, (
-        "setString a été appelé depuis le worker au lieu du thread principal")
 
 
 def test_observer_interface_is_optional():

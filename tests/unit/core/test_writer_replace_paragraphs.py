@@ -11,9 +11,12 @@ qui permet de vérifier que chaque paragraphe garde son propre style, et qu'une
 suppression n'invalide pas les autres.
 """
 
+import pytest
+
 from src.mirai.core.context import ToolContext
 from src.mirai.core.tools.writer_tools import replace_paragraphs
 from tests.stubs.fake_shell import FakeShell
+from tests.stubs.fake_writer_body import TABLE, FakeBodyDoc
 
 
 class FakeParagraph:
@@ -59,6 +62,15 @@ class FakeCursor:
     def write_last(self, text):
         self._anchor.text += text
 
+    def gotoRange(self, position, _expand):
+        self._until = position[1]
+
+    def setString(self, _text):
+        # Le curseur va de la fin d'un paragraphe à la fin d'un suivant :
+        # effacer la plage supprime les paragraphes qu'elle couvre.
+        items = self._doc.items
+        del items[items.index(self._anchor) + 1:items.index(self._until) + 1]
+
 
 class FakeText:
     def __init__(self, doc):
@@ -69,9 +81,6 @@ class FakeText:
 
     def createTextCursorByRange(self, position):
         return FakeCursor(self._doc, position)
-
-    def removeTextContent(self, para):
-        self._doc.items.remove(para)
 
     def insertControlCharacter(self, cursor, _char, _absorb):
         cursor.append_paragraph()
@@ -180,6 +189,76 @@ def test_invalid_range_is_refused():
     assert doc.paragraphs == ["A", "B", "C"]
 
 
+def _ctx_with_table():
+    doc = FakeBodyDoc(["Avant.", "Juste avant.", TABLE, "Après."])
+    return ToolContext(doc, doc.controller, "writer", FakeShell()), doc
+
+
+@pytest.mark.parametrize("text", ["Fusion.", "Un.\nDeux.\nTrois.\nQuatre."],
+                         ids=["fewer_lines", "more_lines"])
+def test_a_range_across_a_table_with_another_number_of_lines_is_refused(text):
+    """Moins de lignes que de paragraphes supprimeraient le tableau avec le
+    surplus, plus de lignes feraient passer du texte de l'autre côté :
+    l'outil refuse et dit au modèle comment s'y prendre."""
+    ctx, doc = _ctx_with_table()
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": text})
+
+    assert not result.ok
+    assert "[P2]" in result.error and "[P3]" in result.error
+    assert doc.paragraphs == ["Avant.", "Juste avant.", "Après."]
+    assert doc.tables == 1
+
+
+def test_a_range_across_a_table_with_one_line_per_paragraph_is_replaced_and_keeps_it():
+    """Corriger l'orthographe de tout le document garde un texte par
+    paragraphe : chacun reste de son côté du tableau."""
+    ctx, doc = _ctx_with_table()
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": "Avant !\nJuste avant !\nAprès !"})
+
+    assert result.ok
+    assert doc.paragraphs == ["Avant !", "Juste avant !", "Après !"]
+    assert doc.tables == 1
+
+
+def test_a_refused_range_names_every_table_it_crosses():
+    """Un refus par tableau coûterait au modèle un tour de plus pour chacun."""
+    doc = FakeBodyDoc(["Un.", TABLE, "Deux.", TABLE, "Trois."])
+    ctx = ToolContext(doc, doc.controller, "writer", FakeShell())
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 3, "text": "Fusion."})
+
+    assert not result.ok
+    assert "[P1] et [P2]" in result.error and "[P2] et [P3]" in result.error
+
+
+def test_each_side_replaced_from_the_last_keeps_the_numbers_of_the_map():
+    """Le refus dit de commencer par le dernier côté : un remplacement
+    renumérote les paragraphes qui le suivent, jamais ceux d'avant."""
+    doc = FakeBodyDoc(["Intro.", "Contexte.", TABLE, "Chiffres.", "Conclusion."])
+    ctx = ToolContext(doc, doc.controller, "writer", FakeShell())
+
+    refusal = replace_paragraphs(ctx, {"start": 1, "end": 4, "text": "Résumé."})
+    after = replace_paragraphs(ctx, {"start": 3, "end": 4, "text": "Résumé de la fin."})
+    before = replace_paragraphs(ctx, {"start": 1, "end": 2, "text": "Résumé du début."})
+
+    assert "en commençant par le dernier" in refusal.error
+    assert after.ok and before.ok
+    assert doc.paragraphs == ["Résumé du début.", "Résumé de la fin."]
+    assert doc.tables == 1
+
+
+def test_a_range_on_one_side_of_a_table_is_replaced_and_keeps_it():
+    ctx, doc = _ctx_with_table()
+
+    result = replace_paragraphs(ctx, {"start": 1, "end": 2, "text": "Fusion."})
+
+    assert result.ok
+    assert doc.paragraphs == ["Fusion.", "Après."]
+    assert doc.tables == 1
+
+
 def test_tool_is_registered_for_writer():
     """Sans enregistrement, l'outil serait invisible pour le modèle."""
     from src.mirai.core.registry import ToolRegistry
@@ -253,3 +332,26 @@ def test_document_map_exposes_styles_and_total():
     assert "Standard" not in result.content, "le style par défaut reste implicite"
     assert "FIN DU DOCUMENT — 2 paragraphes" in result.content
     assert result.data["paragraph_count"] == 2
+
+
+def test_a_run_out_of_turns_after_rewriting_paragraphs_says_they_were_applied():
+    """Réécrire des paragraphes modifie le document : si les tours s'épuisent
+    ensuite, le run ne doit pas s'annoncer comme un échec à relancer."""
+    from src.mirai.core.llm_client import LLMClient
+    from src.mirai.core.orchestrator import Orchestrator
+    from src.mirai.core.registry import ToolRegistry
+    from src.mirai.core.sinks import PaletteSink
+    from src.mirai.core.tools import register_all
+    from tests.stubs.fake_shell import FakeSSEResponse, native_tool_call_chunks
+
+    shell = FakeShell(config={"llm_tool_mode": "native"}, responses=[
+        FakeSSEResponse(native_tool_call_chunks(
+            "writer_replace_paragraphs", '{"start": 1, "text": "Nouveau."}'))])
+    doc = FakeDoc(["Ancien."])
+    ctx = ToolContext(doc, object(), "writer", shell)
+
+    result = Orchestrator(LLMClient(shell), register_all(ToolRegistry()), ctx,
+                          max_iterations=1).run_agentic("réécris", PaletteSink())
+
+    assert doc.paragraphs == ["Nouveau."]
+    assert result.reason == "max_iterations_after_changes"

@@ -6,23 +6,47 @@ import os
 from unittest.mock import MagicMock
 
 from src.mirai import credentials, local_config
+from tests.stubs.helpers import http_response, refuse_settings_writes
 from tests.stubs.uno_stubs import install, make_job, read_user_config, seed_user_config
 
 install()
 
 
-def _response(config):
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(config).encode("utf-8")
-    resp.__enter__ = lambda s: s
-    resp.__exit__ = MagicMock(return_value=False)
-    return resp
-
-
 def _fetch(job, config):
     job._failover_ordered_urls = lambda: ["https://dm.example"]
-    job._urlopen = MagicMock(return_value=_response(config))
+    job._urlopen = MagicMock(return_value=http_response(config))
     return job._fetch_config(force=True)
+
+
+def _first_migration_fails(monkeypatch):
+    real = local_config.LocalConfig.migrate_legacy
+    calls = []
+
+    def migrate(self, home_dir):
+        calls.append(home_dir)
+        if len(calls) == 1:
+            raise PermissionError("[WinError 5] Accès refusé")
+        return real(self, home_dir)
+
+    monkeypatch.setattr(local_config.LocalConfig, "migrate_legacy", migrate)
+
+
+def test_failed_storage_preparation_is_retried_by_the_next_job(tmp_path, monkeypatch):
+    _first_migration_fails(monkeypatch)
+    make_job(config_dir=str(tmp_path))
+    install_state = os.path.join(local_config.data_dir(str(tmp_path)),
+                                 local_config.INSTALL_STATE_FILE)
+    assert not os.path.exists(install_state)
+    make_job(config_dir=str(tmp_path))
+    assert os.path.exists(install_state)
+
+
+def test_secret_renewed_during_the_session_survives_the_next_job(tmp_path, monkeypatch):
+    settings = os.path.join(local_config.data_dir(str(tmp_path)), local_config.SETTINGS_FILE)
+    local_config.write_json_atomic(settings, {"relay_client_key": "ancienne"})
+    refuse_settings_writes(monkeypatch)
+    make_job(config_dir=str(tmp_path)).set_config("relay_client_key", "nouvelle")
+    assert make_job(config_dir=str(tmp_path)).get_config("relay_client_key", "") == "nouvelle"
 
 
 def test_set_config_writes_settings_file_not_config_json(tmp_path):
