@@ -382,12 +382,39 @@ Ajouts nés de la mise en œuvre :
   mesure et la délégation de signature, facultatifs, ne sont pas demandés :
   leurs balises restent vides et l'agent les complète dans Writer.
 
+- **Actualiser un acte généré** : Éloignement ne pose aucune marque de balise
+  à la génération. Writer garde donc, à l'ouverture de l'acte, les valeurs
+  insérées (`balises` du dossier pour ce modèle) dans la propriété
+  `MirAI.Eloignement.Valeurs`. Pour actualiser, il cherche l'ancienne valeur
+  dans le texte et ne la compte que là où rien n'y est collé (lettre,
+  chiffre, trait d'union, apostrophe, souligné). Une valeur introuvable est
+  signalée « modifiée à la main : non remplacée ». C'est la règle du
+  complément Word (`core/eloignement/snapshot.py`). Un document rempli dans
+  Writer garde ses signets à empreinte.
+- **Fenêtres modales** : elles sont rattachées à la fenêtre du document avant
+  `execute()`. Sans cela, sous macOS, `execute()` rend la main sans rien
+  afficher (constaté en vrai le 2026-11-22).
+
 Vérifié :
 
-- 110 tests unitaires Éloignement (client, lien, file d'envoi, conflit, session,
+- 122 tests unitaires Éloignement (client, lien, file d'envoi, conflit, session, instantané,
   balises, options de génération, câblage), suite complète verte.
 - E2b construit dans LibreOffice headless : liste déroulante des valeurs,
   refus d'une option manquante, corps `options` attendu.
+- **En vrai, le 2026-11-22**, avec LibreOffice 25.8.4.2 sur macOS, l'OXT de la
+  branche, le DM d'intégration et le SSO de l'agent, dossier fictif 13 :
+  catalogue, recherche, formulaire d'options OQTF (acte 34), génération du
+  Courrier d'essai (acte 35), Ctrl+S → version 2, « Remplir depuis un
+  dossier » sur le modèle brut puis premier versement (`actes/fichier`).
+- Actualisation par l'instantané vérifiée en headless sur l'acte 35 : un mot
+  plus long (« Karimou », « Abdel-Karim ») n'est pas touché, une valeur
+  retouchée est signalée, un seul Ctrl+Z annule.
+- Défaut connu : `oxt/Jobs.xcu` déclare `onLoad` et `onNew` en minuscules,
+  des noms que LibreOffice n'émet pas. La barre d'outils n'apparaît donc
+  qu'après un premier passage par la chip de la palette, et un acte lié
+  rouvert n'est pas suivi au Ctrl+S tant que le volet n'a pas été ouvert. Le
+  défaut est antérieur à la branche ; la correction est à faire à part, car
+  elle touche le démarrage.
 - Dans LibreOffice 25.8 headless, sur les modèles réels d'Éloignement : repérage
   des 15 à 115 balises dans l'ordre du document, remplissage en texte brut avec
   signets, actualisation qui laisse un passage retouché à la main, annulation

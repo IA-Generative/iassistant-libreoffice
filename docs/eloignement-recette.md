@@ -151,6 +151,10 @@ dossier ne permet pas), le message en donne la raison.
    la valeur retouchée est marquée « (modifié à la main) » et décochée.
 4. « Appliquer ». **Attendu** : seule la valeur cochée change ; Ctrl+Z annule
    l'actualisation d'un coup.
+5. Même essai sur un acte généré par Éloignement (étape 3, Courrier d'essai) :
+   prénom changé dans le dossier, lieu de naissance retouché dans Writer.
+   **Attendu** : le prénom est proposé ; le lieu de naissance est marqué
+   « (modifiée à la main : non remplacée) » et reste tel quel.
 
 ### 11. Données et traces
 

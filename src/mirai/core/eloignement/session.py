@@ -25,6 +25,7 @@ from ..ui_thread import MainThreadDispatcher
 from . import api
 from . import link as link_mod
 from . import outbox as outbox_mod
+from . import snapshot as snapshot_mod
 
 try:
     import unohelper
@@ -455,14 +456,20 @@ class Session:
 
     # -- ouverture (thread principal) ---------------------------------------------------
 
-    def open_linked(self, path, link, empty=None, labels=None, header=None, modele_nom=""):
-        """Ouvre un ODT dans Writer, sans conversion, et le lie au dossier."""
+    def open_linked(self, path, link, empty=None, labels=None, header=None, modele_nom="",
+                    snapshot=None):
+        """Ouvre un ODT dans Writer, sans conversion, et le lie au dossier.
+
+        `snapshot` : valeurs insérées par Éloignement, gardées dans le document
+        pour « Actualiser depuis le dossier » (voir snapshot.py)."""
         ctx = self.shell.uno_ctx
         desktop = ctx.getServiceManager().createInstanceWithContext(
             "com.sun.star.frame.Desktop", ctx)
         model = desktop.loadComponentFromURL(file_url(path), "_blank", 0, ())
         state = self.attach(model)
         link_mod.write_link(model, link)
+        if snapshot:
+            snapshot_mod.write_snapshot(model, snapshot)
         state.key = self.key_for(model, link)
         self.known.add(link.dossier, state.key)
         state.empty = list(empty or [])

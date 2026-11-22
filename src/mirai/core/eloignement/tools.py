@@ -18,6 +18,7 @@ from ..tool_calls import ToolResult, ToolSpec
 from . import api, fill
 from . import link as link_mod
 from . import options as options_mod
+from . import snapshot as snapshot_mod
 from .session import get_session, safe_filename, unique_path
 
 
@@ -71,6 +72,7 @@ def generer_acte(ctx, args):
     acte = session.client.generer(dossier_id, args["modele"], options)
     document = api.safe_id(acte["id"])
     data, version = session.client.contenu(dossier_id, document)
+    snapshot = _values_at_generation(session, dossier_id, args["modele"])
     path = unique_path(session.workdir, safe_filename(acte["nom"] or f"acte-{document}"))
     with open(path, "wb") as fh:
         fh.write(data)
@@ -81,7 +83,7 @@ def generer_acte(ctx, args):
 
     def open_and_scan():
         model = session.open_linked(path, link, header=args.get("_header") or {},
-                                    modele_nom=modele_nom)
+                                    modele_nom=modele_nom, snapshot=snapshot)
         names = fill.placeholder_names(fill.find_placeholders(model))
         state = session.attach(model)
         state.empty = list(dict.fromkeys(list(labels) + names))
@@ -93,6 +95,17 @@ def generer_acte(ctx, args):
     empty = ctx.on_main(open_and_scan, timeout=60)
     return ToolResult("", True, f"acte ouvert, {len(empty)} balise(s) à compléter",
                       data={"chemin": path, "vides": empty, "libelles": labels})
+
+
+def _values_at_generation(session, dossier_id, modele_id):
+    """Valeurs qu'Éloignement vient d'insérer, gardées pour « Actualiser ».
+    Sans elles l'acte s'ouvre quand même : seule l'actualisation manquera."""
+    try:
+        valeurs, _ = session.client.balises(dossier_id, modele_id)
+    except api.EloignementError as exc:
+        session.log(f"[eloignement] valeurs de l'acte non gardées : HTTP {exc.status}")
+        return {}
+    return snapshot_mod.as_snapshot(valeurs)
 
 
 def remplir_depuis_dossier(ctx, args):
@@ -133,12 +146,16 @@ def lire_ecarts(ctx, _args):
     if link is None:
         return _fail("Ce document n'est lié à aucun dossier.")
     marks = ctx.on_main(lambda: fill.read_marks(ctx.model))
-    if not marks:
+    snapshot = {} if marks else ctx.on_main(lambda: snapshot_mod.read_snapshot(ctx.model))
+    if not marks and not snapshot:
         return _fail("Aucun passage rempli depuis le dossier n'a été retrouvé dans ce document.")
-    balises = list(dict.fromkeys(mark.balise for mark in marks))
     valeurs, libelles = session.client.balises(link.dossier, link.modele)
-    valeurs = {name: valeurs[name] for name in balises if name in valeurs}
-    changes = fill.refresh_plan(marks, valeurs)
+    if marks:
+        balises = list(dict.fromkeys(mark.balise for mark in marks))
+        changes = fill.refresh_plan(marks, {n: valeurs[n] for n in balises if n in valeurs})
+    else:
+        found = ctx.on_main(lambda: snapshot_mod.count_occurrences(ctx.model, snapshot))
+        changes = snapshot_mod.text_plan(snapshot, valeurs, found)
     return ToolResult("", True, f"{len(changes)} écart(s)",
                       data={"ecarts": [dataclasses.asdict(c) for c in changes],
                             "libelles": libelles})
@@ -148,7 +165,10 @@ def appliquer_ecarts(ctx, args):
     changes = [fill.Change(**{k: c.get(k) for k in
                               ("balise", "bookmark", "current", "new", "modified_by_hand")})
                for c in args.get("ecarts") or [] if isinstance(c, dict)]
-    written = ctx.on_main(lambda: fill.apply_changes(ctx.model, changes))
+    marked = [c for c in changes if c.bookmark]
+    in_text = [c for c in changes if not c.bookmark]
+    written = ctx.on_main(lambda: fill.apply_changes(ctx.model, marked)
+                          + snapshot_mod.apply_text_changes(ctx.model, in_text))
     return ToolResult("", True, f"{written} passage(s) actualisé(s)", data={"ecrits": written})
 
 

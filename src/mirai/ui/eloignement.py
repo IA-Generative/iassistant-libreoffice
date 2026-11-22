@@ -15,6 +15,7 @@ du moteur) ; ce qui touche UNO revient par le dispatcher de la session.
 
 import threading
 
+import uno
 import unohelper
 
 from ..core.context import ToolContext
@@ -141,7 +142,10 @@ def modele_line(modele):
 
 def change_line(change, labels):
     label = labels.get(change["balise"], change["balise"])
-    hand = "  (modifié à la main)" if change.get("modified_by_hand") else ""
+    hand = ""
+    if change.get("modified_by_hand"):
+        hand = ("  (modifié à la main)" if change.get("bookmark")
+                else "  (modifiée à la main : non remplacée)")
     return f"{label} : « {change['current']} » → « {change['new']} »{hand}"
 
 
@@ -358,8 +362,15 @@ class Form:
             pass
 
     def run(self):
-        """Exécution modale ; rend `result`."""
+        """Exécution modale, posée et centrée sur la fenêtre du document ; rend `result`.
+
+        Sans pair créé sur une fenêtre parente, `execute()` rend la main aussitôt
+        sous macOS, sans rien afficher."""
         try:
+            parent = _parent_window(self.session)
+            if parent is not None:
+                self.dialog.createPeer(self.session.shell.toolkit(), parent)
+                _center_on(self.dialog, parent)
             self.dialog.execute()
         finally:
             try:
@@ -940,6 +951,16 @@ class Progress:
             pass
 
 
+def _center_on(dialog, parent):
+    try:
+        outer, own = parent.getPosSize(), dialog.getPosSize()
+        dialog.setPosSize(outer.X + max(0, (outer.Width - own.Width) // 2),
+                          outer.Y + max(0, (outer.Height - own.Height) // 3),
+                          own.Width, own.Height, dsfr.POSSIZE)
+    except Exception:
+        pass
+
+
 def _parent_window(session):
     try:
         frame = session.shell.uno_ctx.getServiceManager().createInstanceWithContext(
@@ -1004,9 +1025,11 @@ def sync_toolbar(shell, enabled, frame=None):
     if enabled and not present:
         settings = manager.createSettings()
         settings.UIName = "MIrAI — Éloignement"
-        settings.insertByIndex(0, (_prop("CommandURL", TOOLBAR_COMMAND),
-                                   _prop("Label", TITLE), _prop("Type", 0),
-                                   _prop("Style", _TOOLBAR_STYLE)))
+        button = (_prop("CommandURL", TOOLBAR_COMMAND), _prop("Label", TITLE),
+                  _prop("Type", 0), _prop("Style", _TOOLBAR_STYLE))
+        # Un tuple Python n'est pas reconnu comme séquence de PropertyValue.
+        uno.invoke(settings, "insertByIndex",
+                   (0, uno.Any("[]com.sun.star.beans.PropertyValue", button)))
         manager.insertSettings(TOOLBAR, settings)
         manager.store()
         shell.set_config("eloignement_toolbar", True)
