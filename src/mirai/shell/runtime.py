@@ -25,6 +25,9 @@ class ShellRuntime:
         # autre a abouti entre-temps.
         self.enrollment_lock = threading.Lock()
         self.enrollment_generation = 0
+        # Le SSO fait tourner le jeton de renouvellement : un seul échange à la
+        # fois (shell/token_refresh.py).
+        self.token_refresh_lock = threading.Lock()
         # Bases DM (normalisées) qui n'ont répondu à aucune récupération de config
         # dans ce processus : essayées en dernier et ignorées par la passation,
         # sinon chaque récupération paierait leur délai ; une base redevient saine

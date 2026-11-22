@@ -41,7 +41,9 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_settings_token_field.py": 2,
     "tests/unit/test_storage_wiring.py": 10,
     "tests/unit/test_telemetry_defaults.py": 1,
-    "tests/unit/test_token_logic.py": 4,
+    # +2 : _ensure_access_token et _request_token, le seul endroit où se voit
+    # qu'un renouvellement concurrent n'échange le jeton qu'une fois.
+    "tests/unit/test_token_logic.py": 6,
     "tests/unit/test_uninstall_wipe.py": 4,
     "tests/unit/test_update_blocked.py": 14,
     "tests/unit/test_update_features.py": 15,

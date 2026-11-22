@@ -3,10 +3,14 @@ Tests for token/JWT logic and PKCE in MainJob.
 No LibreOffice required — UNO modules are stubbed.
 """
 import base64
+import shutil
+import tempfile
+import threading
 import time
 import unittest
+from unittest.mock import patch
 
-from tests.stubs.uno_stubs import install, make_job, make_jwt
+from tests.stubs.uno_stubs import install, make_job, make_jwt, seed_user_config
 
 install()
 
@@ -103,3 +107,33 @@ class TestPkce(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_shell_exchanges_the_refresh_token_once_for_concurrent_callers():
+    config_dir = tempfile.mkdtemp()
+    try:
+        job = make_job(config_dir=config_dir)
+        seed_user_config(config_dir, {
+            "access_token": make_jwt({"exp": int(time.time()) - 10}),
+            "refresh_token": "rt-1",
+            "keycloakTokenEndpoint": "https://dm.example.test/auth/token",
+        })
+        sent = []
+
+        def answer(_endpoint, data):
+            sent.append(data["refresh_token"])
+            time.sleep(0.2)
+            return {"access_token": make_jwt({"exp": int(time.time()) + 600}),
+                    "refresh_token": "rt-2"}
+
+        with patch.object(job, "_request_token", side_effect=answer):
+            threads = [threading.Thread(target=job._ensure_access_token, args=({}, False))
+                       for _ in range(3)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        assert sent == ["rt-1"]
+        assert job.get_config("refresh_token", "") == "rt-2"
+    finally:
+        shutil.rmtree(config_dir, ignore_errors=True)

@@ -310,5 +310,6 @@
   "callback.badge": "Conexión validada",
   "callback.close_tab": "Puede cerrar esta pestaña y volver a LibreOffice.",
   "callback.if_stuck": "Si LibreOffice no responde, espere unos segundos y vuelva a ejecutar la acción.",
-  "callback.no_action": "No se requiere ninguna acción adicional aquí."
+  "callback.no_action": "No se requiere ninguna acción adicional aquí.",
+  "preset.eloignement": "🏛️ Éloignement"
 }

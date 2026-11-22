@@ -258,6 +258,30 @@ Le prompt système porte la contrepartie : *« AGIS, NE DÉCRIS PAS »* — appl
 la modification avec les outils d'écriture, et traiter l'absence de sélection
 comme « la demande porte sur le document entier ».
 
+## Éloignement (expérimental) — `core/eloignement/`, `ui/eloignement.py`
+
+Actes générés par l'application Éloignement depuis Writer, enregistrés dans le
+dossier. Conception, routes et écarts : [eloignement-conception.md](eloignement-conception.md) ;
+essai de bout en bout : [eloignement-recette.md](eloignement-recette.md).
+
+- **Interrupteur** `eloignement` (`features` du DM, sinon `eloignement_enabled`),
+  éteint par défaut : ni chip, ni barre d'outils (créée à l'exécution), ni écouteur.
+- **Transport** : `MainJobShell.tools_request` → `{toolsEndpoint}/eloignement/v1/…`,
+  paire relais + `X-User-Authorization` ; le DM pose le jeton de service et
+  l'identité de l'agent. Aucun hôte ni secret d'Éloignement dans le plugin.
+- **Tools à part** : `core/eloignement/tools.py` a son propre registre, jamais
+  proposé au modèle de langage (données personnelles, rien sans geste de l'agent).
+- **Lien** dans `UserDefinedProperties` (`MirAI.Eloignement.*`), jamais dans le
+  texte. **Valeurs reçues = données** : `setString` sur un curseur, un signet
+  par valeur (empreinte dans son nom), jamais de champ, macro ni lien.
+- **Enregistrement** : LibreOffice enregistre d'abord sur le poste ; l'écouteur
+  du SEUL document lié (`OnSaveDone`, `OnSaveAsDone`) fige une copie dans la file
+  d'envoi (`outbox.py`), rejouée par un thread sans UNO ; 412 → conflit, jamais
+  d'écrasement ; un lien créé ailleurs demande confirmation.
+- **Options de génération** : le modèle les annonce (`options_requises`) ;
+  `options.py` les pose à leur `champ`, l'écran E2b les demande. Libellés et
+  valeurs viennent d'Éloignement, jamais du plugin.
+
 ## Presets (les chips de la palette) — `core/presets.py`
 
 - **pipeline** (Python pilote, iso-fonctionnalité stricte avec l'historique,

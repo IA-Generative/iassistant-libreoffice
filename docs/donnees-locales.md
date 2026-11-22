@@ -21,6 +21,7 @@ Tout vit dans un seul dossier du profil LibreOffice : `<profil LibreOffice>/user
 | `prompts_calc.txt`, `prompt.txt` | Consignes saisies dans les anciens dialogues d'édition et de Calc ; plus lus ni écrits, effacés à la désinstallation |
 | `secure_bootstrap_state.json`, `telemetry_queue.json` | État et file d'attente de l'ancienne télémétrie « sécurisée » ; plus lus ni écrits, effacés à la désinstallation |
 | `pending_update/` | Mise à jour téléchargée en attente d'installation |
+| `eloignement/` | Seulement si la fonction Éloignement (expérimentale) est allumée : `actes/` (actes ouverts depuis Éloignement, avec des données personnelles du dossier), `attente/` et `file_envoi.json` (copies figées des actes en attente d'envoi vers le dossier, et leur file), `liens_connus.json` (liens dossier ↔ acte créés sur ce poste) |
 | `mirai.log`, `mirai.log.1` | Journal (voir plus bas) |
 
 Un ancien fichier `user/config/config.json` (à côté du dossier `mirai/`) subsiste : c'est une souche `{extensionUUID, plugin_uuid}` conservée pour que l'identité de l'appareil survive si l'extension est ramenée à une version plus ancienne (par exemple par une campagne de retour arrière du Device Management). Elle est aussi écrite sur une installation neuve.

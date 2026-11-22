@@ -7,6 +7,8 @@ Invariant : aucune logique métier ici — uniquement de l'adaptation.
 """
 
 import json
+import urllib.error
+import urllib.parse
 import urllib.request
 
 from .links import find_link
@@ -30,6 +32,35 @@ def clamp_max_tokens(model, max_tokens):
         if key in model_lower:
             return min(max_tokens, limit)
     return max_tokens
+
+
+def feature_from(features, name, config_value):
+    """`features` du DM d'abord (strictement True), sinon la clé de
+    configuration `<name>_enabled`. None : le DM n'a encore rien dit."""
+    if isinstance(features, dict) and name in features:
+        return features[name] is True
+    if config_value is None or config_value == "":
+        return False if features else None
+    return config_value is True or str(config_value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def build_tools_request(endpoint, method, path, body, headers, relay_headers, token):
+    """Requête vers le relais d'outils du DM (https, sauf poste local)."""
+    endpoint = str(endpoint or "").strip().rstrip("/")
+    if not endpoint:
+        raise RuntimeError("relais d'outils non configuré par le DM (toolsEndpoint)")
+    parsed = urllib.parse.urlparse(endpoint)
+    local = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and local):
+        raise RuntimeError("relais d'outils refusé : https exigé")
+    token = str(token or "").strip()
+    if not token:
+        raise PermissionError("non connecté : la session MirAI est nécessaire")
+    all_headers = dict(headers or {})
+    all_headers.update(relay_headers or {})
+    all_headers["X-User-Authorization"] = f"Bearer {token}"
+    url = endpoint + ("/" + path.lstrip("/") if path else "")
+    return urllib.request.Request(url, data=body, headers=all_headers, method=method.upper())
 
 
 class MainJobShell:
@@ -97,6 +128,37 @@ class MainJobShell:
         """Ouvre la requête via le transport coquille (proxy + SSL + relais)."""
         context = self._job.get_ssl_context(getattr(request, "full_url", None))
         return self._job._urlopen(request, context=context, timeout=timeout)
+
+    def feature_state(self, name):
+        """Interrupteur de fonctionnalité : True, False, ou None tant que le DM
+        n'a pas encore répondu (voir `feature_from`)."""
+        return feature_from(getattr(self._job, "_features_cache", None),
+                            name, self.get_config(f"{name}_enabled", None))
+
+    def feature_enabled(self, name):
+        """Éteint par défaut, y compris tant que le DM n'a pas répondu."""
+        return self.feature_state(name) is True
+
+    def tools_request(self, method, path, body=None, headers=None, timeout=20):
+        """Appel au relais d'outils du DM : `{toolsEndpoint}/<path>`.
+
+        Paire relais + jeton de l'agent (`X-User-Authorization`) ; le DM pose
+        le jeton de service et l'identité de l'agent. Rend (statut, en-têtes,
+        octets), y compris pour une réponse en erreur HTTP. Réseau bloquant :
+        thread de travail uniquement.
+        """
+        request = build_tools_request(
+            self.get_config("toolsEndpoint", ""), method, path, body, headers,
+            self._job._relay_headers(), self._job._get_openwebui_access_token())
+        try:
+            with self.urlopen(request, timeout=timeout) as response:
+                return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as exc:
+            try:
+                data = exc.read()
+            except Exception:
+                data = b""
+            return exc.code, exc.headers, data
 
     def request_timeout(self):
         try:

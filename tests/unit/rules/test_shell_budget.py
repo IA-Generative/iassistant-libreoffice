@@ -16,7 +16,9 @@ _ENTRYPOINT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "src", "mirai", "entrypoint.py"))
 
 BUDGET = {
-    "lines": 6313,
+    # +7 (exp/eloignement) : routage de la commande Éloignement et suivi des
+    # documents liés à l'ouverture, deux imports paresseux vers core/entry.py.
+    "lines": 6309,
     "mainjob_methods": 131,
     "class_state_attributes": 0,
     "threads_and_timers": 13,
