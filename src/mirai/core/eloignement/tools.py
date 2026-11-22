@@ -15,7 +15,9 @@ import dataclasses
 
 from ..registry import ToolRegistry
 from ..tool_calls import ToolResult, ToolSpec
-from . import api, fill, link as link_mod
+from . import api, fill
+from . import link as link_mod
+from . import options as options_mod
 from .session import get_session, safe_filename, unique_path
 
 
@@ -63,7 +65,10 @@ def generer_acte(ctx, args):
     """Éloignement remplit le modèle avec le dossier ; l'acte s'ouvre lié."""
     session = _session(ctx)
     dossier_id = api.safe_id(args["dossier"])
-    acte = session.client.generer(dossier_id, args["modele"])
+    options = args.get("options") or None
+    if options is not None and not options_mod.valid_body(options):
+        return _fail("Options de génération illisibles.")
+    acte = session.client.generer(dossier_id, args["modele"], options)
     document = api.safe_id(acte["id"])
     data, version = session.client.contenu(dossier_id, document)
     path = unique_path(session.workdir, safe_filename(acte["nom"] or f"acte-{document}"))
@@ -121,7 +126,7 @@ def remplir_depuis_dossier(ctx, args):
                       data={"remplies": filled, "vides": empty, "libelles": libelles})
 
 
-def lire_ecarts(ctx, args):
+def lire_ecarts(ctx, _args):
     """Écarts entre les passages remplis du document et le dossier."""
     session = _session(ctx)
     link = ctx.on_main(lambda: link_mod.read_link(ctx.model))
@@ -147,7 +152,7 @@ def appliquer_ecarts(ctx, args):
     return ToolResult("", True, f"{written} passage(s) actualisé(s)", data={"ecrits": written})
 
 
-def envoyer(ctx, args):
+def envoyer(ctx, _args):
     """Relance la file d'envoi (Ctrl+S l'alimente)."""
     session = _session(ctx)
     session.kick()
@@ -173,7 +178,8 @@ SPECS = [
     ToolSpec("eloignement_generer_acte",
              "Fait générer par Éloignement l'acte d'un modèle pour un dossier, et l'ouvre.",
              {"type": "object", "properties": {"dossier": _STRING, "modele": _STRING,
-                                               "modele_nom": _STRING},
+                                               "modele_nom": _STRING,
+                                               "options": {"type": "object"}},
               "required": ["dossier", "modele"]},
              _guard(generer_acte), apps=("writer",)),
     ToolSpec("eloignement_remplir_depuis_dossier",

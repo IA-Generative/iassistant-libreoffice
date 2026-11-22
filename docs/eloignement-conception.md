@@ -32,6 +32,9 @@ contient ni secret ni nom d'hôte d'Éloignement.
    L'agent choisit un modèle, puis clique sur « Valider ».
 3. L'écran **E2** s'ouvre : **« Rechercher un dossier »**. L'agent choisit un
    dossier et contrôle son en-tête, puis clique sur « Valider ».
+   Si le modèle exige des options de génération (délai de départ volontaire,
+   durée d'interdiction de retour…), l'écran **E2b « Options de génération »**
+   les demande, telles qu'Éloignement les décrit.
 4. Éloignement génère l'acte. Le plugin télécharge l'ODT dans le dossier de
    travail (§5.3) et l'ouvre tel quel dans Writer, sans conversion.
 5. Le plugin écrit le lien dans les propriétés personnalisées du document. Le
@@ -94,6 +97,7 @@ Les libellés sont ceux de la conception de la messagerie (onglet « Fiche »).
 |---|---|---|
 | **E1 — Nouvel acte depuis Éloignement** | dialogue modal | champ de recherche, liste « Dossier › Modèle » du catalogue de la préfecture ; « Valider », « Annuler » |
 | **E2 — Rechercher un dossier** | dialogue modal | un seul champ (« prénom nom date de naissance », n° étranger ou n° de dossier) et « Rechercher » ; chaque résultat tient sur une ligne : « NOM Prénom · né(e) le JJ/MM/AAAA · mesure · statut · dossier n° X » ; en dessous, l'en-tête du dossier sélectionné (identité, nationalité, n° étranger, mesure, statut) ; « Valider », « Annuler ». Brouillon ou archivé : ligne grisée, « Valider » inactif, infobulle reprise de la messagerie (« Ce dossier est archivé : aucune pièce ne peut plus y être ajoutée. ») |
+| **E2b — Options de génération** | dialogue modal | une ligne par option de `options_requises` du modèle : libellé d'Éloignement (à défaut, le code de l'option), liste déroulante si Éloignement donne les valeurs permises (Oui/Non pour un booléen), saisie libre sinon ; « Valider », « Annuler ». Absent pour un modèle sans option (courrier simple) |
 | **E3 — volet « Éloignement »** | volet latéral de Writer | Document lié : « Lié au dossier n° X », personne, modèle, version, état de l'enregistrement (« Enregistré dans le dossier n° X » / « En attente d'envoi » / « Conflit de version » / « Modifications non enregistrées ») ; « À compléter » : libellé lisible et balise, un clic va à la balise ; boutons « Actualiser depuis le dossier », « Enregistrer une copie sur le poste », « Ouvrir le dossier dans Éloignement » (si le lien d'interface est fourni). Document non lié qui contient des balises : « Remplir depuis un dossier » |
 | **E4 — conflit de version** | dialogue modal | « Le document a été modifié dans Éloignement depuis votre version n. » ; « Garder ma version comme nouvelle version », « Ouvrir la version du dossier », « Annuler » (l'envoi reste en attente) |
 | **E5 — actualiser** | dialogue modal | tableau balise / dans le document / dans le dossier, une case par ligne (décochée si modifiée à la main) ; « Appliquer », « Annuler » |
@@ -157,10 +161,11 @@ d'autant, avec la raison) :
 | `core/eloignement/api.py` | client des routes /v1 (une table `ROUTES`), multipart en stdlib, erreurs → messages de la messagerie, identifiants validés avant d'entrer dans un chemin |
 | `core/eloignement/link.py` | lien dans `UserDefinedProperties` |
 | `core/eloignement/outbox.py` | file d'envoi persistante, rejeu, conflit |
+| `core/eloignement/options.py` | options de génération : lecture de `options_requises`, corps `options` posé à chaque `champ` |
 | `core/eloignement/fill.py` | balises (`TextField.JumpEdit` et texte `<a.b>`), insertion en texte, signets à empreinte, écarts pour « Actualiser », détection de la logique de modèle |
 | `core/eloignement/session.py` | session du processus : documents liés, écouteur d'enregistrement, thread d'envoi, ouverture d'un acte |
 | `core/eloignement/tools.py` | les tools, dans un registre à part (§5.5) |
-| `ui/eloignement.py` | E1, E2, E3, E4, E5, barre d'outils, boîtes de message |
+| `ui/eloignement.py` | E1, E2, E2b, E3, E4, E5, barre d'outils, boîtes de message |
 | `ui/palette.py` | + la chip |
 
 ### 5.3 Lien et fichiers locaux
@@ -257,9 +262,9 @@ en bêta3), appelées par `{toolsEndpoint}/eloignement/v1/…`.
 | # | Besoin | Route | Utilisée par |
 |---|---|---|---|
 | R0 | découverte | `GET {toolsEndpoint}` → `services` contient `eloignement` | `Session.offered` |
-| R1 | catalogue des modèles de la préfecture | `GET /v1/modeles?q=` → `{items:[{id, nom, chemin, version}]}` | E1 |
+| R1 | catalogue des modèles de la préfecture | `GET /v1/modeles?q=` → `{items:[{id, nom, chemin, version, natures, options_requises:[{option, champ}]}]}` | E1, E2b |
 | R2 | recherche, en-tête | `GET /v1/dossiers?q=` (q interprété : mots, date, n° étranger, n° de dossier) ; `GET /v1/dossiers/{id}` (`statut_detaille`, `mesure_envisagee`, `_links.interface`) | E2, volet |
-| R3 | générer | `POST /v1/dossiers/{id}/actes` `{modele_id, options?}` + `Idempotency-Key` → `{acte_id, nom, version, modele, balises_vides:[{nom, libelle, valeur}]}` ; 422 `OPTION_GENERATION_MANQUANTE`, 409 `CHAMPS_A_CONFIRMER` | parcours A |
+| R3 | générer | `POST /v1/dossiers/{id}/actes` `{modele_id, options?}` + `Idempotency-Key` → `{acte_id, nom, version, modele, balises_vides:[{nom, libelle, valeur}]}` ; `options` porte chaque option de `options_requises` à son `champ` (`oqtf.delai_depart_volontaire_jours` → `{"oqtf": {"delai_depart_volontaire_jours": 0}}`) ; 422 `OPTION_GENERATION_MANQUANTE`, 422 avec la raison quand le dossier ne permet pas la mesure, 409 `CHAMPS_A_CONFIRMER` | parcours A |
 | R3-bis | premier versement d'un document rempli dans Writer | `POST /v1/dossiers/{id}/actes/fichier` (multipart `fichier`, `modele_id` facultatif) + `Idempotency-Key` → version 1 | parcours B, premier Ctrl+S |
 | R4 | télécharger | `GET /v1/dossiers/{id}/actes/{acte_id}/contenu` → ODT + `ETag` | parcours A, « Ouvrir la version du dossier » |
 | R5 | valeurs des balises | `GET /v1/dossiers/{id}/balises[?modele_id=]` → `{items:[{nom, libelle, valeur}]}` (filtre par modèle, le tri par balise se fait dans le plugin) | parcours B et C |
@@ -341,7 +346,9 @@ cette trame :
    ou rester appelés seulement depuis les écrans en v1 ?
 3. Où vit le fichier de travail d'un acte : le dossier de travail de MirAI
    (proposé), ou le dossier Documents de l'agent ?
-4. R3 doit-elle déduire les options de génération du dossier ?
+4. R3 doit-elle déduire les options de génération du dossier ? (Réponse
+   d'Éloignement : non, le modèle les annonce dans `options_requises` et
+   Writer les demande, §10.)
 5. Éloignement doit-il poser des signets de balise à la génération (§6) ?
 6. Un enregistrement sous un autre nom (« Enregistrer sous ») d'un document lié
    doit-il aussi envoyer une version ? (Proposé : oui. Seule « Enregistrer une
@@ -365,10 +372,19 @@ Ajouts nés de la mise en œuvre :
 - **Désinstallation** : le dossier `mirai/` est effacé, y compris un envoi en
   attente ; le fichier enregistré par l'agent, lui, reste où il est.
 
+- **Options de génération** (bêta4) : `options_requises` ne donne encore que
+  le code et le `champ` de chaque option. E2b montre alors le code et un champ
+  libre (une saisie numérique part en nombre). Demandé à Éloignement, en
+  ajout : `libelle`, `type` (`texte`, `entier`, `booleen`, `choix`),
+  `valeurs` [{valeur, libelle}] et `defaut`. E2b s'en sert dès qu'ils
+  arrivent, sans changement du plugin.
+
 Vérifié :
 
-- 87 tests unitaires Éloignement (client, lien, file d'envoi, conflit, session,
-  balises, câblage), suite complète verte.
+- 110 tests unitaires Éloignement (client, lien, file d'envoi, conflit, session,
+  balises, options de génération, câblage), suite complète verte.
+- E2b construit dans LibreOffice headless : liste déroulante des valeurs,
+  refus d'une option manquante, corps `options` attendu.
 - Dans LibreOffice 25.8 headless, sur les modèles réels d'Éloignement : repérage
   des 15 à 115 balises dans l'ordre du document, remplissage en texte brut avec
   signets, actualisation qui laisse un passage retouché à la main, annulation

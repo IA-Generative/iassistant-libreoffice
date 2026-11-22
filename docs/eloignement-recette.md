@@ -4,7 +4,7 @@
 uniquement · Conception : [eloignement-conception.md](eloignement-conception.md)
 
 Cet essai vérifie le parcours complet, de Writer jusqu'au dossier dans
-Éloignement, à travers le relais du DM. Comptez trois quarts d'heure. Chaque
+Éloignement, à travers le relais du DM. Comptez une heure. Chaque
 étape dit quoi faire et ce que vous devez voir.
 
 ## Prérequis
@@ -12,11 +12,11 @@ Cet essai vérifie le parcours complet, de Writer jusqu'au dossier dans
 | Quoi | Valeur |
 |---|---|
 | Éloignement | bêta (image 1.0.0-beta3 ou plus récente), routes /v1 de la conception §6 |
-| Compte d'agent | Le compte MirAI de la personne connectée sur le poste : le DM tire l'adresse de l'agent de SON jeton. En bêta, ce compte est rattaché à la préfecture Seine-Saint-Denis, qui a un modèle d'essai : « Courrier d'essai IAssistant », chemin « Essais IAssistant » (id `956ff188-33c1-4fff-a16a-6d49aa83e397`). Il n'a ni bloc conditionnel ni directive relatorio et porte six balises : `etranger.nom`, `etranger.prenom`, `etranger.date_naissance`, `etranger.lieu_naissance`, `etranger.nationalite`, `etranger.numero_agdref`. `agent.essai-nuit@exemple.gouv.fr` ne sert qu'aux appels directs avec le jeton de service, pas à travers le DM. |
+| Compte d'agent | Le compte MirAI de la personne connectée sur le poste : le DM tire l'adresse de l'agent de SON jeton. En bêta, ce compte est rattaché à la préfecture Seine-Saint-Denis, qui a les dix modèles de l'application (OQTF 611-1 1° à 4°, OQTF UE, OQTF UE réadmission, placement en CRA, information du procureur, procédure contradictoire, assignation à résidence) et le « Courrier d'essai IAssistant » (chemin « Essais IAssistant »). Le Courrier d'essai n'a ni bloc conditionnel ni option et porte six balises `etranger.*` ; les modèles de l'application ont des blocs relatorio, seule la génération par Éloignement s'y applique. `agent.essai-nuit@exemple.gouv.fr` ne sert qu'aux appels directs avec le jeton de service, pas à travers le DM. |
 | DM | relais d'outils actif (`DM_TOOLS_ENABLED`), service `eloignement` déclaré pour le profil du poste, `ELOIGNEMENT_CLIENT_SECRET` posé ; `toolsEndpoint` présent dans `/config` |
 | Interrupteur | `eloignement: true` dans les `featureToggles` du gabarit du plugin, pour la cohorte d'essai. Pour un poste isolé : `"eloignement_enabled": true` dans les réglages locaux. |
 | Poste | OXT de la branche installé, poste enrôlé, session MirAI ouverte (Keycloak) avec ce compte |
-| Dossiers fictifs | Seine-Saint-Denis n'a **aucun dossier** en bêta. À créer d'abord, sous votre identité, avec des identités fictives : un dossier actif (par exemple un brouillon créé depuis Thunderbird puis activé ; ci-dessous « KOFFI Marc, né le 17/04/1992 »), un dossier brouillon et un dossier archivé. |
+| Dossiers fictifs | Dossier actif n° 13 : EXEMPLE-FICTIF Karim, né le 01/01/1990, nationalité MA, n° étranger 9999999901, en instruction, mesure envisagée « OQTF sans délai de départ volontaire » (il porte déjà deux actes d'essai). Pour l'étape 3.6, un dossier brouillon et un dossier archivé de la préfecture, à créer sous votre identité avec des identités fictives ; sans eux, sautez 3.6. |
 
 Avant de commencer, vérifiez l'audience : le jeton Keycloak du poste doit être
 accepté par le relais (`X-User-Authorization`). Un 401 à l'étape 2 avec
@@ -40,19 +40,20 @@ ce point (audience vérifiée par le DM).
 ### 3. Nouvel acte (parcours A)
 
 1. Cliquez « Éloignement ». **Attendu** : la fenêtre « Nouvel acte depuis
-   Éloignement » montre « Essais IAssistant › Courrier d'essai IAssistant ».
-2. Tapez « essai », « Rechercher ». **Attendu** : le modèle reste dans la liste ;
-   avec « zzz », la liste est vide.
+   Éloignement » liste onze modèles, dont « Essais IAssistant › Courrier
+   d'essai IAssistant ».
+2. Tapez « essai », « Rechercher ». **Attendu** : la liste se restreint au
+   Courrier d'essai ; avec « zzz », elle est vide.
 3. Choisissez le modèle, « Valider ». **Attendu** : la fenêtre « Rechercher un
    dossier ».
-4. Tapez « KOFFI Marc 17/04/1992 », Entrée. **Attendu** : une ligne
-   « KOFFI Marc · né(e) le 17/04/1992 · … · dossier n° … ».
+4. Tapez « EXEMPLE-FICTIF Karim 01/01/1990 », Entrée. **Attendu** : une ligne
+   « EXEMPLE-FICTIF Karim · né(e) le 01/01/1990 · … · dossier n° 13 ».
 5. Sélectionnez la ligne. **Attendu** : l'en-tête du dossier (identité,
    nationalité, n° étranger, mesure envisagée).
 6. Sélectionnez le dossier archivé, « Valider ». **Attendu** : refus, « Ce
    dossier est archivé : aucune pièce ne peut plus y être ajoutée. » Même
    essai avec le brouillon.
-7. Revenez sur KOFFI Marc, « Valider ». **Attendu** : « Génération de l'acte
+7. Revenez sur le dossier 13, « Valider ». **Attendu** : « Génération de l'acte
    dans Éloignement… », puis l'acte s'ouvre dans Writer tel quel, et le volet
    « Éloignement » à droite : « Lié au dossier n° … », la personne, le modèle,
    « Version : 1 », et la liste « À compléter » des balises restées vides.
@@ -62,8 +63,24 @@ ce point (audience vérifiée par le DM).
    `MirAI.Eloignement.Dossier`, `.Modele`, `.Document`, `.Version`. Rien dans
    le texte.
 
-Si Éloignement refuse la génération (option de génération manquante, champs
-à confirmer), le message le dit : réglez-les dans Éloignement et recommencez.
+Si Éloignement refuse la génération (champs à confirmer, mesure que le
+dossier ne permet pas), le message en donne la raison.
+
+### 3 bis. Acte avec options de génération
+
+1. « Éloignement », choisissez « OQTF 611-1 3° », « Valider », puis le
+   dossier 13, « Valider ». **Attendu** : la fenêtre « Options de génération »,
+   une ligne par option exigée par le modèle. Tant qu'Éloignement ne donne pas
+   les libellés, la ligne montre le code de l'option
+   (`voluntary_departure_delay`, `return_ban_duration`) et un champ libre.
+2. « Valider » sans rien remplir. **Attendu** : « « … » est à renseigner. »
+3. Saisissez 0 pour le délai et 2 pour la durée, « Valider ». **Attendu** :
+   l'OQTF s'ouvre ; « À compléter » liste la délégation de signature et le
+   tribunal administratif.
+4. Essai de refus : « Placement en CRA » sur le dossier 13 (pas d'OQTF
+   effective). **Attendu** : « Génération impossible : » suivi de la raison
+   donnée par Éloignement. « Procédure contradictoire » sans fiche pénale
+   répond encore « introuvable » : c'est une erreur de l'application, connue.
 
 ### 4. Enregistrer dans le dossier
 
@@ -116,7 +133,7 @@ Si Éloignement refuse la génération (option de génération manquante, champs
 1. Ouvrez un document simple contenant des balises (champs « espace réservé »
    `<etranger.nom>`, `<etranger.prenom>`), sans bloc conditionnel.
 2. « Éloignement », puis le lien « Ce document contient des balises : le
-   remplir depuis un dossier », choisissez KOFFI Marc. **Attendu** : les
+   remplir depuis un dossier », choisissez le dossier 13. **Attendu** : les
    balises sont remplies en texte ; le volet liste celles restées vides.
 3. Ctrl+S. **Attendu** : premier versement (« Enregistré dans le dossier
    n° … »), l'acte apparaît dans Éloignement en version 1.

@@ -116,34 +116,45 @@ def _retry_after(headers):
         return None
 
 
+def _detail_message(detail, erreurs):
+    """Texte du `detail` : chaîne (et ses `erreurs`), objet à `message`, ou liste
+    de validation (`msg`)."""
+    if isinstance(detail, str):
+        message = detail.strip()
+        extra = [str(e.get("message", "")).strip() for e in erreurs or []
+                 if isinstance(e, dict) and e.get("message")] if isinstance(erreurs, list) else []
+        return message + (" (" + " ; ".join(extra) + ")" if message and extra else "")
+    if isinstance(detail, dict):
+        return str(detail.get("message") or "").strip()
+    if isinstance(detail, list):
+        return " ; ".join(str(e.get("msg")).strip() for e in detail
+                          if isinstance(e, dict) and e.get("msg"))
+    return ""
+
+
+def _problem_message(problem):
+    """Ordre de la messagerie : `detail`, puis `title`, puis le message du relais."""
+    message = _detail_message(problem.get("detail"), problem.get("erreurs"))
+    if not message and isinstance(problem.get("title"), str):
+        message = problem["title"].strip()
+    relay_error = problem.get("error")
+    if not message and isinstance(relay_error, dict) and relay_error.get("message"):
+        message = str(relay_error["message"]).strip()
+    return message
+
+
 def error_from_response(status, headers, body):
     """EloignementError à partir d'une réponse en échec.
 
-    Ordre de la messagerie : `detail` du problem+json (et ses `erreurs`), puis
-    `title`, puis le message du relais, puis le libellé du code."""
-    problem = {}
+    Le texte vient du problem+json (`_problem_message`), à défaut du libellé
+    du code."""
     try:
         problem = json.loads((body or b"").decode("utf-8")) or {}
     except Exception:
         problem = {}
     if not isinstance(problem, dict):
         problem = {}
-    message = ""
-    detail = problem.get("detail")
-    if isinstance(detail, str) and detail.strip():
-        message = detail.strip()
-        erreurs = problem.get("erreurs")
-        if isinstance(erreurs, list):
-            extra = [str(e.get("message", "")).strip() for e in erreurs
-                     if isinstance(e, dict) and e.get("message")]
-            if extra:
-                message += " (" + " ; ".join(extra) + ")"
-    elif isinstance(detail, dict) and detail.get("message"):
-        message = str(detail["message"]).strip()
-    elif isinstance(problem.get("title"), str) and problem["title"].strip():
-        message = problem["title"].strip()
-    elif isinstance(problem.get("error"), dict) and problem["error"].get("message"):
-        message = str(problem["error"]["message"]).strip()
+    message = _problem_message(problem)
     if not message:
         message = status_message(status)
     elif status:
@@ -160,7 +171,7 @@ def multipart(fields, files, json_fields=True):
     parts = []
     for name, value in fields.items():
         parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n'.encode("utf-8")
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n'.encode()
             + (b"Content-Type: application/json; charset=utf-8\r\n" if json_fields else b"")
             + b"\r\n"
             + str(value).encode("utf-8") + b"\r\n")
@@ -168,9 +179,9 @@ def multipart(fields, files, json_fields=True):
         safe_name = re.sub(r'["\r\n\\]', "_", filename or "document.odt")
         parts.append(
             f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
-            f'filename="{safe_name}"\r\nContent-Type: {content_type}\r\n\r\n'.encode("utf-8")
+            f'filename="{safe_name}"\r\nContent-Type: {content_type}\r\n\r\n'.encode()
             + data + b"\r\n")
-    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    parts.append(f"--{boundary}--\r\n".encode())
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
@@ -256,10 +267,11 @@ class Client:
         """Demande à Éloignement de remplir le modèle avec le dossier.
 
         Rend l'acte décrit par Éloignement, normalisé : id, nom attribué,
-        version, balises restées vides [{nom, libelle}]. Les options de
-        génération qui ne se déduisent pas du dossier sont refusées par
-        Éloignement (422 OPTION_GENERATION_MANQUANTE, 409 CHAMPS_A_CONFIRMER) :
-        l'agent les règle dans Éloignement."""
+        version, balises restées vides [{nom, libelle}]. `options` porte les
+        options de génération que le modèle exige (`options_requises`) ; sans
+        elles, Éloignement répond 422 OPTION_GENERATION_MANQUANTE. Un dossier
+        qui ne permet pas la mesure donne 422 avec la raison, des champs à
+        confirmer 409 CHAMPS_A_CONFIRMER."""
         payload = {"modele_id": str(modele_id)}
         if options:
             payload["options"] = options

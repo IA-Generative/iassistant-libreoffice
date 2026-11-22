@@ -5,6 +5,7 @@
 - E3 volet « Éloignement » du document lié (fenêtre non modale posée sur la
   fenêtre du document) : dossier, personne, modèle, version, état de
   l'enregistrement, balises à compléter, actions.
+- E2b « Options de génération » : ce que le modèle exige, décrit par Éloignement.
 - E4 conflit de version, E5 actualisation depuis le dossier.
 
 Libellés en français, ceux de la conception de la messagerie (« Rechercher un
@@ -17,7 +18,9 @@ import threading
 import unohelper
 
 from ..core.context import ToolContext
-from ..core.eloignement import fill, link as link_mod
+from ..core.eloignement import fill
+from ..core.eloignement import link as link_mod
+from ..core.eloignement import options as options_mod
 from ..core.eloignement.session import DISABLED, get_session
 from ..core.eloignement.tools import registry as tools_registry
 from ..core.tool_calls import ToolResult
@@ -307,9 +310,9 @@ class Form:
         except Exception:
             return str(getattr(self.models.get(name), "Text", "") or "")
 
-    def listbox(self, name, x, y, w, h, on_select=None, multi=False):
+    def listbox(self, name, x, y, w, h, on_select=None, multi=False, dropdown=False):
         control, model = dsfr.add_control(self.dialog, self.model, name, "ListBox", x, y, w, h, {
-            "FontName": self.font, "FontHeight": 8, "Dropdown": False,
+            "FontName": self.font, "FontHeight": 8, "Dropdown": dropdown,
             "MultiSelection": multi, "StringItemList": ()})
         self.models[name] = model
         if on_select is not None:
@@ -416,7 +419,8 @@ class DossierDialog(Form):
         self.dossiers = []
         self.header = {}
         self.label("intro", intro, 16, 12, 608, 20)
-        self.label("hint", "Prénom, nom et date de naissance, numéro étranger ou numéro de dossier.",
+        self.label("hint",
+                   "Prénom, nom et date de naissance, numéro étranger ou numéro de dossier.",
                    16, 32, 608, 18, tone="text_mention", size=7)
         self.edit("q", 16, 54, 480, 28, on_enter=self.search)
         self.button("go", "Rechercher", 506, 54, 118, 28, self.search)
@@ -489,6 +493,57 @@ class DossierDialog(Form):
             self.set_label("status", reason, "warning")
             return
         self.close(dossier)
+
+
+# -- E2b : options de génération ---------------------------------------------------------
+
+class OptionsDialog(Form):
+    """Une ligne par option exigée : liste si Éloignement donne les valeurs, saisie sinon."""
+
+    ROW = 54
+
+    def __init__(self, session, modele, wanted):
+        height = 120 + self.ROW * len(wanted)
+        super().__init__(session, "Options de génération", 560, height)
+        self.wanted = wanted
+        self.label("intro", f"Éloignement a besoin de ces options pour « {modele_line(modele)} ».",
+                   16, 12, 528, 34, multiline=True)
+        y = 52
+        for i, option in enumerate(wanted):
+            self.label(f"l{i}", option.libelle, 16, y, 528, 18, bold=True)
+            choices = option.choices()
+            if choices:
+                self.listbox(f"o{i}", 16, y + 20, 528, 26, dropdown=True)
+                picked = [k for k, c in enumerate(choices) if c["valeur"] == option.defaut]
+                self.set_items(f"o{i}", [c["libelle"] for c in choices], picked[:1])
+            else:
+                self.edit(f"o{i}", 16, y + 20, 528, 26)
+                if option.defaut is not None:
+                    self.models[f"o{i}"].Text = str(option.defaut)
+            y += self.ROW
+        self.label("status", "", 16, y, 528, 20, tone="warning")
+        self.link("cancel", "Annuler", 330, y + 28, 80, 28, lambda: self.close(None))
+        self.button("ok", "Valider", 420, y + 26, 124, 32, self.validate, primary=True)
+
+    def _answers(self):
+        answers = {}
+        for i, option in enumerate(self.wanted):
+            choices = option.choices()
+            if not choices:
+                answers[option.option] = self.text(f"o{i}")
+                continue
+            picked = self.selected(f"o{i}")
+            if picked and picked[0] < len(choices):
+                answers[option.option] = choices[picked[0]]["valeur"]
+        return answers
+
+    def validate(self):
+        try:
+            body = options_mod.build(self.wanted, self._answers())
+        except ValueError as exc:
+            self.set_label("status", str(exc), "warning")
+            return
+        self.close(body)
 
 
 # -- E4 : conflit, E5 : actualiser -----------------------------------------------------------
@@ -679,8 +734,8 @@ class Panel:
                 prop.Name, prop.Value = "FilterName", "writer8"
                 args = (prop,)
             self.doc.storeToURL(url, args)
-            self.session.set_status(self.doc, "Copie enregistrée sur le poste (elle garde le lien).",
-                                    "success")
+            self.session.set_status(
+                self.doc, "Copie enregistrée sur le poste (elle garde le lien).", "success")
         except Exception as exc:
             self.form.set_label("state", f"Copie impossible : {exc}", "error")
 
@@ -733,7 +788,7 @@ class EloignementUI:
         if panel is not None:
             panel.close()
 
-    def confirm_unknown_link(self, model, link):
+    def confirm_unknown_link(self, _model, link):
         return ask(self.session, TITLE,
                    f"Ce document est lié au dossier n° {link.dossier}, mais ce lien n'a pas "
                    "été créé sur ce poste.\n\nEnregistrer ce document dans ce dossier "
@@ -747,8 +802,9 @@ class EloignementUI:
         choice = ConflictDialog(self.session, link.dossier).run()
         if choice == "mine":
             key = state.key
-            background(self.session, lambda: self.session.keep_mine(key, link.dossier, link.document),
-                       lambda _r, err: self.refresh(model))
+            background(self.session,
+                       lambda: self.session.keep_mine(key, link.dossier, link.document),
+                       lambda _r, _err: self.refresh(model))
         elif choice == "theirs":
             self.open_dossier_version(model, link)
         self.refresh(model)
@@ -780,14 +836,15 @@ class EloignementUI:
         if self.session.enabled():
             background(self.session, work, done)
 
-    def open_dossier_version(self, model, link):
+    def open_dossier_version(self, _model, link):
         def work():
             return self.session.download_act(link.dossier, link.document,
                                              "", suffix="(version du dossier)")
 
         def done(result, error):
             if error is not None:
-                message(self.session, TITLE, f"Ouverture impossible : {getattr(error, 'message', error)}")
+                reason = getattr(error, "message", error)
+                message(self.session, TITLE, f"Ouverture impossible : {reason}")
                 return
             path, version = result
             self.session.open_linked(path, link_mod.Link(link.dossier, link.modele,
@@ -817,19 +874,25 @@ class EloignementUI:
         dossier = DossierDialog(self.session, model, f"Acte : {modele_line(modele)}").run()
         if not dossier:
             return
-        self.generate(model, modele, dossier)
+        wanted = options_mod.required(modele)
+        chosen = OptionsDialog(self.session, modele, wanted).run() if wanted else {}
+        if chosen is None:
+            return
+        self.generate(model, modele, dossier, chosen)
 
-    def generate(self, model, modele, dossier):
+    def generate(self, model, modele, dossier, chosen=None):
         progress = Progress(self.session, "Génération de l'acte dans Éloignement…")
         args = {"dossier": str(dossier.get("id")), "modele": str(modele.get("id")),
                 "modele_nom": str(modele.get("nom") or ""), "_header": dossier}
+        if chosen:
+            args["options"] = chosen
 
         def done(result):
             progress.close()
             if not result.ok:
                 message(self.session, TITLE, "Génération impossible : " + result.error
-                        + "\n\nRéglez les options ou les champs à confirmer dans Éloignement, "
-                          "puis recommencez.")
+                        + "\n\nSi le dossier ne permet pas cette mesure, complétez-le dans "
+                          "Éloignement, puis recommencez.")
 
         call_tool(self.session, model, "eloignement_generer_acte", args, done)
 

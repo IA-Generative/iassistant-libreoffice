@@ -132,3 +132,16 @@ def test_tag_values_and_labels_come_from_eloignement_only():
 ])
 def test_discovery(discovery, expected):
     assert api.announces(discovery) is expected
+
+
+def test_a_measure_the_dossier_does_not_allow_is_explained():
+    err = api.error_from_response(422, {}, json.dumps(
+        {"detail": "Aucune OQTF effective : le placement en CRA est impossible."}).encode())
+    assert err.message.startswith("Aucune OQTF effective")
+    assert not err.transient
+
+
+def test_a_validation_refusal_lists_what_is_wrong():
+    body = {"detail": [{"loc": ["body", "options", "oqtf"], "msg": "valeur non permise"}]}
+    err = api.error_from_response(422, {}, json.dumps(body).encode())
+    assert err.message == "valeur non permise (HTTP 422)"

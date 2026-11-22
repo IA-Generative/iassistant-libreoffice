@@ -278,6 +278,9 @@ essai de bout en bout : [eloignement-recette.md](eloignement-recette.md).
   du SEUL document lié (`OnSaveDone`, `OnSaveAsDone`) fige une copie dans la file
   d'envoi (`outbox.py`), rejouée par un thread sans UNO ; 412 → conflit, jamais
   d'écrasement ; un lien créé ailleurs demande confirmation.
+- **Options de génération** : le modèle les annonce (`options_requises`) ;
+  `options.py` les pose à leur `champ`, l'écran E2b les demande. Libellés et
+  valeurs viennent d'Éloignement, jamais du plugin.
 
 ## Presets (les chips de la palette) — `core/presets.py`
 
