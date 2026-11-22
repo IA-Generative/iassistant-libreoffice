@@ -12,11 +12,11 @@ Cet essai vérifie le parcours complet, de Writer jusqu'au dossier dans
 | Quoi | Valeur |
 |---|---|
 | Éloignement | bêta (image 1.0.0-beta3 ou plus récente), routes /v1 de la conception §6 |
-| Compte d'agent | Le compte MirAI de la personne connectée sur le poste : le DM tire l'adresse de l'agent de SON jeton. En bêta, ce compte est rattaché à la préfecture seine-saint-denis, qui n'a **aucun modèle d'acte**. Avant le parcours A, au choix : poser un modèle d'essai pour seine-saint-denis, ou rattacher temporairement le compte à la préfecture fictive « essai-nuit » (un modèle : « Information du procureur (essai) »). `agent.essai-nuit@exemple.gouv.fr` n'existe que dans le Keycloak d'Éloignement, sans mot de passe : il ne sert qu'aux appels directs avec le jeton de service, pas à travers le DM. |
+| Compte d'agent | Le compte MirAI de la personne connectée sur le poste : le DM tire l'adresse de l'agent de SON jeton. En bêta, ce compte est rattaché à la préfecture Seine-Saint-Denis, qui a un modèle d'essai : « Courrier d'essai IAssistant », chemin « Essais IAssistant » (id `956ff188-33c1-4fff-a16a-6d49aa83e397`). Il n'a ni bloc conditionnel ni directive relatorio et porte six balises : `etranger.nom`, `etranger.prenom`, `etranger.date_naissance`, `etranger.lieu_naissance`, `etranger.nationalite`, `etranger.numero_agdref`. `agent.essai-nuit@exemple.gouv.fr` ne sert qu'aux appels directs avec le jeton de service, pas à travers le DM. |
 | DM | relais d'outils actif (`DM_TOOLS_ENABLED`), service `eloignement` déclaré pour le profil du poste, `ELOIGNEMENT_CLIENT_SECRET` posé ; `toolsEndpoint` présent dans `/config` |
 | Interrupteur | `eloignement: true` dans les `featureToggles` du gabarit du plugin, pour la cohorte d'essai. Pour un poste isolé : `"eloignement_enabled": true` dans les réglages locaux. |
 | Poste | OXT de la branche installé, poste enrôlé, session MirAI ouverte (Keycloak) avec ce compte |
-| Dossier fictif | un dossier actif de la préfecture d'essai (par exemple KOFFI Marc, né le 17/04/1992), un dossier brouillon et un dossier archivé |
+| Dossiers fictifs | Seine-Saint-Denis n'a **aucun dossier** en bêta. À créer d'abord, sous votre identité, avec des identités fictives : un dossier actif (par exemple un brouillon créé depuis Thunderbird puis activé ; ci-dessous « KOFFI Marc, né le 17/04/1992 »), un dossier brouillon et un dossier archivé. |
 
 Avant de commencer, vérifiez l'audience : le jeton Keycloak du poste doit être
 accepté par le relais (`X-User-Authorization`). Un 401 à l'étape 2 avec
@@ -40,8 +40,9 @@ ce point (audience vérifiée par le DM).
 ### 3. Nouvel acte (parcours A)
 
 1. Cliquez « Éloignement ». **Attendu** : la fenêtre « Nouvel acte depuis
-   Éloignement » montre « Essai nuit › Information du procureur (essai) ».
-2. Tapez « procureur », « Rechercher ». **Attendu** : la liste se restreint.
+   Éloignement » montre « Essais IAssistant › Courrier d'essai IAssistant ».
+2. Tapez « essai », « Rechercher ». **Attendu** : le modèle reste dans la liste ;
+   avec « zzz », la liste est vide.
 3. Choisissez le modèle, « Valider ». **Attendu** : la fenêtre « Rechercher un
    dossier ».
 4. Tapez « KOFFI Marc 17/04/1992 », Entrée. **Attendu** : une ligne
@@ -120,7 +121,9 @@ Si Éloignement refuse la génération (option de génération manquante, champs
 3. Ctrl+S. **Attendu** : premier versement (« Enregistré dans le dossier
    n° … »), l'acte apparaît dans Éloignement en version 1.
 4. Essai de refus : même geste sur un modèle d'Éloignement qui contient des
-   `${…}` ou des blocs conditionnels. **Attendu** : « Ce document contient
+   `${…}` ou des blocs conditionnels, par exemple `info_procureur.odt` du dépôt
+   d'Éloignement ouvert depuis le poste. Le refus vient avant tout appel au
+   service. **Attendu** : « Ce document contient
    des blocs conditionnels de modèle : seul Éloignement sait les évaluer. »
 
 ### 10. Actualiser depuis le dossier (parcours C)
