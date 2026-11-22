@@ -141,12 +141,13 @@ def modele_line(modele):
 
 
 def change_line(change, labels):
+    """Une ligne de E5. Un passage retouché à la main n'est pas cité : son
+    étendue n'est plus sûre (une frappe par-dessus la valeur peut ne garder
+    que la première lettre dans le signet)."""
     label = labels.get(change["balise"], change["balise"])
-    hand = ""
     if change.get("modified_by_hand"):
-        hand = ("  (modifié à la main)" if change.get("bookmark")
-                else "  (modifiée à la main : non remplacée)")
-    return f"{label} : « {change['current']} » → « {change['new']} »{hand}"
+        return f"{label} : modifié à la main, non remplacé (dossier : « {change['new']} »)"
+    return f"{label} : « {change['current']} » → « {change['new']} »"
 
 
 # -- tâches de fond ------------------------------------------------------------------
@@ -577,8 +578,8 @@ class RefreshDialog(Form):
     def __init__(self, session, changes, labels):
         super().__init__(session, "Actualiser depuis le dossier", 640, 420)
         self.changes = changes
-        self.label("intro", "Ces valeurs du dossier diffèrent du document. Les passages modifiés "
-                            "à la main sont décochés : sélectionnez-les pour les remplacer.",
+        self.label("intro", "Ces valeurs du dossier diffèrent du document : sélectionnez celles "
+                            "à reprendre. Un passage modifié à la main n'est jamais remplacé.",
                    16, 12, 608, 40, multiline=True)
         self.listbox("list", 16, 58, 608, 280, multi=True)
         self.set_items("list", [change_line(c, labels) for c in changes],
@@ -587,7 +588,8 @@ class RefreshDialog(Form):
         self.button("ok", "Appliquer", 510, 372, 114, 32, self.apply, primary=True)
 
     def apply(self):
-        self.close([self.changes[i] for i in self.selected("list") if i < len(self.changes)])
+        self.close([self.changes[i] for i in self.selected("list")
+                    if i < len(self.changes) and not self.changes[i].get("modified_by_hand")])
 
 
 # -- E3 : volet du document lié -------------------------------------------------------------

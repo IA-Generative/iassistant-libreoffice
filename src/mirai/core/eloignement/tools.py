@@ -164,7 +164,8 @@ def lire_ecarts(ctx, _args):
 def appliquer_ecarts(ctx, args):
     changes = [fill.Change(**{k: c.get(k) for k in
                               ("balise", "bookmark", "current", "new", "modified_by_hand")})
-               for c in args.get("ecarts") or [] if isinstance(c, dict)]
+               for c in args.get("ecarts") or []
+               if isinstance(c, dict) and not c.get("modified_by_hand")]
     marked = [c for c in changes if c.bookmark]
     in_text = [c for c in changes if not c.bookmark]
     written = ctx.on_main(lambda: fill.apply_changes(ctx.model, marked)

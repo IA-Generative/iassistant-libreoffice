@@ -100,7 +100,7 @@ Les libellés sont ceux de la conception de la messagerie (onglet « Fiche »).
 | **E2b — Options de génération** | dialogue modal | une ligne par option de `options_requises` du modèle : libellé d'Éloignement (à défaut, le code de l'option), liste déroulante si Éloignement donne les valeurs permises (Oui/Non pour un booléen), saisie libre sinon ; « Valider », « Annuler ». Absent pour un modèle sans option (courrier simple) |
 | **E3 — volet « Éloignement »** | volet latéral de Writer | Document lié : « Lié au dossier n° X », personne, modèle, version, état de l'enregistrement (« Enregistré dans le dossier n° X » / « En attente d'envoi » / « Conflit de version » / « Modifications non enregistrées ») ; « À compléter » : libellé lisible et balise, un clic va à la balise ; boutons « Actualiser depuis le dossier », « Enregistrer une copie sur le poste », « Ouvrir le dossier dans Éloignement » (si le lien d'interface est fourni). Document non lié qui contient des balises : « Remplir depuis un dossier » |
 | **E4 — conflit de version** | dialogue modal | « Le document a été modifié dans Éloignement depuis votre version n. » ; « Garder ma version comme nouvelle version », « Ouvrir la version du dossier », « Annuler » (l'envoi reste en attente) |
-| **E5 — actualiser** | dialogue modal | tableau balise / dans le document / dans le dossier, une case par ligne (décochée si modifiée à la main) ; « Appliquer », « Annuler » |
+| **E5 — actualiser** | dialogue modal | une ligne par écart, « valeur du document » → « valeur du dossier », toutes cochées ; un passage modifié à la main est listé « modifié à la main, non remplacé » et n'est jamais écrasé ; « Appliquer », « Annuler » |
 
 Les erreurs reprennent les messages de la messagerie (`ELO_STATUS_MESSAGES`) :
 
@@ -388,7 +388,7 @@ Ajouts nés de la mise en œuvre :
   `MirAI.Eloignement.Valeurs`. Pour actualiser, il cherche l'ancienne valeur
   dans le texte et ne la compte que là où rien n'y est collé (lettre,
   chiffre, trait d'union, apostrophe, souligné). Une valeur introuvable est
-  signalée « modifiée à la main : non remplacée ». C'est la règle du
+  signalée « modifié à la main, non remplacé ». C'est la règle du
   complément Word (`core/eloignement/snapshot.py`). Un document rempli dans
   Writer garde ses signets à empreinte.
 - **Fenêtres modales** : elles sont rattachées à la fenêtre du document avant

@@ -115,3 +115,14 @@ def test_drafts_and_archived_dossiers_cannot_receive_an_act(change, reason):
 
 def test_unknown_identity_is_said():
     assert ui.resume_line({"id": 3, "statut": "actif"}).startswith("identité non renseignée")
+
+
+def test_a_hand_edited_passage_is_shown_but_never_offered_for_replacement():
+    labels = {"etranger.prenom": "Prénom", "etranger.nationalite": "Nationalité"}
+    by_dossier = {"balise": "etranger.prenom", "bookmark": "m1", "current": "Karim",
+                  "new": "Karima", "modified_by_hand": False}
+    by_hand = {"balise": "etranger.nationalite", "bookmark": "m2", "current": "J",
+               "new": "marocain", "modified_by_hand": True}
+    assert ui.change_line(by_dossier, labels) == "Prénom : « Karim » → « Karima »"
+    line = ui.change_line(by_hand, labels)
+    assert "non remplacé" in line and "« J »" not in line   # l'étendue retouchée n'est pas sûre

@@ -148,13 +148,13 @@ dossier ne permet pas), le message en donne la raison.
 1. Sur le document du 9, retouchez à la main une valeur remplie.
 2. Dans Éloignement, modifiez une autre valeur du dossier.
 3. Volet, « Actualiser depuis le dossier ». **Attendu** : la liste des écarts ;
-   la valeur retouchée est marquée « (modifié à la main) » et décochée.
-4. « Appliquer ». **Attendu** : seule la valeur cochée change ; Ctrl+Z annule
-   l'actualisation d'un coup.
+   la valeur retouchée est listée « modifié à la main, non remplacé ».
+4. « Appliquer ». **Attendu** : seule la valeur du dossier change, la retouche
+   reste ; Ctrl+Z annule l'actualisation d'un coup.
 5. Même essai sur un acte généré par Éloignement (étape 3, Courrier d'essai) :
    prénom changé dans le dossier, lieu de naissance retouché dans Writer.
-   **Attendu** : le prénom est proposé ; le lieu de naissance est marqué
-   « (modifiée à la main : non remplacée) » et reste tel quel.
+   **Attendu** : le prénom est proposé ; le lieu de naissance est listé
+   « modifié à la main, non remplacé » et reste tel quel.
 
 ### 11. Données et traces
 
