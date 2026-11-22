@@ -156,13 +156,17 @@ def test_feature_off_still_keeps_the_save_in_the_queue(env):
     assert sess.outbox.get("a-1").state == outbox.WAITING
 
 
-def test_an_act_filled_in_writer_stays_local_and_says_why(env):
+def test_a_document_filled_in_writer_is_queued_for_its_first_upload(env):
     sess, doc, _ = env
-    link.write_link(doc, link.Link(dossier="12"))
-    assert sess.on_saved(doc) is None
-    assert sess.outbox.entries() == []
-    text, tone = sess.describe(doc)
-    assert tone == "warning" and "poste" in text
+    lnk = link.Link(dossier="12", modele="m1")
+    link.write_link(doc, lnk)
+    sess.known.add("12", sess.key_for(doc, lnk))
+    entry = sess.on_saved(doc)
+    assert entry.document == "" and entry.modele == "m1"
+    sess.outbox.sent(entry.key)
+    sess.apply_outcome(outbox.Outcome(entry.key, outbox.SENT, document="a-9", version="1"))
+    assert link.read_link(doc) == link.Link("12", "m1", "a-9", "1")
+    assert sess.known.contains("12", "a-9")      # la suite part sans redemander
 
 
 def test_discovery_requires_both_the_switch_and_the_relay(env):

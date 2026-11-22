@@ -46,6 +46,7 @@ class Entry:
     next_at: float = 0.0
     message: str = ""
     server_version: str = ""  # version courante annoncée par la 412
+    modele: str = ""          # modèle d'origine, pour un premier versement
 
 
 def entry_key(dossier, document, location=""):
@@ -138,7 +139,7 @@ class Outbox:
 
     # -- transitions --------------------------------------------------------------
 
-    def put(self, key, dossier, document, version, nom, source_path):
+    def put(self, key, dossier, document, version, nom, source_path, modele=""):
         """Fige le fichier enregistré et (re)met l'envoi en attente."""
         with open(source_path, "rb") as fh:
             data = fh.read()
@@ -151,7 +152,7 @@ class Outbox:
             state = CONFLICT if previous and previous.state == CONFLICT else WAITING
             self._entries[key] = Entry(
                 key=key, dossier=dossier, document=document, version=version,
-                nom=nom, snapshot=snapshot, state=state, attempts=0,
+                nom=nom, snapshot=snapshot, state=state, attempts=0, modele=modele,
                 next_at=self._clock(),
                 message=previous.message if state == CONFLICT else "")
             self._save()
@@ -235,11 +236,6 @@ class Outcome:
 
 SENT = "envoye"
 
-# Un acte rempli dans Writer (« Remplir depuis un dossier ») n'existe pas encore
-# dans Éloignement, et aucune route ne permet de l'y créer : demandée, pas
-# contournée (docs/eloignement-conception.md §6).
-NO_ACT_ROUTE = ("Éloignement ne sait pas encore recevoir un acte rempli dans Writer : "
-                "le document reste enregistré sur le poste")
 
 
 def send_one(outbox, client, entry):
@@ -250,11 +246,16 @@ def send_one(outbox, client, entry):
     except OSError:
         outbox.refused(entry.key, "copie locale introuvable : réenregistrer le document")
         return Outcome(entry.key, REFUSED, "copie locale introuvable")
-    if not entry.document:
-        outbox.refused(entry.key, NO_ACT_ROUTE)
-        return Outcome(entry.key, REFUSED, NO_ACT_ROUTE)
     try:
-        result = client.verser(entry.dossier, entry.document, data, entry.version, entry.nom)
+        if entry.document:
+            result = client.verser(entry.dossier, entry.document, data, entry.version, entry.nom)
+        else:
+            # Premier versement d'un document rempli dans Writer. La clé
+            # d'idempotence suit le contenu : un renvoi après coupure ne crée
+            # pas un second acte.
+            digest = hashlib.sha256(data).hexdigest()[:24]
+            result = client.creer_acte(entry.dossier, data, entry.nom, entry.modele,
+                                       idempotency_key=f"fichier:{entry.key}:{digest}")
     except EloignementError as exc:
         if exc.status == 412:
             outbox.conflict(entry.key, exc.message, server_version(exc))

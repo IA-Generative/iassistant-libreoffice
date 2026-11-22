@@ -94,6 +94,9 @@ def remplir_depuis_dossier(ctx, args):
     """Remplit les balises du document ouvert avec les valeurs du dossier."""
     session = _session(ctx)
     dossier_id = api.safe_id(args["dossier"])
+    if ctx.on_main(lambda: fill.has_template_logic(ctx.model)):
+        return _fail("Ce document contient des blocs conditionnels de modèle : seul Éloignement "
+                     "sait les évaluer. Utilisez « Nouvel acte depuis Éloignement ».")
     names = ctx.on_main(lambda: fill.placeholder_names(fill.find_placeholders(ctx.model)))
     if not names:
         return _fail("Ce document ne contient aucune balise à remplir.")

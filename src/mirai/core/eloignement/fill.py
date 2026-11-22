@@ -15,6 +15,7 @@ Toutes les fonctions qui reçoivent `model` s'exécutent sur le thread principal
 """
 
 import dataclasses
+import functools
 import hashlib
 import re
 
@@ -126,7 +127,60 @@ def find_placeholders(model):
                 found.append(Placeholder(name, "texte", rng))
     except Exception:
         pass
-    return found
+    return _in_document_order(model, found)
+
+
+def _start(item):
+    return item.target.getAnchor() if item.kind == "champ" else item.target
+
+
+def _in_document_order(model, items):
+    """Trie par position dans le corps du texte ; ce qui n'y est pas
+    (tableau, cadre) garde son rang relatif, en fin de liste."""
+    try:
+        body = model.getText()
+    except Exception:
+        return items
+
+    def compare(a, b):
+        try:
+            # compareRegionStarts : 1 si a est avant b, -1 s'il est après.
+            return -int(body.compareRegionStarts(_start(a), _start(b)))
+        except Exception:
+            return 0
+
+    return sorted(items, key=functools.cmp_to_key(compare))
+
+
+LOGIC_SCHEME = "relatorio://"
+
+
+def has_template_logic(model):
+    """Le document porte-t-il de la logique de modèle Relatorio : blocs
+    `if`/`for` (liens relatorio://) ou expressions `${…}` ? Seul Éloignement
+    sait les évaluer."""
+    try:
+        descriptor = model.createSearchDescriptor()
+        descriptor.SearchString = r"\$\{[^}]*\}"
+        descriptor.SearchRegularExpression = True
+        if model.findFirst(descriptor) is not None:
+            return True
+    except Exception:
+        pass
+    try:
+        paragraphs = model.getText().createEnumeration()
+        while paragraphs.hasMoreElements():
+            paragraph = paragraphs.nextElement()
+            if not paragraph.supportsService("com.sun.star.text.Paragraph"):
+                continue
+            portions = paragraph.createEnumeration()
+            while portions.hasMoreElements():
+                url = str(getattr(portions.nextElement(), "HyperLinkURL", "") or "")
+                if url.startswith(LOGIC_SCHEME):
+                    return True
+    except Exception:
+        return False
+    return False
 
 
 def placeholder_names(placeholders):

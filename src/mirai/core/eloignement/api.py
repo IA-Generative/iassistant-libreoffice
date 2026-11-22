@@ -27,6 +27,7 @@ ROUTES = {
     "actes": "v1/dossiers/{dossier}/actes",
     "contenu": "v1/dossiers/{dossier}/actes/{document}/contenu",
     "versions": "v1/dossiers/{dossier}/actes/{document}/versions",
+    "fichier": "v1/dossiers/{dossier}/actes/fichier",
     "balises": "v1/dossiers/{dossier}/balises",
 }
 
@@ -150,7 +151,7 @@ def error_from_response(status, headers, body):
     return EloignementError(status, message, _retry_after(headers), problem)
 
 
-def multipart(fields, files):
+def multipart(fields, files, json_fields=True):
     """Corps multipart/form-data, sans dépendance.
 
     `fields` : {nom: texte} ; `files` : {nom: (nom_de_fichier, type, octets)}.
@@ -159,8 +160,9 @@ def multipart(fields, files):
     parts = []
     for name, value in fields.items():
         parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n'
-            f"Content-Type: application/json; charset=utf-8\r\n\r\n".encode("utf-8")
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n'.encode("utf-8")
+            + (b"Content-Type: application/json; charset=utf-8\r\n" if json_fields else b"")
+            + b"\r\n"
             + str(value).encode("utf-8") + b"\r\n")
     for name, (filename, content_type, data) in files.items():
         safe_name = re.sub(r'["\r\n\\]', "_", filename or "document.odt")
@@ -269,6 +271,20 @@ class Client:
             timeout=UPLOAD_TIMEOUT)
         return normalize_acte(data, headers)
 
+    def creer_acte(self, dossier_id, odt_bytes, nom="", modele_id="", idempotency_key=""):
+        """Premier versement d'un document rempli dans Writer : Éloignement le
+        prend tel quel (sans le rendre), lui attribue id, nom et version 1."""
+        fields = {"modele_id": modele_id} if modele_id else {}
+        body, content_type = multipart(
+            fields, {"fichier": (nom or "acte.odt", ODT_TYPE, odt_bytes)}, json_fields=False)
+        headers = {"Content-Type": content_type}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        data, resp_headers = self._call(
+            "POST", ROUTES["fichier"].format(dossier=safe_id(dossier_id)), body, headers,
+            timeout=UPLOAD_TIMEOUT)
+        return normalize_acte(data, resp_headers)
+
     def verser(self, dossier_id, document_id, odt_bytes, version, nom=""):
         """Nouvelle version de l'acte. Éloignement exige la version de
         référence (If-Match, 428 sinon) et refuse (412) si elle a bougé ; la
@@ -305,7 +321,9 @@ def normalize_acte(data, headers=None):
 def server_version(error):
     """Version courante annoncée par une 412, ou ""."""
     problem = getattr(error, "problem", None) or {}
-    return str(problem.get("version") or "") if isinstance(problem, dict) else ""
+    if not isinstance(problem, dict):
+        return ""
+    return str(problem.get("version") or problem.get("etag_courant") or "").strip('"')
 
 
 def etag(headers):

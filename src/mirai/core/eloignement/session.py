@@ -274,10 +274,6 @@ class Session:
             return None
         key = self.key_for(model, link)
         state.key = key
-        if not link.document:
-            self.set_status(model, "Enregistré sur le poste. " + outbox_mod.NO_ACT_ROUTE + ".",
-                            "warning")
-            return None
         if not self.known.contains(link.dossier, key):
             confirm = getattr(self.ui, "confirm_unknown_link", None)
             if confirm is None or not confirm(model, link):
@@ -286,7 +282,7 @@ class Session:
                 return None
             self.known.add(link.dossier, key)
         entry = self.outbox.put(key, link.dossier, link.document, link.version,
-                                os.path.basename(path), path)
+                                os.path.basename(path), path, modele=link.modele)
         if not self.enabled():
             self.set_status(model, "En attente d'envoi : " + DISABLED, "warning")
             return entry

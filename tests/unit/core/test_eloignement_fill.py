@@ -84,6 +84,7 @@ def _doc_with_fields(*placeholders):
     enum.hasMoreElements.side_effect = [True] * len(fields) + [False]
     enum.nextElement.side_effect = fields
     doc = MagicMock()
+    doc.getText.return_value.compareRegionStarts.return_value = 0   # ordre déjà bon
     doc.getTextFields.return_value.createEnumeration.return_value = enum
     doc.findAll.return_value.getCount.return_value = 0
     doc.getBookmarks.return_value.getElementNames.return_value = ()

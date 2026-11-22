@@ -133,14 +133,23 @@ def test_archived_dossier_is_refused_with_the_reason_and_the_file_stays(box):
     assert os.path.exists(entry.snapshot)
 
 
-def test_an_act_unknown_to_eloignement_is_not_invented(box):
+def test_a_document_filled_in_writer_is_created_once_then_versioned(box):
     b, _, directory = box
-    path = saved_file(directory)
-    b.put("nouveau-12-x", "12", "", "", "acte.odt", path)
-    relay = ScriptedRelay()
-    [result] = outbox.send_due(b, api.Client(relay))
-    assert result.state == outbox.REFUSED
-    assert relay.calls == []
+    path = saved_file(directory, content=b"rempli")
+    b.put("nouveau-12-x", "12", "", "", "acte.odt", path, modele="m1")
+    relay = ScriptedRelay(OSError("coupure"),
+                          (201, {}, {"acte_id": "a-9", "version": 1, "nom": "2026_11_22_KOFFI.odt"}))
+    client = api.Client(relay)
+    [first] = outbox.send_due(b, client)
+    assert first.state == outbox.WAITING
+    b.keep_mine("nouveau-12-x")          # « Réessayer l'envoi »
+    [second] = outbox.send_due(b, client)
+    assert (second.state, second.document, second.version) == ("envoye", "a-9", "1")
+    call = relay.calls[1]
+    assert (call["method"], call["path"]) == ("POST", "eloignement/v1/dossiers/12/actes/fichier")
+    assert b'name="modele_id"' in call["body"] and b"m1" in call["body"]
+    # même contenu, même clé : un renvoi après coupure ne crée pas deux actes
+    assert relay.calls[0]["headers"]["Idempotency-Key"] == call["headers"]["Idempotency-Key"]
 
 
 def test_an_unreadable_queue_file_is_set_aside_not_overwritten(box):
