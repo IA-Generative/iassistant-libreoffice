@@ -162,7 +162,7 @@ from .i18n import (
     get_locale as _i18n_get_locale,
     set_locale as _i18n_set_locale,
 )
-from .shell import config_fetch, dm_bases
+from .shell import config_fetch, dm_bases, token_refresh
 from .shell import runtime as _shell_runtime
 from .shell.open_url import open_url
 from .shell.settings_result import apply_settings_result
@@ -3309,7 +3309,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     headers=_with_user_agent({"Content-Type": "application/x-www-form-urlencoded"})
                 )
 
-            with self._urlopen(request, context=self.get_ssl_context(), timeout=20) as response:
+            with self._urlopen(request, context=self.get_ssl_context(),
+                              timeout=token_refresh.TOKEN_TIMEOUT_SECONDS) as response:
                 payload = response.read().decode("utf-8")
             return json.loads(payload)
         except Exception as e:
@@ -3834,40 +3835,28 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return None
 
     def _ensure_access_token(self, config_data, interactive=True):
-        access_token = str(self._get_config_from_file("access_token", "")).strip()
-        if access_token and not self._token_is_expired(access_token):
-            return access_token
+        def stored_token():
+            token = str(self._get_config_from_file("access_token", "")).strip()
+            return token if token and not self._token_is_expired(token) else ""
 
-        refresh_token = str(self._get_config_from_file("refresh_token", "")).strip()
-        keycloak = self._keycloak_config(config_data)
-        _, token_endpoint = self._keycloak_endpoints(config_data)
-        client_id = (
-            keycloak.get("client_id")
-            or keycloak.get("clientId")
-            or self._get_config_from_file("keycloakClientId", "")
-            or self._get_config_from_file("keycloak_client_id", "")
-            or self._get_config_from_file("client_id", "")
-        )
-        client_secret = (
-            keycloak.get("client_secret")
-            or keycloak.get("clientSecret")
-            or self._get_config_from_file("keycloak_client_secret", "")
-            or self._get_config_from_file("client_secret", "")
-        )
-
-        if refresh_token:
-            refresh_payload = {
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": client_id
-            }
-            if client_secret:
-                refresh_payload["client_secret"] = client_secret
-            token_response = self._request_token(token_endpoint, refresh_payload)
+        def refresh():
+            refresh_token = str(self._get_config_from_file("refresh_token", "")).strip()
+            if not refresh_token:
+                return None
+            _, token_endpoint = self._keycloak_endpoints(config_data)
+            payload = token_refresh.refresh_payload(
+                refresh_token, self._keycloak_config(config_data),
+                lambda key: self._get_config_from_file(key, ""))
+            token_response = self._request_token(token_endpoint, payload)
             if isinstance(token_response, dict) and token_response.get("access_token"):
                 self._store_tokens(token_response)
                 return token_response.get("access_token")
+            return None
 
+        access_token = stored_token() or token_refresh.refresh_once(
+            self.runtime.token_refresh_lock, stored_token, refresh)
+        if access_token:
+            return access_token
         if not interactive:
             log_to_file("Access token unavailable (interactive login disabled for this flow)")
             return None
