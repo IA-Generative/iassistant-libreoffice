@@ -23,7 +23,10 @@
     "proxy_allow_insecure_ssl": true,
     "api_type": "chat",
     "is_openwebui": true,
-    "openai_compatibility": false
+    "openai_compatibility": false,
+    "featureToggles": {
+      "eloignement": false
+    }
   },
   "local": {
     "_description": "Dev autonome, sans DM, sans Keycloak",
