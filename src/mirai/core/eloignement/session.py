@@ -329,9 +329,17 @@ class Session:
 
     # -- envoi ------------------------------------------------------------------------
 
+    def _switch(self):
+        try:
+            return self.shell.feature_state(FEATURE)
+        except Exception:
+            return False
+
     def kick(self):
-        """Réveille (ou démarre) le thread d'envoi."""
-        if not self.enabled():
+        """Réveille (ou démarre) le thread d'envoi. Au démarrage, tant que le DM
+        n'a pas dit si la fonction est allumée, le thread attend sa réponse :
+        un envoi resté en file repart ainsi sans geste de l'agent."""
+        if self._switch() is False:
             return
         with self._lock:
             self._wake.set()
@@ -342,9 +350,17 @@ class Session:
             self._worker.start()
 
     def _send_loop(self):
+        waited = 0
         while True:
             self._wake.clear()
-            if not self.enabled():
+            switch = self._switch()
+            if switch is None and waited < 20:
+                waited += 1
+                self._wake.wait(30)
+                continue
+            if switch is not True:
+                with self._lock:
+                    self._worker = None
                 return
             for outcome in outbox_mod.send_due(self.outbox, self.client):
                 self.dispatcher.post(lambda o=outcome: self.apply_outcome(o))

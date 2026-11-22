@@ -1,6 +1,6 @@
 # Éloignement dans Writer — conception
 
-**Date** : 2026-11-22 · **Statut** : proposition, à valider avant tout code ·
+**Date** : 2026-11-22 · **Statut** : validé et implémenté (voir §10) ·
 **Branche** : `exp/eloignement` (locale, rien de poussé)
 
 ## 1. Objectif
@@ -116,53 +116,52 @@ messages.
 
 ## 4. Points d'entrée
 
-- **Palette** : une commande « Éloignement » dans Writer, visible seulement
+- **Palette** : une chip « 🏛️ Éloignement » dans Writer, visible seulement
   quand la fonctionnalité est active. Elle ouvre E1, ou E3 si le document est
   déjà lié.
-- **Barre d'outils** : un bouton « Éloignement » (`oxt/Addons.xcu`,
-  `OfficeToolBar`, contexte Writer), qui fait la même chose.
-- **Volet latéral** : `oxt/Sidebar.xcu` déclare un deck et un panneau, et une
-  fabrique Python (`XUIElementFactory`) les construit. C'est un composant UNO de
-  plus, déclaré dans le manifeste comme `calc_prompt_function.py`.
-  *Risque* : le plugin n'a encore aucun volet latéral. Si la fabrique Python
-  pose problème au banc, le repli est une fenêtre non modale ancrée, comme la
-  palette.
+- **Barre d'outils** : une barre « MIrAI — Éloignement » avec un bouton
+  « Éloignement », **créée à l'exécution** dans la configuration de Writer
+  (`ModuleUIConfigurationManager`) quand l'interrupteur est allumé, et retirée
+  quand il s'éteint. Un bouton déclaré dans `Addons.xcu` serait visible de
+  tous les postes, interrupteur éteint compris.
+- **Volet E3** : une fenêtre non modale posée sur la fenêtre du document (le
+  patron éprouvé de la palette), une par document lié. *Écart assumé* : un
+  vrai volet latéral demande une fabrique Python (`XUIElementFactory`) et un
+  `Sidebar.xcu` qui afficherait l'onglet à tous les postes ; non vérifiable au
+  banc cette nuit, il reste à faire si la fenêtre ne convient pas.
 
 ## 5. Architecture
 
-### 5.1 Ce qui change dans la coquille (à valider)
+### 5.1 Ce qui change dans la coquille
 
-La coquille ne change pas, sauf sur trois points, chacun de quelques lignes,
-sur le modèle de `OpenAssistant` :
+Trois retouches, sept lignes (borne `lines` du budget de la coquille relevée
+d'autant, avec la raison) :
 
-1. **`MainJob.trigger`** : une action `Eloignement`, qui fait un import
-   paresseux de `core.eloignement.entry`.
-2. **`MainJob.execute`** (événements `onLoad` et `onNew`, déjà câblés dans
-   `Jobs.xcu`) : si la fonctionnalité est active, un appel paresseux qui pose
-   l'écouteur d'enregistrement sur un document lié. C'est ainsi qu'une copie
-   rouverte retrouve son dossier.
-3. **`_curl_headers_for_log`** : ajouter `x-user-authorization` aux en-têtes
-   masqués.
+1. **`MainJob.trigger`** : l'action `Eloignement` appelle
+   `core.entry.open_eloignement` (import paresseux).
+2. **`MainJob.execute`** (événements `onLoad`, `onNew`) : appel de
+   `core.entry.eloignement_on_load`. Interrupteur éteint : retour immédiat,
+   sans import de l'interface (sauf pour retirer la barre d'outils créée du
+   temps où il était allumé). DM pas encore joint au démarrage : l'écouteur
+   d'enregistrement est posé sur un document déjà lié, pour qu'un Ctrl+S soit
+   mis en file au lieu d'être perdu.
+3. **`_redact_header_value`** : `x-user-authorization` est masqué dans le
+   journal.
 
 ### 5.2 Moteur et interface
 
 | Fichier | Rôle |
 |---|---|
-| `core/shell_facade.py` | + `tools_request(method, path, body, headers, timeout)` : URL depuis `toolsEndpoint`, en-têtes `_relay_headers()` + jeton utilisateur + `_with_user_agent`, transport `_urlopen` + `get_ssl_context`. + `feature_enabled("eloignement")` |
-| `core/eloignement_api.py` | client des routes R1…R7, multipart en stdlib, erreurs → messages français |
-| `core/eloignement_link.py` | lecture et écriture du lien dans `DocumentProperties.UserDefinedProperties` |
-| `core/eloignement_queue.py` | file d'envoi persistante, rejeu, conflit |
-| `core/eloignement_fill.py` | repérage des balises (`TextField.JumpEdit`), insertion en texte, signets, comparaison pour « Actualiser » |
-| `core/tools/eloignement_tools.py` | les tools du registre (§5.5) |
-| `ui/eloignement_dialogs.py` | E1, E2, E4, E5 |
-| `ui/eloignement_panel.py` | E3 et la fabrique du volet |
-
-Le threading suit les règles existantes :
-
-- le réseau tourne dans un thread de travail ;
-- tout accès UNO passe par `MainThreadDispatcher` ;
-- `processEventsToIdle` n'est jamais appelé ;
-- `core/` et `ui/` n'importent jamais `entrypoint`.
+| `core/shell_facade.py` | + `tools_request` (relais d'outils : `toolsEndpoint`, paire relais, `X-User-Authorization`, transport de la coquille), `feature_state` / `feature_enabled` ; fonctions pures `build_tools_request`, `feature_from` |
+| `core/entry.py` | + `open_eloignement`, `eloignement_on_load` |
+| `core/eloignement/api.py` | client des routes /v1 (une table `ROUTES`), multipart en stdlib, erreurs → messages de la messagerie, identifiants validés avant d'entrer dans un chemin |
+| `core/eloignement/link.py` | lien dans `UserDefinedProperties` |
+| `core/eloignement/outbox.py` | file d'envoi persistante, rejeu, conflit |
+| `core/eloignement/fill.py` | balises (`TextField.JumpEdit` et texte `<a.b>`), insertion en texte, signets à empreinte, écarts pour « Actualiser », détection de la logique de modèle |
+| `core/eloignement/session.py` | session du processus : documents liés, écouteur d'enregistrement, thread d'envoi, ouverture d'un acte |
+| `core/eloignement/tools.py` | les tools, dans un registre à part (§5.5) |
+| `ui/eloignement.py` | E1, E2, E3, E4, E5, barre d'outils, boîtes de message |
+| `ui/palette.py` | + la chip |
 
 ### 5.3 Lien et fichiers locaux
 
@@ -209,14 +208,16 @@ celles-ci :
 
 ### 5.5 Tools du registre
 
-| Tool | Mutant | Rôle |
-|---|---|---|
-| `eloignement_lister_modeles` | | R1 |
-| `eloignement_rechercher_dossier` | | R2 |
-| `eloignement_generer_acte` | ✔ (ouvre un document) | R3 + R4 |
-| `eloignement_remplir_depuis_dossier` | ✔ | R5 + insertion |
-| `eloignement_actualiser` | ✔ | R5 + comparaison |
-| `eloignement_enregistrer` | | R6 avec la file |
+| Tool | Rôle |
+|---|---|
+| `eloignement_lister_modeles` | R1 |
+| `eloignement_rechercher_dossier` | R2 (recherche) |
+| `eloignement_lire_dossier` | R2 (en-tête) |
+| `eloignement_generer_acte` | R3 + R4, ouvre l'acte lié |
+| `eloignement_remplir_depuis_dossier` | R5 + insertion dans le document ouvert |
+| `eloignement_lire_ecarts` | R5 + comparaison aux signets |
+| `eloignement_appliquer_ecarts` | écrit les écarts acceptés (une action d'annulation) |
+| `eloignement_envoyer` | relance la file d'envoi (R6, R3-bis) |
 
 Ces tools sont appelés directement par les écrans. Par défaut, ils ne sont **pas
 proposés au modèle de langage** : les dossiers contiennent des données
@@ -229,7 +230,8 @@ La fonctionnalité est active si deux conditions sont remplies, comme dans la
 messagerie :
 
 - l'interrupteur `eloignement` vaut strictement `true` dans les `features` du DM
-  (`featureToggles` du gabarit du plugin, réglable par cohorte) ;
+  (`featureToggles` du gabarit du plugin, réglable par cohorte) ; à défaut de
+  clé dans `features`, la clé de configuration `eloignement_enabled` (essais) ;
 - la découverte `GET {toolsEndpoint}` annonce le service `eloignement`
   (résultat gardé 5 min).
 
@@ -249,46 +251,38 @@ ni volet, ni écouteur.
 
 ## 6. Routes
 
-Les routes passent par le relais DM sous le préfixe `/v1/`. Elles sont
-appelées par `{toolsEndpoint}/eloignement/v1/…`.
+Figées côté Éloignement le 2026-11-22 (branche `exp/api-v1-dossiers`, déployées
+en bêta3), appelées par `{toolsEndpoint}/eloignement/v1/…`.
 
-| # | Besoin | Route visée | État le 2026-11-22 |
+| # | Besoin | Route | Utilisée par |
 |---|---|---|---|
-| R0 | découverte | `GET {toolsEndpoint}` → `services` contient `eloignement` | **existe** (DM, `exp/eloignement-relais`) |
-| R1 | catalogue des modèles de la préfecture, avec recherche | `GET /v1/modeles?q=` → `[{id, nom, chemin, version}]` | **manquante**. Prévue « si le temps le permet » dans la PR brouillon #1720. Seul l'équivalent legacy existe (`/document-tree`, JWT agent, inaccessible au jeton de service) |
-| R2 | recherche d'un dossier, en-tête | `GET /v1/dossiers?q=` interprété ; `GET /v1/dossiers/{id}` | **en cours** (#1720) : `q` multi-critères (mots, date, n° étranger, n° de dossier), `mesure_envisagee`, `statut_detaille` (dont `archive`), `inclure_archives` |
-| R3 | générer un acte (modèle + dossier) | `POST /v1/dossiers/{id}/actes` `{modele_id, …}` → `{id, nom (dossier_type_rang), version, balises_vides:[{balise, libelle}]}` | **manquante**. Génération + octets : « si le temps le permet » (#1720). Balises vides avec libellés : **pas prévue** |
-| R3-bis | générer depuis un ODT fourni (parcours B avec `if`/`for`) | même route, avec le fichier en multipart | **à demander** (optionnelle) |
-| R4 | télécharger l'acte | `GET /v1/dossiers/{id}/actes/{doc}/contenu` → octets ODT + `ETag` | **manquante** (#1720, même lot que R3) |
-| R5 | valeurs des balises d'un dossier, avec libellés | `GET /v1/dossiers/{id}/valeurs?balises=a,b` → `{valeurs:{balise: texte\|null}, libelles:{balise: texte}}` | **manquante, pas prévue cette nuit**. Aujourd'hui, le catalogue n'a pas de libellé lisible (`libelle` = la balise) |
-| R6 | verser une nouvelle version d'un acte | `PUT /v1/dossiers/{id}/actes/{doc}/contenu` + `If-Match` → `{version, nom}` ; 412 en cas de conflit, 409 si le dossier est archivé | **manquante, pas prévue cette nuit**. `POST /v1/dossiers/{id}/documents` existe mais verse une *pièce entrante* dans le lot de dépôt, sans version : ne convient pas |
-| R7 | liste des actes d'un dossier | `GET /v1/dossiers/{id}/actes` → `[{id, nom, modele, version, modifie_le, modifie_par}]` | **manquante** (#1720, « si le temps le permet ») |
+| R0 | découverte | `GET {toolsEndpoint}` → `services` contient `eloignement` | `Session.offered` |
+| R1 | catalogue des modèles de la préfecture | `GET /v1/modeles?q=` → `{items:[{id, nom, chemin, version}]}` | E1 |
+| R2 | recherche, en-tête | `GET /v1/dossiers?q=` (q interprété : mots, date, n° étranger, n° de dossier) ; `GET /v1/dossiers/{id}` (`statut_detaille`, `mesure_envisagee`, `_links.interface`) | E2, volet |
+| R3 | générer | `POST /v1/dossiers/{id}/actes` `{modele_id, options?}` + `Idempotency-Key` → `{acte_id, nom, version, modele, balises_vides:[{nom, libelle, valeur}]}` ; 422 `OPTION_GENERATION_MANQUANTE`, 409 `CHAMPS_A_CONFIRMER` | parcours A |
+| R3-bis | premier versement d'un document rempli dans Writer | `POST /v1/dossiers/{id}/actes/fichier` (multipart `fichier`, `modele_id` facultatif) + `Idempotency-Key` → version 1 | parcours B, premier Ctrl+S |
+| R4 | télécharger | `GET /v1/dossiers/{id}/actes/{acte_id}/contenu` → ODT + `ETag` | parcours A, « Ouvrir la version du dossier » |
+| R5 | valeurs des balises | `GET /v1/dossiers/{id}/balises[?modele_id=]` → `{items:[{nom, libelle, valeur}]}` (filtre par modèle, le tri par balise se fait dans le plugin) | parcours B et C |
+| R6 | nouvelle version | `POST /v1/dossiers/{id}/actes/{acte_id}/versions` (multipart `fichier`) + `If-Match` obligatoire (428) → 201 ; 412 avec `version`, `etag_courant`, `modifie_par`, `modifie_le` ; 409 archivé ; 415 hors ODT | Ctrl+S |
+| R7 | actes d'un dossier | `GET /v1/dossiers/{id}/actes` → `{items:[{acte_id, nom, version, modele, modifie_le, modifie_par}]}` | volet (nom du modèle), « Garder ma version » sans 412 détaillée |
 
-Contraintes du relais DM, relevées dans le code :
+Écarts restants côté Éloignement, signalés à Éric :
 
-- préfixe autorisé : `/v1/` ;
-- taille maximale : 60 Mo ;
-- délai : 120 s ;
-- débit : 60 appels par minute, par personne et par service ;
-- `If-Match` et `ETag` sont transmis.
-- `Content-Disposition` n'est pas transmis. Le nom attribué doit donc venir dans
-  le corps JSON, ce qu'Éloignement s'engage à faire.
+- **Nom de l'acte** : Éloignement attribue le nommage existant de l'application
+  (`2026_11_22_<NOM>_<modèle>.odt`, avec le nom de la personne), pas
+  `dossier_type_rang`. Le plugin affiche et envoie le nom reçu, sans le recalculer.
+- **Libellés des balises** : provisoires, tirés du nom (l'application n'en a pas).
+- **Signets par balise à la génération** : non faits (moteur de rendu). Sans eux,
+  « Actualiser depuis le dossier » ne marche que sur les passages remplis par
+  le plugin (parcours B).
+- **ODT fourni comme modèle** : versé tel quel (R3-bis), jamais rendu par
+  Relatorio. Le plugin refuse donc « Remplir depuis un dossier » sur un document
+  qui contient des blocs `if`/`for` ou des expressions `${…}`.
 
-Points à confirmer :
-
-- **Options de génération.** Selon la nature du modèle, la génération legacy
-  exige des options : délégation de signature, n° de mesure, OQTF… Elle répond
-  409 `CHAMPS_A_CONFIRMER` s'il reste des champs à confirmer. Faut-il que R3 les
-  déduise du dossier ? Sinon le plugin affiche le message et « Ouvrir le dossier
-  dans Éloignement ». Un formulaire d'options dans Writer serait une
-  duplication.
-- **Repères à la génération.** Pour actualiser un acte généré par Éloignement
-  (parcours C), il faut savoir où chaque valeur a été posée. Demande : qu'Éloignement entoure chaque valeur d'un signet nommé d'après sa balise. Sans
-  cela, « Actualiser » ne marche que pour le parcours B.
-- **Audience Keycloak.** `keycloakClientId` du plugin LibreOffice est servi par
-  le DM depuis son propre `KEYCLOAK_CLIENT_ID`, qui sert aussi d'audience
-  vérifiée sur `X-User-Authorization`. C'est probablement compatible, mais à
-  vérifier au banc sur le `aud` du jeton.
+Contraintes du relais DM, relevées dans le code : préfixe `/v1/`, 60 Mo,
+120 s, 60 appels par minute et par personne ; `If-Match`, `ETag`,
+`Idempotency-Key` transmis ; `Content-Disposition` et `X-Nom-Fichier` **non**
+transmis (le nom vient du corps JSON).
 
 ## 7. Livraison par étapes
 
@@ -352,3 +346,36 @@ cette trame :
 6. Un enregistrement sous un autre nom (« Enregistrer sous ») d'un document lié
    doit-il aussi envoyer une version ? (Proposé : oui. Seule « Enregistrer une
    copie » n'envoie rien.)
+
+## 10. État de l'implémentation (2026-11-22)
+
+Réponses retenues aux questions du §9, en attendant validation : retouches de
+la coquille acceptées (7 lignes) ; tools **non** proposés au modèle de langage ;
+actes ouverts dans le dossier de travail de MirAI ; « Enregistrer sous » envoie
+aussi une version.
+
+Ajouts nés de la mise en œuvre :
+
+- **Lien reçu d'ailleurs** : un document lié dont le lien n'a pas été créé sur
+  ce poste (pièce jointe, clé USB) ne verse rien sans confirmation de l'agent.
+  Sinon un fichier piégé verserait en silence dans le dossier qu'il désigne.
+- **Pas d'enregistrement à la place de l'agent** : après un envoi réussi, la
+  nouvelle version est écrite dans les propriétés ; le fichier local n'est
+  réenregistré que si l'agent n'a rien retouché entre-temps.
+- **Désinstallation** : le dossier `mirai/` est effacé, y compris un envoi en
+  attente ; le fichier enregistré par l'agent, lui, reste où il est.
+
+Vérifié :
+
+- 87 tests unitaires Éloignement (client, lien, file d'envoi, conflit, session,
+  balises, câblage), suite complète verte.
+- Dans LibreOffice 25.8 headless, sur les modèles réels d'Éloignement : repérage
+  des 15 à 115 balises dans l'ordre du document, remplissage en texte brut avec
+  signets, actualisation qui laisse un passage retouché à la main, annulation
+  d'un seul Ctrl+Z, lien conservé par une copie, événements `OnSaveDone` et
+  `OnCopyToDone`, construction et rendu du volet.
+
+Pas encore vérifié : l'affichage réel des fenêtres (écran verrouillé cette
+nuit) et le parcours de bout en bout à travers le DM, qui demande un poste
+enrôlé et une connexion Keycloak. Le déroulé est dans
+`docs/eloignement-recette.md`.

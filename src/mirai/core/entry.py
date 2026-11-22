@@ -170,7 +170,9 @@ def eloignement_on_load(job, args):
     try:
         if state is None:
             from .eloignement.session import get_session
-            get_session(shell).attach(model)
+            session = get_session(shell)
+            session.attach(model)
+            session.kick()
             return True
         from ..ui.eloignement import document_event
         return document_event(shell, model, state)
