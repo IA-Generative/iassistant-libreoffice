@@ -42,6 +42,9 @@ MAX_SLEEP_S = 600
 
 DISABLED = "Éloignement est désactivé sur ce poste."
 NOT_OFFERED = "Éloignement n'est pas proposé par le device management de ce poste."
+NOT_SIGNED_IN = ("Session MirAI indisponible : reconnectez-vous depuis le menu « 🤖 MIrAI », "
+                 "puis recommencez.")
+UNREACHABLE = "Device management injoignable pour le moment : réessayez dans un instant."
 
 _session = [None]
 
@@ -185,27 +188,42 @@ class Session:
         except Exception:
             return False
 
-    def offered(self):
-        """Le relais annonce-t-il Éloignement ? Réseau : thread de travail."""
-        checked_at, ok = self._discovery
-        if ok and time.time() - checked_at < DISCOVERY_MAX_AGE_S:
-            return True
+    def discover(self):
+        """Vérifie que le relais annonce Éloignement ; réseau : thread de travail.
+
+        Lève une EloignementError qui dit la vraie cause : session MirAI
+        absente, device management injoignable, ou service non proposé. Seul
+        un succès est gardé en cache : un échec passager se réessaie au
+        geste suivant."""
+        if time.time() - self._discovery[0] < DISCOVERY_MAX_AGE_S and self._discovery[1]:
+            return
         try:
             status, _headers, body = self.shell.tools_request(
                 "GET", "", None, {"Accept": "application/json"}, 10)
-            ok = 200 <= int(status) < 300 and api.announces(json.loads(body or b"{}"))
+        except PermissionError as exc:
+            self.log(f"[eloignement] découverte impossible : {exc}")
+            raise api.EloignementError(401, NOT_SIGNED_IN) from exc
         except Exception as exc:
             self.log(f"[eloignement] découverte impossible : {exc}")
-            ok = False
-        self._discovery = (time.time(), ok)
-        return ok
+            raise api.EloignementError(0, UNREACHABLE) from exc
+        status = int(status)
+        if status in (401, 403):
+            raise api.EloignementError(status, NOT_SIGNED_IN)
+        if not 200 <= status < 300:
+            raise api.EloignementError(status, UNREACHABLE)
+        try:
+            announced = api.announces(json.loads(body or b"{}"))
+        except ValueError:
+            announced = False
+        if not announced:
+            raise api.EloignementError(status, NOT_OFFERED)
+        self._discovery = (time.time(), True)
 
     def require(self):
         """Lève une EloignementError lisible si la fonction n'est pas utilisable."""
         if not self.enabled():
             raise api.EloignementError(0, DISABLED)
-        if not self.offered():
-            raise api.EloignementError(0, NOT_OFFERED)
+        self.discover()
 
     # -- documents liés ------------------------------------------------------------
 

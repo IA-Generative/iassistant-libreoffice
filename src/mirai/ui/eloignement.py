@@ -399,8 +399,9 @@ class ModeleDialog(Form):
         self.listbox("list", 16, 78, 548, 280)
         self.label("status", "Chargement du catalogue…", 16, 366, 548, 20, tone="text_mention")
         if can_fill:
-            self.link("fill", "Ce document contient des balises : le remplir depuis un dossier",
-                      16, 392, 548, 20, lambda: self.close(("remplir", None)))
+            self.label("fill_intro", "Ce document contient des balises :", 16, 396, 230, 20)
+            self.button("fill", "Remplir depuis un dossier", 246, 390, 220, 30,
+                        lambda: self.close(("remplir", None)))
         self.link("cancel", "Annuler", 360, 426, 80, 28, lambda: self.close(None))
         self.button("ok", "Valider", 450, 424, 114, 32, self.validate, primary=True)
         self.search()

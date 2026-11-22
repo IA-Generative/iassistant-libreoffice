@@ -50,6 +50,7 @@ STATUS_MESSAGES = {
     429: "trop de demandes : réessayer dans une minute",
 }
 SERVER_ERROR = "service indisponible"
+NO_SESSION = "session MirAI indisponible : reconnectez-vous depuis le menu « 🤖 MIrAI »"
 
 # Pannes passagères : l'envoi est gardé et rejoué.
 TRANSIENT = {0, 408, 429, 502, 503, 504}
@@ -202,6 +203,10 @@ class Client:
                 method, f"{SERVICE}/{path}", body, all_headers, timeout)
         except EloignementError:
             raise
+        except PermissionError as exc:
+            # Jeton de l'agent absent ou non renouvelé : passager (un envoi en
+            # file repartira), mais à nommer, ce n'est pas le service.
+            raise EloignementError(0, NO_SESSION) from exc
         except Exception as exc:
             raise EloignementError(0, status_message(0)) from exc
         if not 200 <= int(status) < 300:

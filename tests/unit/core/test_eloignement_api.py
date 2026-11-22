@@ -145,3 +145,11 @@ def test_a_validation_refusal_lists_what_is_wrong():
     body = {"detail": [{"loc": ["body", "options", "oqtf"], "msg": "valeur non permise"}]}
     err = api.error_from_response(422, {}, json.dumps(body).encode())
     assert err.message == "valeur non permise (HTTP 422)"
+
+
+def test_without_an_agent_session_the_call_says_so_and_stays_retryable():
+    client = api.Client(ScriptedRelay(PermissionError("non connecté")))
+    with pytest.raises(api.EloignementError) as err:
+        client.modeles()
+    assert "reconnectez-vous" in err.value.message
+    assert err.value.transient               # un envoi en file repartira

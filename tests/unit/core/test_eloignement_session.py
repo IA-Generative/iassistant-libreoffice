@@ -182,6 +182,24 @@ def test_discovery_requires_both_the_switch_and_the_relay(env):
     assert "désactivé" in str(err.value)
 
 
+def test_a_missing_session_is_not_reported_as_a_missing_service(env):
+    sess, _doc, relay = env
+    relay.responses.append(PermissionError("non connecté"))
+    with pytest.raises(Exception) as err:
+        sess.require()
+    assert "reconnectez-vous" in str(err.value)
+
+
+def test_an_unreachable_relay_is_said_and_retried_at_the_next_gesture(env):
+    sess, _doc, relay = env
+    relay.responses.append((503, {}, b""))
+    with pytest.raises(Exception) as err:
+        sess.require()
+    assert "injoignable" in str(err.value)
+    relay.responses.append((200, {}, {"services": ["eloignement"]}))
+    sess.require()                              # l'échec n'a pas été gardé en cache
+
+
 def test_file_names_from_eloignement_cannot_escape_the_work_directory():
     assert session_mod.safe_filename("../../etc/passwd") == "passwd.odt"
     assert session_mod.safe_filename('12_oqtf:1?.odt') == "12_oqtf_1_.odt"

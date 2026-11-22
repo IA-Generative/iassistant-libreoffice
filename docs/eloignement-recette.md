@@ -132,8 +132,8 @@ dossier ne permet pas), le message en donne la raison.
 
 1. Ouvrez un document simple contenant des balises (champs « espace réservé »
    `<etranger.nom>`, `<etranger.prenom>`), sans bloc conditionnel.
-2. « Éloignement », puis le lien « Ce document contient des balises : le
-   remplir depuis un dossier », choisissez le dossier 13. **Attendu** : les
+2. « Éloignement », puis le bouton « Remplir depuis un dossier » (sous « Ce
+   document contient des balises : »), choisissez le dossier 13. **Attendu** : les
    balises sont remplies en texte ; le volet liste celles restées vides.
 3. Ctrl+S. **Attendu** : premier versement (« Enregistré dans le dossier
    n° … »), l'acte apparaît dans Éloignement en version 1.
