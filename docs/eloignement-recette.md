@@ -12,10 +12,10 @@ Cet essai vérifie le parcours complet, de Writer jusqu'au dossier dans
 | Quoi | Valeur |
 |---|---|
 | Éloignement | bêta (image 1.0.0-beta3 ou plus récente), routes /v1 de la conception §6 |
-| Compte d'agent | `agent.essai-nuit@exemple.gouv.fr`, préfecture fictive « essai-nuit » : un seul modèle, « Information du procureur (essai) ». Les vraies préfectures de bêta n'ont aucun modèle. |
+| Compte d'agent | Le compte MirAI de la personne connectée sur le poste : le DM tire l'adresse de l'agent de SON jeton. En bêta, ce compte est rattaché à la préfecture seine-saint-denis, qui n'a **aucun modèle d'acte**. Avant le parcours A, au choix : poser un modèle d'essai pour seine-saint-denis, ou rattacher temporairement le compte à la préfecture fictive « essai-nuit » (un modèle : « Information du procureur (essai) »). `agent.essai-nuit@exemple.gouv.fr` n'existe que dans le Keycloak d'Éloignement, sans mot de passe : il ne sert qu'aux appels directs avec le jeton de service, pas à travers le DM. |
 | DM | relais d'outils actif (`DM_TOOLS_ENABLED`), service `eloignement` déclaré pour le profil du poste, `ELOIGNEMENT_CLIENT_SECRET` posé ; `toolsEndpoint` présent dans `/config` |
 | Interrupteur | `eloignement: true` dans les `featureToggles` du gabarit du plugin, pour la cohorte d'essai. Pour un poste isolé : `"eloignement_enabled": true` dans les réglages locaux. |
-| Poste | OXT de la branche installé, poste enrôlé, session MirAI ouverte (Keycloak) avec le compte d'agent ci-dessus |
+| Poste | OXT de la branche installé, poste enrôlé, session MirAI ouverte (Keycloak) avec ce compte |
 | Dossier fictif | un dossier actif de la préfecture d'essai (par exemple KOFFI Marc, né le 17/04/1992), un dossier brouillon et un dossier archivé |
 
 Avant de commencer, vérifiez l'audience : le jeton Keycloak du poste doit être
