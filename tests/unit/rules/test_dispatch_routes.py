@@ -24,6 +24,7 @@ _COMMAND = re.compile(r"service:fr\.gouv\.interieur\.mirai\.do\?([A-Za-z]+)(?:&a
 HANDLERS = {
     "OpenAssistant": ("module", "open_palette"),
     "TestModel": ("module", "test_model_capabilities"),
+    "Eloignement": ("module", "open_eloignement"),
     "settings": ("job", "settings_box"),
     "AboutDialog": ("job", "_show_about_dialog"),
     "Documentation": ("job", "_open_url_config"),
@@ -59,12 +60,14 @@ def test_every_declared_command_reaches_its_handler(action, source):
     job._open_url_config = MagicMock()
 
     with patch("src.mirai.core.entry.open_palette") as open_palette, \
-            patch("src.mirai.core.entry.test_model_capabilities") as test_model:
+            patch("src.mirai.core.entry.test_model_capabilities") as test_model, \
+            patch("src.mirai.core.entry.open_eloignement") as open_eloignement:
         job.trigger(f"{action}&src={source}")
 
     kind, name = HANDLERS[action]
     if kind == "module":
-        handler = {"open_palette": open_palette, "test_model_capabilities": test_model}[name]
+        handler = {"open_palette": open_palette, "test_model_capabilities": test_model,
+                   "open_eloignement": open_eloignement}[name]
     else:
         handler = getattr(job, name)
     handler.assert_called_once()

@@ -1010,13 +1010,36 @@ def ask(session, title, text):
 
 TOOLBAR = "private:resource/toolbar/custom_mirai_eloignement"
 TOOLBAR_COMMAND = "service:fr.gouv.interieur.mirai.do?Eloignement&src=toolbar"
-_TOOLBAR_STYLE = 256 | 32   # ItemStyle.TEXT | ItemStyle.AUTO_SIZE
+# ItemStyle.ICON : icône seule (oxt/Addons.xcu, nœud Images), le libellé passe
+# en infobulle. Sur macOS, le survol peint le bouton en noir : une icône d'un
+# bleu clair, comme celles de Colibre, y reste lisible ; un libellé ou un bleu
+# foncé disparaissent.
+_TOOLBAR_STYLE = 128
 
 
 def _prop(name, value):
     prop = PropertyValue()
     prop.Name, prop.Value = name, value
     return prop
+
+
+def _toolbar_settings(manager):
+    settings = manager.createSettings()
+    settings.UIName = "MIrAI — Éloignement"
+    button = (_prop("CommandURL", TOOLBAR_COMMAND), _prop("Label", TITLE),
+              _prop("Tooltip", TITLE), _prop("Type", 0), _prop("Style", _TOOLBAR_STYLE))
+    # Un tuple Python n'est pas reconnu comme séquence de PropertyValue.
+    uno.invoke(settings, "insertByIndex",
+               (0, uno.Any("[]com.sun.star.beans.PropertyValue", button)))
+    return settings
+
+
+def _stored_style(manager):
+    try:
+        item = manager.getSettings(TOOLBAR, False).getByIndex(0)
+        return next((p.Value for p in item if p.Name == "Style"), None)
+    except Exception:
+        return None
 
 
 def sync_toolbar(shell, enabled, frame=None):
@@ -1033,16 +1056,13 @@ def sync_toolbar(shell, enabled, frame=None):
     manager = supplier.getUIConfigurationManager("com.sun.star.text.TextDocument")
     present = bool(manager.hasSettings(TOOLBAR))
     if enabled and not present:
-        settings = manager.createSettings()
-        settings.UIName = "MIrAI — Éloignement"
-        button = (_prop("CommandURL", TOOLBAR_COMMAND), _prop("Label", TITLE),
-                  _prop("Type", 0), _prop("Style", _TOOLBAR_STYLE))
-        # Un tuple Python n'est pas reconnu comme séquence de PropertyValue.
-        uno.invoke(settings, "insertByIndex",
-                   (0, uno.Any("[]com.sun.star.beans.PropertyValue", button)))
-        manager.insertSettings(TOOLBAR, settings)
+        manager.insertSettings(TOOLBAR, _toolbar_settings(manager))
         manager.store()
         shell.set_config("eloignement_toolbar", True)
+    elif enabled and _stored_style(manager) != _TOOLBAR_STYLE:
+        # Barre enregistrée dans le profil par une version qui la dessinait autrement.
+        manager.replaceSettings(TOOLBAR, _toolbar_settings(manager))
+        manager.store()
     elif not enabled and present:
         manager.removeSettings(TOOLBAR)
         manager.store()

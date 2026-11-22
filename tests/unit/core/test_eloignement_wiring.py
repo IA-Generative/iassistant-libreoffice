@@ -130,3 +130,72 @@ def test_a_hand_edited_passage_is_shown_but_never_offered_for_replacement():
 
 def test_the_panel_says_that_ctrl_s_saves_into_the_dossier():
     assert ui.save_hint("13") == "Ctrl+S enregistre dans le dossier n° 13 d'Éloignement."
+
+
+class _ToolbarManager:
+    """Configuration des barres de Writer : une barre enregistrée par nom."""
+
+    def __init__(self, stored_style=None):
+        self.saved = {}
+        if stored_style is not None:
+            self.saved[ui.TOOLBAR] = [[SimpleNamespace(Name="Style", Value=stored_style)]]
+
+    def hasSettings(self, name):
+        return name in self.saved
+
+    def createSettings(self):
+        return SimpleNamespace(items=[])
+
+    def getSettings(self, name, _writable):
+        return SimpleNamespace(getByIndex=lambda i: self.saved[name][i])
+
+    def insertSettings(self, name, settings):
+        self.saved[name] = settings.items
+
+    replaceSettings = insertSettings
+
+    def removeSettings(self, name):
+        del self.saved[name]
+
+    def store(self):
+        pass
+
+
+def _sync(monkeypatch, manager, enabled=True):
+    monkeypatch.setattr(ui, "PropertyValue", lambda: SimpleNamespace(Name="", Value=None))
+    monkeypatch.setattr(ui.uno, "Any", lambda _type, value: value, raising=False)
+    monkeypatch.setattr(ui.uno, "invoke", lambda obj, _m, args: obj.items.insert(args[0], args[1]),
+                        raising=False)
+    supplier = SimpleNamespace(getUIConfigurationManager=lambda _module: manager)
+    ctx = SimpleNamespace(getServiceManager=lambda: SimpleNamespace(
+        createInstanceWithContext=lambda _name, _ctx: supplier))
+    shell = SimpleNamespace(uno_ctx=ctx, set_config=lambda *_a: None)
+    ui.sync_toolbar(shell, enabled)
+
+
+def _button(manager):
+    return {p.Name: p.Value for p in manager.saved[ui.TOOLBAR][0]}
+
+
+def test_the_toolbar_button_is_an_icon_with_its_label_as_tooltip(monkeypatch):
+    manager = _ToolbarManager()
+    _sync(monkeypatch, manager)
+    button = _button(manager)
+    assert button["CommandURL"] == ui.TOOLBAR_COMMAND
+    assert (button["Style"], button["Tooltip"]) == (128, "Éloignement")
+
+
+def test_a_toolbar_saved_with_another_style_is_rebuilt(monkeypatch):
+    manager = _ToolbarManager(stored_style=256 | 32)
+    _sync(monkeypatch, manager)
+    assert _button(manager)["Style"] == 128
+
+
+def test_the_toolbar_icon_is_declared_for_the_toolbar_command():
+    import os
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    with open(os.path.join(root, "oxt", "Addons.xcu"), encoding="utf-8") as fh:
+        addons = fh.read()
+    assert ui.TOOLBAR_COMMAND.replace("&", "&amp;") in addons
+    for size in (16, 26):
+        assert os.path.isfile(os.path.join(root, "oxt", "assets", f"eloignement{size}.png"))
