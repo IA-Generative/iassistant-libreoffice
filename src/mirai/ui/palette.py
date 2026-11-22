@@ -587,13 +587,7 @@ class AssistantPalette:
             self._chip_names.append(name)
             self._handlers.append(control)
 
-        # Commande Éloignement : seulement dans Writer, interrupteur allumé.
-        if self.app == "writer" and self.shell.feature_enabled("eloignement"):
-            control, _chip_model = dsfr.add_chip(
-                dialog, model, "chip_eloignement", _t("preset.eloignement"),
-                0, 0, 100, 28, font, on_click=self._on_eloignement)
-            self._chip_names.append("chip_eloignement")
-            self._handlers.append(control)
+        self._add_eloignement_chip(dialog, model, font)
 
         # Indicateur de sélection : ce sur quoi l'action va porter, en direct.
         _, selection_model = dsfr.add_control(
@@ -1772,6 +1766,16 @@ class AssistantPalette:
         if self.busy:
             return
         self._defer(lambda: self._start_run(preset=preset))
+
+    def _add_eloignement_chip(self, dialog, model, font):
+        """Commande Éloignement : seulement dans Writer, interrupteur allumé."""
+        if self.app != "writer" or not self.shell.feature_enabled("eloignement"):
+            return
+        control, _chip_model = dsfr.add_chip(
+            dialog, model, "chip_eloignement", _t("preset.eloignement"),
+            0, 0, 100, 28, font, on_click=self._on_eloignement)
+        self._chip_names.append("chip_eloignement")
+        self._handlers.append(control)
 
     def _on_eloignement(self):
         """Ouvre le parcours Éloignement sur le document courant."""

@@ -22,7 +22,9 @@ import urllib.parse
 import urllib.request
 
 from ..ui_thread import MainThreadDispatcher
-from . import api, link as link_mod, outbox as outbox_mod
+from . import api
+from . import link as link_mod
+from . import outbox as outbox_mod
 
 try:
     import unohelper

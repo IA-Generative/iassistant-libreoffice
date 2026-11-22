@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.mirai.core.eloignement import link, outbox, session as session_mod
+from src.mirai.core.eloignement import link, outbox
+from src.mirai.core.eloignement import session as session_mod
 from tests.stubs.fake_eloignement import FakeEloignementShell, FakeLinkedDoc, ScriptedRelay
 
 
