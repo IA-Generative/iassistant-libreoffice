@@ -587,6 +587,14 @@ class AssistantPalette:
             self._chip_names.append(name)
             self._handlers.append(control)
 
+        # Commande Éloignement : seulement dans Writer, interrupteur allumé.
+        if self.app == "writer" and self.shell.feature_enabled("eloignement"):
+            control, _chip_model = dsfr.add_chip(
+                dialog, model, "chip_eloignement", _t("preset.eloignement"),
+                0, 0, 100, 28, font, on_click=self._on_eloignement)
+            self._chip_names.append("chip_eloignement")
+            self._handlers.append(control)
+
         # Indicateur de sélection : ce sur quoi l'action va porter, en direct.
         _, selection_model = dsfr.add_control(
             dialog, model, "selection", "FixedText", 0, 0, 100, 18, {
@@ -1764,6 +1772,15 @@ class AssistantPalette:
         if self.busy:
             return
         self._defer(lambda: self._start_run(preset=preset))
+
+    def _on_eloignement(self):
+        """Ouvre le parcours Éloignement sur le document courant."""
+        def run():
+            from .eloignement import open_eloignement
+            desktop = self.uno_ctx.getServiceManager().createInstanceWithContext(
+                "com.sun.star.frame.Desktop", self.uno_ctx)
+            open_eloignement(self.shell, desktop.getCurrentComponent())
+        self._defer(run)
 
     def _on_send(self):
         """Envoyer, ou Arrêter si un run est déjà en cours."""

@@ -310,5 +310,6 @@
   "callback.badge": "连接已验证",
   "callback.close_tab": "您可以关闭此标签页并返回 LibreOffice。",
   "callback.if_stuck": "如果 LibreOffice 无响应，请等待几秒后重试该操作。",
-  "callback.no_action": "此处无需进一步操作。"
+  "callback.no_action": "此处无需进一步操作。",
+  "preset.eloignement": "🏛️ Éloignement"
 }

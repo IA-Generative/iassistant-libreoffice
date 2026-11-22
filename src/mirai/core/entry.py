@@ -125,3 +125,63 @@ def open_palette(job, model):
         import traceback
         shell.log("[palette] ÉCHEC d'ouverture :\n" + traceback.format_exc())
         return None
+
+
+def open_eloignement(job, model):
+    """Commande « Éloignement » (palette, barre d'outils)."""
+    shell = MainJobShell(job)
+    if not shell.feature_enabled("eloignement"):
+        shell.log("[eloignement] commande ignorée : interrupteur éteint")
+        return None
+    try:
+        from ..ui.eloignement import open_eloignement as _open
+        return _open(shell, model)
+    except Exception:
+        import traceback
+        shell.log("[eloignement] ÉCHEC :\n" + traceback.format_exc())
+        return None
+
+
+def _job_model(args):
+    """Le document d'un événement de job (`Environment` → `Model`), ou None."""
+    for item in args or ():
+        if getattr(item, "Name", "") != "Environment":
+            continue
+        for env in getattr(item, "Value", None) or ():
+            if getattr(env, "Name", "") == "Model":
+                return env.Value
+    return None
+
+
+def eloignement_on_load(job, args):
+    """Événements onLoad/onNew : barre d'outils et suivi d'un document lié.
+
+    Pas encore de réponse du DM (démarrage) : l'écouteur d'enregistrement est
+    posé quand même sur un document DÉJÀ lié, pour qu'un Ctrl+S ne parte pas
+    sans être mis en file. Interrupteur éteint : seule la barre d'outils créée
+    du temps où il était allumé est retirée."""
+    shell = MainJobShell(job)
+    model = _job_model(args)
+    state = shell.feature_state("eloignement")
+    if model is None or state is None and not _linked(model):
+        return False
+    if state is False and not shell.get_config("eloignement_toolbar", False):
+        return False
+    try:
+        if state is None:
+            from .eloignement.session import get_session
+            get_session(shell).attach(model)
+            return True
+        from ..ui.eloignement import document_event
+        return document_event(shell, model, state)
+    except Exception as exc:
+        shell.log(f"[eloignement] suivi du document impossible : {exc}")
+        return False
+
+
+def _linked(model):
+    from .eloignement import link
+    try:
+        return link.read_link(model) is not None
+    except Exception:
+        return False

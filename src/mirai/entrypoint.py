@@ -242,7 +242,8 @@ def _with_user_agent(headers=None):
 
 def _redact_header_value(name, value):
     key = str(name or "").strip().lower()
-    if key in ("authorization", "x-api-key", "api-key", "proxy-authorization", "x-relay-key"):
+    if key in ("authorization", "x-api-key", "api-key", "proxy-authorization", "x-relay-key",
+               "x-user-authorization"):
         return "<redacted>"
     return value
 
@@ -6200,6 +6201,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         """XJob.execute : appelé par oxt/Jobs.xcu (onFirstVisibleTask, onLoad,
         onNew). Le constructeur a déjà lancé les tâches de démarrage."""
         log_to_file("=== XJob.execute called ===")
+        from .core.entry import eloignement_on_load
+        eloignement_on_load(self, args)
 
     # Actions qui ne portent ni sur le document ni sur une sélection : elles
     # doivent aboutir dans TOUS les contextes, Writer comme Calc, avec ou sans
@@ -6289,6 +6292,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         if action == "OpenAssistant":
             from .core.entry import open_palette
             open_palette(self, model)
+            return
+        if action == "Eloignement":
+            from .core.entry import open_eloignement
+            open_eloignement(self, model)
             return
 
         if self._handle_shell_action(action):

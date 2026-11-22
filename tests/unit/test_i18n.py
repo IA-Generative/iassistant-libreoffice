@@ -302,6 +302,7 @@ _IDENTICAL_BY_DESIGN = {
     "addon.menubar",  # "🤖 MIrAI" : nom de la marque
     "common.ok",  # "OK" : sigle international
     "palette.header",  # "  MIrAI — Assistant ({app})" : nom de la marque
+    "preset.eloignement",  # "🏛️ Éloignement" : nom de l'application préfectorale
     "palette.title",  # "MIrAI — Assistant" : nom de la marque
     "settings.id_prefix",  # "ID: {value}" : sigle international
     "settings.model_label",  # "Model:" : mot identique
