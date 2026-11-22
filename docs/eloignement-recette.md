@@ -11,7 +11,7 @@ Cet essai vérifie le parcours complet, de Writer jusqu'au dossier dans
 
 | Quoi | Valeur |
 |---|---|
-| Éloignement | bêta (image 1.0.0-beta3 ou plus récente), routes /v1 de la conception §6 |
+| Éloignement | bêta5 ou plus récente, routes /v1 de la conception §6 |
 | Compte d'agent | Le compte MirAI de la personne connectée sur le poste : le DM tire l'adresse de l'agent de SON jeton. En bêta, ce compte est rattaché à la préfecture Seine-Saint-Denis, qui a les dix modèles de l'application (OQTF 611-1 1° à 4°, OQTF UE, OQTF UE réadmission, placement en CRA, information du procureur, procédure contradictoire, assignation à résidence) et le « Courrier d'essai IAssistant » (chemin « Essais IAssistant »). Le Courrier d'essai n'a ni bloc conditionnel ni option et porte six balises `etranger.*` ; les modèles de l'application ont des blocs relatorio, seule la génération par Éloignement s'y applique. `agent.essai-nuit@exemple.gouv.fr` ne sert qu'aux appels directs avec le jeton de service, pas à travers le DM. |
 | DM | relais d'outils actif (`DM_TOOLS_ENABLED`), service `eloignement` déclaré pour le profil du poste, `ELOIGNEMENT_CLIENT_SECRET` posé ; `toolsEndpoint` présent dans `/config` |
 | Interrupteur | `eloignement: true` dans les `featureToggles` du gabarit du plugin, pour la cohorte d'essai. Pour un poste isolé : `"eloignement_enabled": true` dans les réglages locaux. |
@@ -70,11 +70,11 @@ dossier ne permet pas), le message en donne la raison.
 
 1. « Éloignement », choisissez « OQTF 611-1 3° », « Valider », puis le
    dossier 13, « Valider ». **Attendu** : la fenêtre « Options de génération »,
-   une ligne par option exigée par le modèle. Tant qu'Éloignement ne donne pas
-   les libellés, la ligne montre le code de l'option
-   (`voluntary_departure_delay`, `return_ban_duration`) et un champ libre.
-2. « Valider » sans rien remplir. **Attendu** : « « … » est à renseigner. »
-3. Saisissez 0 pour le délai et 2 pour la durée, « Valider ». **Attendu** :
+   « Délai de départ volontaire » (liste : « Refusé », « 7 jours »… « 60
+   jours ») et la durée d'interdiction de retour (liste : « Pas d'interdiction
+   de retour », « 1 an »… « 5 ans »), rien de présélectionné.
+2. « Valider » sans rien choisir. **Attendu** : « « … » est à renseigner. »
+3. Choisissez « Refusé » et « 2 ans », « Valider ». **Attendu** :
    l'OQTF s'ouvre ; « À compléter » liste la délégation de signature et le
    tribunal administratif.
 4. Essai de refus : « Placement en CRA » sur le dossier 13 (pas d'OQTF

@@ -262,7 +262,7 @@ en bêta3), appelées par `{toolsEndpoint}/eloignement/v1/…`.
 | # | Besoin | Route | Utilisée par |
 |---|---|---|---|
 | R0 | découverte | `GET {toolsEndpoint}` → `services` contient `eloignement` | `Session.offered` |
-| R1 | catalogue des modèles de la préfecture | `GET /v1/modeles?q=` → `{items:[{id, nom, chemin, version, natures, options_requises:[{option, champ}]}]}` | E1, E2b |
+| R1 | catalogue des modèles de la préfecture | `GET /v1/modeles?q=` → `{items:[{id, nom, chemin, version, natures, options_requises:[{option, champ, libelle, type, valeurs}]}]}` | E1, E2b |
 | R2 | recherche, en-tête | `GET /v1/dossiers?q=` (q interprété : mots, date, n° étranger, n° de dossier) ; `GET /v1/dossiers/{id}` (`statut_detaille`, `mesure_envisagee`, `_links.interface`) | E2, volet |
 | R3 | générer | `POST /v1/dossiers/{id}/actes` `{modele_id, options?}` + `Idempotency-Key` → `{acte_id, nom, version, modele, balises_vides:[{nom, libelle, valeur}]}` ; `options` porte chaque option de `options_requises` à son `champ` (`oqtf.delai_depart_volontaire_jours` → `{"oqtf": {"delai_depart_volontaire_jours": 0}}`) ; 422 `OPTION_GENERATION_MANQUANTE`, 422 avec la raison quand le dossier ne permet pas la mesure, 409 `CHAMPS_A_CONFIRMER` | parcours A |
 | R3-bis | premier versement d'un document rempli dans Writer | `POST /v1/dossiers/{id}/actes/fichier` (multipart `fichier`, `modele_id` facultatif) + `Idempotency-Key` → version 1 | parcours B, premier Ctrl+S |
@@ -372,12 +372,15 @@ Ajouts nés de la mise en œuvre :
 - **Désinstallation** : le dossier `mirai/` est effacé, y compris un envoi en
   attente ; le fichier enregistré par l'agent, lui, reste où il est.
 
-- **Options de génération** (bêta4) : `options_requises` ne donne encore que
-  le code et le `champ` de chaque option. E2b montre alors le code et un champ
-  libre (une saisie numérique part en nombre). Demandé à Éloignement, en
-  ajout : `libelle`, `type` (`texte`, `entier`, `booleen`, `choix`),
-  `valeurs` [{valeur, libelle}] et `defaut`. E2b s'en sert dès qu'ils
-  arrivent, sans changement du plugin.
+- **Options de génération** (bêta5) : chaque entrée de `options_requises`
+  porte `libelle`, `type` (`choix`, `texte`, `booleen`) et, pour un choix,
+  `valeurs` [{valeur, libelle}] avec les libellés du front d'Éloignement
+  (délai : « Refusé », « 7 jours »… ; interdiction de retour : « Pas
+  d'interdiction de retour », « 1 an »…). Pas de valeur par défaut : rien
+  n'est présélectionné, l'agent choisit. Une entrée sans libellé ni type
+  (Éloignement plus ancien) montre le code et un champ libre. Le numéro de
+  mesure et la délégation de signature, facultatifs, ne sont pas demandés :
+  leurs balises restent vides et l'agent les complète dans Writer.
 
 Vérifié :
 

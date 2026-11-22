@@ -96,3 +96,26 @@ def test_the_options_travel_in_the_generation_request():
     sent = json.loads(relay.calls[0]["body"])
     assert sent == {"modele_id": "m-oqtf3",
                     "options": {"oqtf": {"delai_depart_volontaire_jours": 0}}}
+
+
+def test_the_options_of_an_oqtf_as_eloignement_describes_them():
+    """Forme rendue par /v1/modeles : libellés et choix du front d'Éloignement, sans défaut."""
+    modele = {"id": "m", "nom": "OQTF 611-1 3°", "options_requises": [
+        {"option": "voluntary_departure_delay", "champ": "oqtf.delai_depart_volontaire_jours",
+         "libelle": "Délai de départ volontaire", "type": "choix",
+         "valeurs": [{"valeur": 0, "libelle": "Refusé"}, {"valeur": 30, "libelle": "30 jours"}]},
+        {"option": "after_cra_release", "champ": "house_arrest_order.aar_suite_a_un_placement_en_cra",
+         "libelle": "Suite à un placement en CRA", "type": "booleen", "valeurs": []},
+        {"option": "cra_location", "champ": "placement_in_cra.cra_location",
+         "libelle": "Lieu du CRA", "type": "texte", "valeurs": []},
+    ]}
+    delay, after_cra, place = options.required(modele)
+    assert [c["libelle"] for c in delay.choices()] == ["Refusé", "30 jours"]
+    assert delay.defaut is None                      # l'agent choisit, rien n'est présélectionné
+    assert [c["libelle"] for c in after_cra.choices()] == ["Oui", "Non"]
+    assert place.choices() == []
+    assert options.build([delay, after_cra, place], {
+        "voluntary_departure_delay": 0, "after_cra_release": True, "cra_location": "Vincennes"}) == {
+        "oqtf": {"delai_depart_volontaire_jours": 0},
+        "house_arrest_order": {"aar_suite_a_un_placement_en_cra": True},
+        "placement_in_cra": {"cra_location": "Vincennes"}}
