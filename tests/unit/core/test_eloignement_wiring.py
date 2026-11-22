@@ -126,3 +126,7 @@ def test_a_hand_edited_passage_is_shown_but_never_offered_for_replacement():
     assert ui.change_line(by_dossier, labels) == "Prénom : « Karim » → « Karima »"
     line = ui.change_line(by_hand, labels)
     assert "non remplacé" in line and "« J »" not in line   # l'étendue retouchée n'est pas sûre
+
+
+def test_the_panel_says_that_ctrl_s_saves_into_the_dossier():
+    assert ui.save_hint("13") == "Ctrl+S enregistre dans le dossier n° 13 d'Éloignement."

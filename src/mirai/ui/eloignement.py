@@ -140,6 +140,11 @@ def modele_line(modele):
     return f"{chemin} › {nom}" if chemin else nom
 
 
+def save_hint(dossier):
+    """Rappel du volet : il n'y a pas de bouton d'envoi, c'est Ctrl+S."""
+    return f"Ctrl+S enregistre dans le dossier n° {dossier} d'Éloignement."
+
+
 def change_line(change, labels):
     """Une ligne de E5. Un passage retouché à la main n'est pas cité : son
     étendue n'est plus sûre (une frappe par-dessus la valeur peut ne garder
@@ -610,9 +615,10 @@ class Panel:
         f.label("person", "", 16, 38, w, 18)
         f.label("modele", "", 16, 58, w, 18, tone="text_mention")
         f.label("version", "", 16, 78, w, 18, tone="text_mention")
-        f.label("state", "", 16, 100, w, 40, multiline=True)
-        f.label("todo", "À compléter", 16, 146, w, 18, bold=True)
-        f.listbox("empty", 16, 166, w, 130, on_select=self.go_to)
+        f.label("save_hint", "", 16, 98, w, 18, bold=True, tone="primary")
+        f.label("state", "", 16, 118, w, 36, multiline=True)
+        f.label("todo", "À compléter", 16, 158, w, 18, bold=True)
+        f.listbox("empty", 16, 178, w, 118, on_select=self.go_to)
         y = 306
         for name, text, action in (
                 ("fill", "Remplir depuis un dossier", self.fill_from_dossier),
@@ -657,7 +663,7 @@ class Panel:
         if link is None:
             f.set_label("title", "Document non lié")
             f.set_label("person", "Ce document n'est lié à aucun dossier.")
-            for name in ("modele", "version", "state"):
+            for name in ("modele", "version", "save_hint", "state"):
                 f.set_label(name, "")
         else:
             f.set_label("title", f"Lié au dossier n° {link.dossier}")
@@ -665,6 +671,7 @@ class Panel:
             f.set_label("person", person_label(header) if header else "")
             f.set_label("modele", "Modèle : " + (state.modele_nom or link.modele or "—"))
             f.set_label("version", "Version : " + (link.version or "—"))
+            f.set_label("save_hint", save_hint(link.dossier))
             text, tone = session.describe(self.doc)
             f.set_label("state", text, TONES.get(tone, "text_body"))
         try:
