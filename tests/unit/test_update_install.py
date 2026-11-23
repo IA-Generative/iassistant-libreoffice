@@ -1,8 +1,6 @@
-"""Mécanisme natif de MAJ (<update-information>) + fiabilité de la voie
-in-process : install sur le MAIN thread via ExtensionManager, scripts cmd.exe
-désactivés par défaut, réconciliation post-redémarrage.
+"""Voie in-process de la mise à jour : installation sur le thread principal via
+ExtensionManager, réconciliation après redémarrage.
 """
-import importlib.util
 import json
 import os
 import tempfile
@@ -15,93 +13,6 @@ install()
 
 from src.mirai import entrypoint
 from src.mirai.shell import runtime as shell_runtime
-
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-_spec = importlib.util.spec_from_file_location(
-    "inject_update_feed", os.path.join(ROOT, "scripts", "inject_update_feed.py"))
-inject_update_feed = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(inject_update_feed)
-
-MINIMAL_DESCRIPTION = """<?xml version='1.0' encoding='UTF-8'?>
-<description
-  xmlns="http://openoffice.org/extensions/description/2006"
-  xmlns:xlink="http://www.w3.org/1999/xlink">
-    <identifier value="fr.gouv.interieur.mirai"/>
-    <version value="0.0.1.0.31"/>
-</description>
-"""
-
-
-def _write(tmpdir, name, content):
-    path = os.path.join(tmpdir, name)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(content)
-    return path
-
-
-def test_inject_bakes_one_src_per_bootstrap_url(tmp_path):
-    """Chaque bootstrap_url du profil donne un <src> (failover natif LO),
-    avec le chemin de feed conventionnel du DM."""
-    d = str(tmp_path)
-    desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
-    cfg = _write(d, "config.json", json.dumps({
-        "enabled": True,
-        "bootstrap_urls": ["https://dm-a.example/", "https://dm-b.example"],
-    }))
-    msg = inject_update_feed.inject(desc, cfg)
-    assert "2 feed URL(s)" in msg
-    out = open(desc, encoding="utf-8").read()
-    assert "<update-information>" in out
-    assert 'xlink:href="https://dm-a.example/catalog/mirai-libreoffice/update.xml"' in out
-    assert 'xlink:href="https://dm-b.example/catalog/mirai-libreoffice/update.xml"' in out
-    # ordre préservé (LibreOffice essaie les <src> dans l'ordre)
-    assert out.index("dm-a.example") < out.index("dm-b.example")
-    # toujours bien formé
-    import xml.etree.ElementTree as ET
-    ET.fromstring(out.encode("utf-8"))
-
-
-def test_inject_skips_offline_profile(tmp_path):
-    """Profil offline (enabled:false) : pas de bloc — le bouton natif répond
-    simplement « aucune mise à jour »."""
-    d = str(tmp_path)
-    desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
-    cfg = _write(d, "config.json", json.dumps({
-        "enabled": False, "bootstrap_urls": ["https://dm.example"],
-    }))
-    msg = inject_update_feed.inject(desc, cfg)
-    assert "skipped" in msg
-    assert "<update-information>" not in open(desc, encoding="utf-8").read()
-
-
-def test_inject_is_idempotent(tmp_path):
-    """Un description.xml déjà équipé n'est pas modifié (double build, repack)."""
-    d = str(tmp_path)
-    desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
-    cfg = _write(d, "config.json", json.dumps({
-        "enabled": True, "bootstrap_urls": ["https://dm.example"],
-    }))
-    inject_update_feed.inject(desc, cfg)
-    first = open(desc, encoding="utf-8").read()
-    msg = inject_update_feed.inject(desc, cfg)
-    assert "already present" in msg
-    assert open(desc, encoding="utf-8").read() == first
-
-
-def test_inject_env_override_wins(monkeypatch, tmp_path):
-    """MIRAI_UPDATE_FEED_URL force une URL de feed unique (builds spéciaux)."""
-    d = str(tmp_path)
-    desc = _write(d, "description.xml", MINIMAL_DESCRIPTION)
-    cfg = _write(d, "config.json", json.dumps({
-        "enabled": True, "bootstrap_urls": ["https://dm.example"],
-    }))
-    monkeypatch.setenv("MIRAI_UPDATE_FEED_URL", "https://override.example/update.xml")
-    inject_update_feed.inject(desc, cfg)
-    out = open(desc, encoding="utf-8").read()
-    assert 'xlink:href="https://override.example/update.xml"' in out
-    assert "dm.example" not in out
-
 
 # La voie du Gestionnaire des extensions remplace atomiquement une extension
 # de même identifiant : pas de remove-avant-add.
@@ -224,15 +135,15 @@ def test_reconcile_keeps_fresh_pending_state(tmp_path):
 
 
 def test_reconcile_reports_failed_at_startup_when_target_never_became_active(monkeypatch, tmp_path):
-    """Dossier de paquet laissé par une installation native annulée : l'étape dit
-    installed_native, mais la cible n'est pas active au redémarrage. Le DM doit
-    l'apprendre (failed) et l'état être purgé — sinon le poste ne retente rien
-    pendant 14 jours et la campagne reste bloquée sur deferred."""
-    monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", 0.01)
+    """Installation annulée par LibreOffice : l'étape dit installed_inprocess,
+    mais la cible n'est pas active au redémarrage. Le DM doit l'apprendre
+    (failed) et l'état être purgé — sinon le poste ne retente rien pendant
+    14 jours et la campagne reste bloquée sur deferred."""
+    monkeypatch.setattr(entrypoint, "_RECONCILE_RECHECK_SECONDS", 0.01)
     job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
-        "version_before": "0.0.1.0.31", "stage": "installed_native",
-        "route": "native", "ts": time.time(),
+        "version_before": "0.0.1.0.31", "stage": "installed_inprocess",
+        "route": "directed", "ts": time.time(),
     }, current_version="0.0.1.0.31")
 
     job._reconcile_update_state(at_startup=True)
@@ -241,7 +152,7 @@ def test_reconcile_reports_failed_at_startup_when_target_never_became_active(mon
         7, "failed", "0.0.1.0.31", "0.0.1.0.31", "installation non active au redémarrage")
     failed = [c for c in job._send_telemetry.call_args_list if c.args[0] == "UpdateInstallFailed"]
     assert len(failed) == 1
-    assert failed[0].args[1]["route"] == "native"
+    assert failed[0].args[1]["route"] == "directed"
     assert not os.path.isdir(pend)
 
 
@@ -249,11 +160,11 @@ def test_reconcile_at_startup_rechecks_registry_before_failing(monkeypatch, tmp_
     """Juste après le démarrage, le registre peut encore se consolider : une
     première lecture périmée ne doit pas produire un « failed » — la seconde
     lecture confirme l'installation."""
-    monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(entrypoint, "_RECONCILE_RECHECK_SECONDS", 0.01)
     job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
-        "version_before": "0.0.1.0.31", "stage": "installed_native",
-        "route": "native", "ts": time.time(),
+        "version_before": "0.0.1.0.31", "stage": "installed_inprocess",
+        "route": "directed", "ts": time.time(),
     }, current_version="0.0.1.0.31")
     job._get_extension_version = MagicMock(side_effect=["0.0.1.0.31", "0.0.1.0.32"])
 
@@ -270,8 +181,8 @@ def test_reconcile_keeps_installed_state_in_session(tmp_path):
     installed_*, elle ne rapporte surtout pas un échec."""
     job, pend = _job_with_state(tmp_path, {
         "campaign_id": 7, "target_version": "0.0.1.0.32",
-        "version_before": "0.0.1.0.31", "stage": "installed_native",
-        "route": "native", "ts": time.time(),
+        "version_before": "0.0.1.0.31", "stage": "installed_inprocess",
+        "route": "directed", "ts": time.time(),
     }, current_version="0.0.1.0.31")
 
     job._reconcile_update_state()
@@ -279,6 +190,52 @@ def test_reconcile_keeps_installed_state_in_session(tmp_path):
     job._report_update_status.assert_not_called()
     job._send_telemetry.assert_not_called()
     assert os.path.isfile(os.path.join(pend, "update_state.json"))
+
+
+def _state_left_by_libreoffice_dialog():
+    """État tel que l'écrivaient les versions qui installaient aussi par le
+    dialogue « Mise à jour des extensions » de LibreOffice."""
+    return {
+        "campaign_id": 7, "target_version": "0.0.1.0.32",
+        "version_before": "0.0.1.0.31", "stage": "installed_native",
+        "ts": time.time(), "route": "native", "postponed_until": 0.0,
+        "native_attempts": 1,
+    }
+
+
+def test_startup_reports_installed_for_an_update_left_by_the_libreoffice_dialog(tmp_path):
+    """La version installée par le dialogue de LibreOffice démarre : elle clôt
+    la campagne de sa devancière (« installed » au DM, télémétrie, purge)."""
+    job, pend = _job_with_state(
+        tmp_path, _state_left_by_libreoffice_dialog(), current_version="0.0.1.0.32")
+
+    job._reconcile_update_state(at_startup=True)
+
+    job._report_update_status.assert_called_once_with(
+        7, "installed", "0.0.1.0.31", "0.0.1.0.32")
+    updated = [c.args[1] for c in job._send_telemetry.call_args_list
+               if c.args[0] == "ExtensionUpdated"]
+    assert updated == [{"version_after": "0.0.1.0.32", "campaign_id": "7",
+                        "confirmed": "true", "route": "native"}]
+    assert not os.path.isdir(pend)
+
+
+def test_startup_reports_failed_for_an_inactive_update_left_by_the_libreoffice_dialog(
+        monkeypatch, tmp_path):
+    """Le dialogue de LibreOffice avait installé la cible, mais elle n'est pas
+    active au redémarrage : le DM apprend l'échec et l'état est purgé."""
+    monkeypatch.setattr(entrypoint, "_RECONCILE_RECHECK_SECONDS", 0.01)
+    job, pend = _job_with_state(
+        tmp_path, _state_left_by_libreoffice_dialog(), current_version="0.0.1.0.31")
+
+    job._reconcile_update_state(at_startup=True)
+
+    job._report_update_status.assert_called_once_with(
+        7, "failed", "0.0.1.0.31", "0.0.1.0.31", "installation non active au redémarrage")
+    failed = [c.args[1] for c in job._send_telemetry.call_args_list
+              if c.args[0] == "UpdateInstallFailed"]
+    assert failed == [{"version_after": "0.0.1.0.32", "campaign_id": "7", "route": "native"}]
+    assert not os.path.isdir(pend)
 
 
 def test_reconcile_purges_stale_state(tmp_path):
@@ -326,79 +283,22 @@ def test_save_update_state_roundtrip(tmp_path):
     assert state["ts"] > 0
 
 
-# Le feed est récupéré par la pile HTTP de LibreOffice (UpdateInformationProvider,
-# la machinerie exacte du bouton « Vérifier les mises à jour ») : ce check
-# headless valide proxy/TLS/GPO sur la flotte sans action utilisateur.
+def test_installed_version_falls_back_to_the_package_description_when_registry_is_unreadable(
+        monkeypatch, tmp_path):
+    """Registre des extensions illisible : la version installée est lue dans le
+    description.xml à la racine du paquet (<paquet>/src/mirai/entrypoint.py),
+    celle que la réconciliation compare à la cible."""
+    job = make_job(config_dir=str(tmp_path / "profil"))
+    pkg = tmp_path / "uno_packages" / "lu42.tmp_" / "mirai.oxt"
+    (pkg / "src" / "mirai").mkdir(parents=True)
+    (pkg / "description.xml").write_text(
+        '<description><identifier value="fr.gouv.interieur.mirai"/>'
+        '<version value="0.0.1.0.32"/></description>', encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "__file__", str(pkg / "src" / "mirai" / "entrypoint.py"))
+    smgr = job.ctx.getServiceManager.return_value
+    smgr.createInstanceWithContext.side_effect = RuntimeError("no registry")
 
-def _job_for_feed_check(urls):
-    job = make_job()
-    job._failover_ordered_urls = MagicMock(return_value=urls)
-    job._get_extension_version = MagicMock(return_value="0.0.1.0.31")
-    job._send_telemetry = MagicMock()
-    return job
-
-
-def test_update_feed_urls_follow_failover_order():
-    """Une URL de feed par bootstrap, ordre de failover préservé, même
-    convention de chemin que le bake au build."""
-    job = _job_for_feed_check(["https://dm-b.example/", "https://dm-a.example"])
-    assert job._update_feed_urls() == [
-        "https://dm-b.example/catalog/mirai-libreoffice/update.xml",
-        "https://dm-a.example/catalog/mirai-libreoffice/update.xml",
-    ]
-
-
-def test_check_native_feed_reports_announced_version():
-    """Feed joignable → version annoncée extraite du DOM (<version value>),
-    télémétrie feed.ok=true, et l'identifiant d'extension est bien passé au
-    provider (sinon LO matcherait d'autres extensions du feed)."""
-    job = _job_for_feed_check(["https://dm.example"])
-    provider = MagicMock(name="UpdateInformationProvider")
-    job.ctx.getServiceManager.return_value.createInstanceWithContext.return_value = provider
-    element = MagicMock(name="descriptionElement")
-    nodes = MagicMock()
-    nodes.getLength.return_value = 1
-    nodes.item.return_value.getAttribute.return_value = "0.0.1.0.32"
-    element.getElementsByTagNameNS.return_value = nodes
-    provider.getUpdateInformation.return_value = [element]
-
-    assert job._check_native_feed() == "0.0.1.0.32"
-
-    args = provider.getUpdateInformation.call_args.args
-    # Adresse nue tant qu'aucune réécriture n'a réussi.
-    assert args[0] == ("https://dm.example/catalog/mirai-libreoffice/update.xml",)
-    assert args[1] == "fr.gouv.interieur.mirai"
-    attrs = job._send_telemetry.call_args.args[1]
-    assert job._send_telemetry.call_args.args[0] == "NativeFeedCheck"
-    assert attrs["feed.ok"] == "true"
-    assert attrs["feed.announced_version"] == "0.0.1.0.32"
-
-
-def test_check_native_feed_reports_error_without_raising():
-    """Feed injoignable (proxy/TLS/GPO/404) → None, télémétrie feed.ok=false
-    avec le détail — jamais d'exception (best-effort)."""
-    job = _job_for_feed_check(["https://dm.example"])
-    provider = MagicMock(name="UpdateInformationProvider")
-    provider.getUpdateInformation.side_effect = RuntimeError("proxy timeout")
-    job.ctx.getServiceManager.return_value.createInstanceWithContext.return_value = provider
-
-    assert job._check_native_feed() is None
-
-    attrs = job._send_telemetry.call_args.args[1]
-    assert attrs["feed.ok"] == "false"
-    assert "proxy timeout" in attrs["feed.error"]
-
-
-def test_check_native_feed_skips_without_bootstrap():
-    """Aucun bootstrap configuré → skip total : ni service UNO ni télémétrie."""
-    job = _job_for_feed_check([])
-    smgr = MagicMock(name="freshServiceManager")
-    job.ctx.getServiceManager.return_value = smgr
-
-    assert job._check_native_feed() is None
-
-    smgr.createInstanceWithContext.assert_not_called()
-    job._send_telemetry.assert_not_called()
+    assert job._get_extension_version() == "0.0.1.0.32"
 
 
 def test_schedule_update_runs_for_rollback_action():

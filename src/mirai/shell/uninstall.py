@@ -141,7 +141,7 @@ class UninstallWatch:
     def schedule_check(self):
         self._runtime.extensions_changed = True
         # Différé : la base des extensions doit être stabilisée (remplacement en
-        # cours, mise à jour native) avant de conclure à une désinstallation.
+        # cours) avant de conclure à une désinstallation.
         timer = threading.Timer(_UNINSTALL_CHECK_DELAY_SECONDS, self._check)
         timer.daemon = True
         timer.start()

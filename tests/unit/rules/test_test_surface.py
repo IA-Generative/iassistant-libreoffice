@@ -28,14 +28,11 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_credentials.py": 1,
     "tests/unit/test_data_paths.py": 6,
     "tests/unit/test_enrollment.py": 7,
-    "tests/unit/test_feed_rewrite.py": 16,
     "tests/unit/test_install_changes.py": 4,
     "tests/unit/test_llm_relay_error.py": 3,
     "tests/unit/test_llm_token_auth.py": 19,
     "tests/unit/test_log_hygiene.py": 11,
     "tests/unit/test_models_fetch.py": 4,
-    "tests/unit/test_native_route.py": 30,
-    "tests/unit/test_native_update.py": 15,
     "tests/unit/test_reload_config.py": 3,
     "tests/unit/test_secret_routing.py": 6,
     "tests/unit/test_settings_token_field.py": 2,
@@ -45,9 +42,11 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_uninstall_wipe.py": 4,
     "tests/unit/test_update_blocked.py": 14,
     "tests/unit/test_update_features.py": 15,
+    "tests/unit/test_update_install.py": 12,
+    "tests/unit/test_update_route.py": 22,
 }
 
-MAKE_JOB_FILES_BUDGET = 30
+MAKE_JOB_FILES_BUDGET = 29
 # make_job est interdit dans ces dossiers, sauf pour ces fichiers : la façade,
 # le routage et le démarrage inerte ne se testent qu'avec un MainJob.
 MAKE_JOB_FORBIDDEN_IN = ("tests/unit/core/", "tests/unit/rules/")
