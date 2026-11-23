@@ -649,6 +649,10 @@ def _resize_document(ctx, shell, ratio, undo_label, tee, cancel_event, append_mo
                           _t("preset.resized", target=max(1, int(round(body_words * ratio)))))
 
 
+_FORMULA_IN_DATA = ("Une cellule à formule se lit « valeur (formule =…) » : la "
+                    "formule explique la valeur, elle n'en fait pas partie.")
+
+
 # Transformer fait un appel au modèle par ligne (500 lignes : 10 à 15 min), et
 # lit toute la plage d'un seul appel qui fige l'interface (50 000 cellules :
 # environ 1 s).
@@ -681,8 +685,9 @@ def _read_transform(ctx):
     plan = _TransformPlan(sheet, col_range, len(row_range), [], col_range.stop, "")
     if plan.too_large:
         return plan
-    for row in row_range:
-        source_text = _row_text(sheet, col_range, row)
+    for row, cells in zip(row_range, calc_tools.read_rows(sheet, col_range, row_range),
+                          strict=True):
+        source_text = _source_text(cells)
         if source_text:
             plan.sources.append((row, source_text))
     if plan.sources:
@@ -695,9 +700,13 @@ def _read_transform(ctx):
 SOURCE_CHANGED = "source modifiée pendant le run"
 
 
-def _row_text(sheet, col_range, row):
-    parts = [sheet.getCellByPosition(col, row).getString() for col in col_range]
-    return " | ".join(p for p in parts if p)
+def _source_text(cells):
+    """Cellules de la ligne qui affichent une valeur, chacune suivie de sa
+    formule. Une formule qui n'affiche rien ne fait pas de la ligne une
+    source : une feuille modèle aux formules recopiées sous les données ne
+    coûte pas un appel au modèle par ligne."""
+    return " | ".join(calc_tools.cell_text(value, formula)
+                      for value, formula in cells if value)
 
 
 def _write_result_row(plan, row, source_text, text):
@@ -706,7 +715,7 @@ def _write_result_row(plan, row, source_text, text):
     plus la source lue avant le run n'est pas écrite : le résultat ne lui
     correspond plus. Thread principal exclusivement."""
     sheet = plan.sheet
-    if _row_text(sheet, plan.col_range, row) != source_text:
+    if _source_text(calc_tools.row_cells(sheet, plan.col_range, row)) != source_text:
         return SOURCE_CHANGED
     if plan.header:
         try:
@@ -777,7 +786,8 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
     system_prompt = _system(
         "Tu es un assistant de transformation de données. "
         "Pour chaque valeur fournie, applique l'instruction demandée. "
-        "Réponds UNIQUEMENT avec le résultat transformé, sans explication ni "
+        + _FORMULA_IN_DATA
+        + " Réponds UNIQUEMENT avec le résultat transformé, sans explication ni "
         "ponctuation autour. N'utilise aucun formatage markdown "
         "(pas de **, *, _, #, `, etc.).")
     llm = _text_client(shell, 2000)
@@ -832,13 +842,15 @@ def _read_table(ctx, max_chars):
     lines = []
     has_data = False
     size = 0
-    for r in rows:
-        cells = [sheet.getCellByPosition(c, r).getString() for c in cols]
-        line = " | ".join(cells)
+    for cells in calc_tools.read_rows(sheet, cols, rows):
+        # Une formule qui n'affiche rien ne prend pas au budget la place des
+        # données : une feuille modèle en recopie loin sous le tableau.
+        line = " | ".join(calc_tools.cell_text(value, formula if value else "")
+                          for value, formula in cells)
         if lines and size + len(line) > max_chars:
             break
         size += len(line) + 1
-        has_data = has_data or any(cells)
+        has_data = has_data or any(value for value, _ in cells)
         lines.append(line)
     return sheet, cols, rows, lines, has_data
 
@@ -900,7 +912,8 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     )
     system_prompt = _system(
         "Tu es un analyste de données. Tu produis des analyses courtes, "
-        "factuelles et actionnables, en texte brut sans markdown.")
+        "factuelles et actionnables, en texte brut sans markdown. "
+        + _FORMULA_IN_DATA)
     max_tokens = int(shell.get_config("analyze_range_max_tokens", 4000))
     llm = _text_client(shell, max_tokens)
 
