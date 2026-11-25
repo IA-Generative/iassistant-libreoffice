@@ -20,23 +20,13 @@ except Exception:
 # Extension identifier (matches oxt/description.xml <identifier>).
 _EXTENSION_IDENTIFIER = "fr.gouv.interieur.mirai"
 
-# Feed natif LibreOffice (<update-information>) servi par le DM. Le chemin doit
-# rester aligné avec scripts/inject_update_feed.py (FEED_PATH), qui le bake dans
-# description.xml.
-_UPDATE_FEED_PATH = "/catalog/mirai-libreoffice/update.xml"
-_UPDATE_FEED_NS = "http://openoffice.org/extensions/update/2006"
-
-# Route native pilotée : refus mémorisé, attente de l'installation par
-# LibreOffice, bornes du déclenchement.
+# Mise à jour : refus mémorisé, seconde lecture du registre au démarrage,
+# fermeture de LibreOffice après l'installation.
 _UPDATE_POSTPONE_SECONDS = 24 * 3600
-_NATIVE_INSTALL_WAIT_SECONDS = 900
-_NATIVE_POLL_SECONDS = 5
-_NATIVE_TRIGGER_TIMEOUT_SECONDS = 30
-_NATIVE_MAX_ATTEMPTS = 2
+_RECONCILE_RECHECK_SECONDS = 5
 _CLOSE_RETRY_SECONDS = 120
 _CLOSE_RETRY_INTERVAL_SECONDS = 3
 _CLOSE_ATTEMPT_TIMEOUT_SECONDS = 10
-_SLOW_PROBE_LOG_MS = 1000
 # Niveaux remontés depuis src/mirai/ pour trouver description.xml (racine du paquet)
 _PACKAGE_ROOT_SEARCH_LEVELS = 4
 _PROMPT_WIZARD_WAIT_SECONDS = 120
@@ -156,7 +146,7 @@ import platform
 import shutil
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from . import credentials, feed_rewrite, local_config, log_setup
+from . import credentials, local_config, log_setup
 from .i18n import t as _t
 from .i18n import (
     get_locale as _i18n_get_locale,
@@ -546,8 +536,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "_send_telemetry",
         "_ensure_device_management_state_async",
         "_schedule_update_reconciliation",
-        "_schedule_native_feed_check",
-        "_schedule_feed_rewrite",
         "_schedule_enrollment_check",
     )
     runtime = property(lambda self: _shell_runtime.get())
@@ -645,22 +633,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         except Exception as e:
             log_to_file(f"Failed to schedule update reconciliation: {str(e)}")
 
-        # Diagnostic passif du feed natif : valide proxy/TLS/GPO de la pile HTTP
-        # de LibreOffice sur la flotte et détecte un feed DM absent avant
-        # d'appuyer le déploiement large dessus.
-        try:
-            self._schedule_native_feed_check()
-        except Exception as e:
-            log_to_file(f"Failed to schedule native feed check: {str(e)}")
-
-        # Adresse du feed natif = ?version=<version installée> tant qu'aucune
-        # directive ne dit autre chose : un nouvel OXT arrive avec l'adresse nue
-        # du build (version générale), à reprendre avant toute vérification.
-        try:
-            self._schedule_feed_rewrite()
-        except Exception as e:
-            log_to_file(f"Failed to schedule feed rewrite: {str(e)}")
-
         # Auto-launch enrollment wizard on first use (deferred to let UI init)
         try:
             self._schedule_enrollment_check()
@@ -681,9 +653,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         "UpdatePostponed": "update",
         "UpdateInstalledPendingRestart": "update",
         "UpdateInstallFailed": "update",
-        "NativeFeedCheck": "update",
-        "FeedRewrite": "update",
-        "UpdateNativeDialogShown": "update",
         "UpdateCloseDeferred": "update",
         "ResizeSelection": "resize",
         "SummarizeSelection": "summarize",
@@ -1099,11 +1068,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                         self._features_cache = features
                         log_to_file(f"Feature flags updated: {list(features.keys())}")
                     update_directive = config_data.get("update")
-                    # Feed natif : avant toute décision (y compris « déjà
-                    # à la cible » et les reports), l'adresse doit refléter
-                    # la cible de CE poste, sinon LibreOffice verrait la
-                    # version générale au prochain « Vérifier ».
-                    self._rewrite_feed_for_directive(update_directive)
                     if isinstance(update_directive, dict) and update_directive.get("action") in ("update", "rollback"):
                         target_ver = str(update_directive.get("target_version", "")).strip()
                         current_ver = str(self._get_extension_version() or "").strip()
@@ -1209,7 +1173,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         (PackageInformationProvider.getExtensionList : une paire [identifiant,
         version] par extension ; on prend la première paire de notre
         identifiant) — pas dans le description.xml du paquet courant : après
-        une mise à jour native, notre propre description.xml décrit encore
+        une mise à jour, notre propre description.xml décrit encore
         l'ancien paquet (LibreOffice le garde chargé jusqu'au redémarrage) :
         lire le registre, jamais son propre dossier. Repli sur description.xml
         (tests, LibreOffice dégradé)."""
@@ -1273,7 +1237,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             )
             return
 
-        # Refus ou report mémorisé (route native ou dirigée) : ne pas reproposer
+        # Refus ou report mémorisé : ne pas reproposer
         # ni retélécharger à chaque rafraîchissement de config avant l'échéance.
         state = self._load_update_state()
         if target_version and str(state.get("target_version", "")).strip() == target_version:
@@ -1312,6 +1276,7 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     except Exception as exc:
                         log_to_file(f"_schedule_update: reconciliation failed: {exc}")
                     previous = self._load_update_state()
+                    # installed_native : voir _reconcile_update_state.
                     if previous.get("stage") in ("installed_native", "installed_inprocess"):
                         # Une installation attend déjà un redémarrage : en session,
                         # écraser son état perdrait définitivement son rapport
@@ -1363,16 +1328,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
 
         tmp_path = None
         try:
-            # Route native d'abord : jamais pour une directive
-            # différée (elle ne dérange pas l'utilisateur) ni un rollback (LO ne
-            # propose que des versions plus récentes) ; bornée en tentatives.
-            if action == "update" and urgency != "deferred":
-                attempts = self._native_attempts_for(target_version)
-                if attempts < _NATIVE_MAX_ATTEMPTS and self._native_feed_offers(target_version):
-                    if self._perform_native_update(directive):
-                        return
-                    log_to_file("_perform_update: native route unavailable, falling back to directed route")
-
             # Download with failover across bootstrap DMs (2 passes), per-URL TLS.
             binary = None
             full_url = candidate_urls[0]
@@ -1890,10 +1845,10 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         on every platform and spawns nothing.
 
         `Desktop.terminate()` must run on the **main thread** (from this update-worker
-        thread it corrupts the macOS layout engine), via `_run_on_main_thread`. Sur la
-        route native, LibreOffice refuse la fermeture (veto) tant qu'une de ses
-        fenêtres modales — la progression de la mise à jour — est encore ouverte, ou
-        si le thread principal est occupé (timeout) : on retente périodiquement
+        thread it corrupts the macOS layout engine), via `_run_on_main_thread`.
+        LibreOffice refuse la fermeture (veto) tant qu'une de ses fenêtres
+        modales est encore ouverte, ou si le thread principal est occupé
+        (timeout) : on retente périodiquement
         jusqu'à acceptation ou expiration du délai. Un veto qui a mis du temps à
         arriver, ou un veto alors qu'un document porte des modifications non
         enregistrées, est traité comme un refus humain (« Enregistrer ? » →
@@ -1965,9 +1920,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 self._notify_update_activates_at_restart()
                 return False
             if err in (_MAIN_THREAD_VETOED, "timeout"):
-                # Veto immédiat = dialogue modal de LibreOffice encore ouvert (fenêtre de
-                # progression de la MAJ) ; timeout = thread principal occupé. Dans les
-                # deux cas on réessaie jusqu'à l'échéance — jamais de SIGTERM ici.
+                # Veto immédiat = dialogue modal de LibreOffice encore ouvert ;
+                # timeout = thread principal occupé. Dans les deux cas on
+                # réessaie jusqu'à l'échéance — jamais de SIGTERM ici.
                 if not vetoed_logged:
                     log_to_file(f"_close_after_inprocess_update: terminate {err} (dialogue ouvert ou thread principal occupé), nouvel essai périodique")
                     vetoed_logged = True
@@ -2047,14 +2002,13 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return {}
         return state if isinstance(state, dict) else {}
 
-    def _save_update_state(self, directive, stage, route=None, postponed_until=None,
-                           native_attempts=None):
+    def _save_update_state(self, directive, stage, route=None, postponed_until=None):
         """Persiste l'état de la campagne en cours (best-effort, jamais bloquant).
 
-        Pour une même cible, les champs non fournis (route, postponed_until,
-        native_attempts) et version_before sont conservés depuis l'état
-        précédent : après l'installation, la version active est déjà la cible,
-        et version_before doit rester celle d'avant pour la réconciliation.
+        Pour une même cible, les champs non fournis (route, postponed_until) et
+        version_before sont conservés depuis l'état précédent : après
+        l'installation, la version active est déjà la cible, et version_before
+        doit rester celle d'avant pour la réconciliation.
         """
         path = self._update_state_path()
         if not path or local_config.is_frozen():
@@ -2070,8 +2024,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 route = str(previous.get("route") or "") if same else ""
             if postponed_until is None:
                 postponed_until = float(previous.get("postponed_until") or 0) if same else 0.0
-            if native_attempts is None:
-                native_attempts = int(previous.get("native_attempts") or 0) if same else 0
             state = {
                 "campaign_id": directive.get("campaign_id"),
                 "target_version": target,
@@ -2080,7 +2032,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 "ts": time.time(),
                 "route": route,
                 "postponed_until": float(postponed_until),
-                "native_attempts": int(native_attempts),
             }
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
@@ -2129,12 +2080,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
             return
         target = str(state.get("target_version", ""))
         stage = str(state.get("stage") or "")
+        # installed_native : étape écrite par les versions qui installaient aussi
+        # par le dialogue de LibreOffice. La version qu'elles ont installée
+        # trouve cet état au premier démarrage et doit encore le clore.
         pending_restart = stage in ("installed_native", "installed_inprocess")
         current = str(self._get_extension_version() or "")
         if at_startup and pending_restart and target and current and current != target:
             # Juste après le démarrage, le registre peut encore se consolider :
             # seconde lecture espacée avant de conclure à un échec.
-            time.sleep(_NATIVE_POLL_SECONDS)
+            time.sleep(_RECONCILE_RECHECK_SECONDS)
             current = str(self._get_extension_version() or "")
         if target and current == target:
             log_to_file(f"_reconcile_update_state: update to {target} confirmed active")
@@ -2197,78 +2151,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         timer.daemon = True
         timer.start()
 
-    # Route native pilotée : le DM décide (directive update), LibreOffice
-    # installe (dialogue « Mise à jour des extensions »). Le plugin ne télécharge
-    # rien : il vérifie que le feed <update-information> de l'extension installée
-    # annonce exactement la cible, ouvre le dialogue natif sur le thread
-    # principal, puis surveille la version installée et ferme LibreOffice
-    # proprement.
-
-    def _native_feed_offers(self, target_version):
-        """Vrai si le feed de l'extension INSTALLÉE annonce exactement
-        target_version. Interrogé par LibreOffice lui-même
-        (PackageInformationProvider.isUpdateAvailable, pile HTTP de LO — le
-        même chemin que son contrôle périodique). Faux si bloc feed absent,
-        feed injoignable, version divergente, ou erreur : la route dirigée prend
-        alors le relais. Singleton obtenu sans import (thread worker)."""
-        target = str(target_version or "").strip()
-        if not target:
-            return False
-        try:
-            provider = self.ctx.getValueByName(
-                "/singletons/com.sun.star.deployment.PackageInformationProvider")
-        except Exception as exc:
-            log_to_file(f"_native_feed_offers: provider unavailable: {exc}")
-            return False
-        if provider is None:
-            log_to_file("_native_feed_offers: PackageInformationProvider unavailable")
-            return False
-        try:
-            pairs = provider.isUpdateAvailable(_EXTENSION_IDENTIFIER)
-        except Exception as exc:
-            log_to_file(f"_native_feed_offers: isUpdateAvailable failed: {exc}")
-            return False
-        announced = ""
-        for pair in pairs or ():
-            try:
-                ident, version = str(pair[0]), str(pair[1])
-            except Exception:
-                continue
-            if ident == _EXTENSION_IDENTIFIER:
-                announced = version
-                break
-        offers = announced == target
-        log_to_file(
-            f"_native_feed_offers: target={target} announced={announced or '-'} offers={offers}")
-        return offers
-
-    def _trigger_native_update_dialog(self, timeout=_NATIVE_TRIGGER_TIMEOUT_SECONDS):
-        """Ouvre, sur le thread PRINCIPAL, le dialogue natif « Mise à jour des
-        extensions » : PackageManagerDialog.trigger("SHOW_UPDATE_DIALOG"), l'appel
-        exact de la bulle de notification de LibreOffice (updatecheck.cxx). LO
-        interroge le feed, télécharge et installe lui-même ; ses dialogues tournent
-        sur son thread de commandes, l'appel rend la main aussitôt.
-        Vrai si le déclenchement s'est exécuté sans exception avant `timeout`.
-        Après un timeout, le rappel éventuel devient no-op (voir _run_on_main_thread).
-        Un timeout après démarrage compte comme déclenché : l'effet est en cours,
-        la surveillance ou le report qui suivent sont l'issue sûre."""
-        ctx = self.ctx
-
-        def _trigger():
-            dialog = ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.deployment.ui.PackageManagerDialog", ctx)
-            if dialog is None:
-                raise RuntimeError("PackageManagerDialog unavailable")
-            dialog.trigger("SHOW_UPDATE_DIALOG")
-
-        ok, err = self._run_on_main_thread(_trigger, timeout, "_trigger_native_update_dialog")
-        if ok or err == _MAIN_THREAD_TIMEOUT_AFTER_START:
-            suffix = "" if ok else " (still running on main thread)"
-            log_to_file(f"_trigger_native_update_dialog: SHOW_UPDATE_DIALOG triggered{suffix}")
-            return True
-        log_to_file(f"_trigger_native_update_dialog: failed: {err}")
-        return False
-
     def _wait_before_prompting(self):
         """Laisse l'assistant d'enrôlement se terminer (budget
         _PROMPT_WIZARD_WAIT_SECONDS), puis un délai de grâce, puis revérifie :
@@ -2286,200 +2168,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                     return
             time.sleep(_PROMPT_POLL_SECONDS)
 
-    def _native_attempts_for(self, target_version):
-        """Tentatives natives déjà faites pour cette cible (état persistant) ;
-        0 si autre cible, état absent ou champ illisible. Cible et état sont
-        comparés normalisés (strip) : c'est la même normalisation que
-        _save_update_state et _schedule_update."""
-        target = str(target_version or "").strip()
-        previous = self._load_update_state()
-        if not target or str(previous.get("target_version", "")).strip() != target:
-            return 0
-        try:
-            return int(previous.get("native_attempts") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    def _package_cache_dir(self):
-        """Dossier du cache des paquets utilisateur
-        (<profil>/user/uno_packages/cache/uno_packages) : on remonte depuis ce
-        module jusqu'à la racine du paquet — le dossier qui contient
-        description.xml — puis de deux niveaux (<paquet>.oxt → <lu…> → cache).
-        Repli : cinq niveaux au-dessus de ce module (disposition standard de
-        uno_packages/cache) si aucun description.xml n'est trouvé dans les
-        niveaux inspectés. Calculé une fois par instance."""
-        cached = getattr(self, "_package_cache_dir_value", None)
-        if cached:
-            return cached
-        root = self._package_root_dir()
-        result = os.path.dirname(os.path.dirname(root)) if root else None
-        if result is None:
-            log_to_file("_package_cache_dir: description.xml introuvable, repli sur la profondeur fixe")
-            result = os.path.abspath(__file__)
-            for _ in range(5):
-                result = os.path.dirname(result)
-        self._package_cache_dir_value = result
-        return result
-
-    def _cached_package_versions(self):
-        """Entrées (dossier <lu…>, version) de NOTRE extension présentes dans le
-        cache des paquets sur disque. En session, LibreOffice garde l'ancien
-        paquet enregistré jusqu'au redémarrage : le registre (getExtensionList)
-        ne voit jamais la nouvelle version, mais son dossier existe déjà dans le
-        cache — c'est le signal fiable d'une installation native aboutie. Le nom
-        du dossier <lu…> est gardé (pas seulement la version) pour distinguer un
-        dossier apparu pendant l'attente d'un dossier résiduel d'une tentative
-        antérieure sur la même cible. Best-effort, jamais d'exception."""
-        entries = set()
-        try:
-            cache = self._package_cache_dir()
-            for lu in os.listdir(cache):
-                lu_dir = os.path.join(cache, lu)
-                if not os.path.isdir(lu_dir):
-                    continue
-                for pkg in os.listdir(lu_dir):
-                    desc = os.path.join(lu_dir, pkg, "description.xml")
-                    if not os.path.isfile(desc):
-                        continue
-                    with open(desc, encoding="utf-8", errors="replace") as fh:
-                        text = fh.read()
-                    if not re.search(r'<identifier\s+value="' + re.escape(_EXTENSION_IDENTIFIER) + r'"', text):
-                        continue
-                    m = re.search(r'<version\s+value="([^"]+)"', text)
-                    if m:
-                        entries.add((lu, m.group(1).strip()))
-        except Exception as exc:
-            log_to_file(f"_cached_package_versions: {exc}")
-        return entries
-
-    @staticmethod
-    def _versions_of(entries):
-        return {v for (_d, v) in entries}
-
-    def _perform_native_update(self, directive):
-        """Route native pilotée : le DM a décidé (directive), LibreOffice installe.
-
-        Renvoie True si le dialogue a été montré et l'issue traitée — installée
-        (fermeture propre) ou reportée (cooldown) ; False si le déclenchement a
-        échoué, sans rien rapporter ni persister : l'appelant bascule en route
-        dirigée. Après l'installation native, LibreOffice garde l'ancien paquet
-        chargé jusqu'au redémarrage et le nouveau dossier apparaît à côté : d'ici
-        la fermeture, aucun import de module du plugin.
-
-        Détection de l'installation : combine le registre
-        (`_get_extension_version`, via `PackageInformationProvider`) et le cache
-        des paquets sur disque (`_cached_package_versions`) — en session,
-        LibreOffice garde l'ancien paquet enregistré jusqu'au redémarrage, donc
-        le registre seul reste bloqué sur l'ancienne version même après une
-        installation native aboutie. Détection confirmée sur deux lectures
-        consécutives, et uniquement pour un dossier apparu depuis l'instantané
-        pris avant l'attente et l'ouverture du dialogue.
-        """
-        target_version = str(directive.get("target_version", "")).strip()
-        campaign_id = directive.get("campaign_id")
-        campaign_attr = str(campaign_id) if campaign_id is not None else ""
-        urgency = directive.get("urgency", "normal")
-        version_before = str(self._get_extension_version() or "")
-        attempts = self._native_attempts_for(target_version)
-
-        cached_before = self._cached_package_versions()
-        self._wait_before_prompting()
-        log_to_file(f"_perform_native_update: opening native update dialog for {target_version}")
-        if not self._trigger_native_update_dialog():
-            return False
-
-        self._report_update_status(campaign_id, "deferred", version_before, target_version)
-        self._save_update_state(directive, "native_dialog", route="native",
-                                native_attempts=attempts + 1)
-        self._send_telemetry("UpdateNativeDialogShown", {
-            "version_after": target_version,
-            "campaign_id": campaign_attr,
-            "route": "native",
-            "attempt": str(attempts + 1),
-            "urgency": urgency,
-        })
-
-        deadline = time.time() + _NATIVE_INSTALL_WAIT_SECONDS
-        last_seen = None
-        polls = 0
-        hits = 0
-        while time.time() < deadline:
-            time.sleep(_NATIVE_POLL_SECONDS)
-            polls += 1
-            probe_start = time.time()
-            seen = str(self._get_extension_version() or "")
-            cached = self._cached_package_versions()
-            new_entries = cached - cached_before
-            if target_version in self._versions_of(new_entries):
-                seen = target_version
-            probe_ms = int((time.time() - probe_start) * 1000)
-            hits = hits + 1 if seen == target_version and target_version else 0
-            # Journal de diagnostic : valeur vue à chaque changement (et à la
-            # première lecture), ou lecture anormalement lente.
-            if seen != last_seen or probe_ms > _SLOW_PROBE_LOG_MS:
-                log_to_file(
-                    f"_perform_native_update: poll #{polls} installed={seen or '-'} "
-                    f"cache={sorted(self._versions_of(cached)) or '-'} target={target_version} "
-                    f"hits={hits} ({probe_ms} ms)")
-                last_seen = seen
-            if hits >= 2:
-                log_to_file(f"_perform_native_update: {target_version} installed natively, closing for restart")
-                self._save_update_state(directive, "installed_native", route="native")
-                self._send_telemetry("UpdateInstalledPendingRestart", {
-                    "version_after": target_version,
-                    "campaign_id": campaign_attr,
-                    "route": "native",
-                })
-                closed = False
-                try:
-                    closed = self._close_after_inprocess_update()
-                except Exception as exc:
-                    log_to_file(f"_perform_native_update: close failed (update is installed): {exc}")
-                if not closed:
-                    self._send_telemetry("UpdateCloseDeferred", {
-                        "version_after": target_version,
-                        "campaign_id": campaign_attr,
-                        "route": "native",
-                    })
-                return True
-
-        log_to_file(f"_perform_native_update: no install detected after {polls} polls (last seen {last_seen or '-'}), postponed")
-        self._save_update_state(directive, "postponed", route="native",
-                                postponed_until=time.time() + _UPDATE_POSTPONE_SECONDS)
-        self._send_telemetry("UpdatePostponed", {
-            "version_after": target_version,
-            "campaign_id": campaign_attr,
-            "route": "native",
-            "urgency": urgency,
-        })
-        return True
-
-    # Diagnostic passif du feed natif : LibreOffice récupère le feed avec SA pile
-    # HTTP (proxy/TLS/GPO propres), pas celle du plugin. Ce check headless valide
-    # donc, sans aucune action utilisateur et à l'échelle de la flotte, que la
-    # route native est viable sur les postes durcis — et détecte un feed DM
-    # absent ou mal formé AVANT d'appuyer le déploiement large dessus.
-
-    def _update_feed_urls(self):
-        """URLs du feed natif, dérivées des bootstrap configurés (failover d'abord).
-        Même convention que le bake au build (scripts/inject_update_feed.py),
-        avec le ?version= que la réécriture pose sur description.xml."""
-        urls = [
-            base.rstrip("/") + _UPDATE_FEED_PATH
-            for base in (self._failover_ordered_urls() or [])
-            if isinstance(base, str) and base.strip()
-        ]
-        # Seulement si la réécriture a réussi : sinon (offline, installation non
-        # inscriptible) LibreOffice lit l'adresse nue, le diagnostic aussi.
-        version = str(self.runtime.feed_rewrite_last or "").strip()
-        return [feed_rewrite.with_version(u, version) for u in urls] if version else urls
-
-    # Réécriture de l'adresse du feed natif : le DM ne sert sur l'adresse nue que
-    # la « version générale ». Le plugin écrit dans le description.xml de SON
-    # installation `?version=<cible>` (directive update) ou `?version=<installée>`
-    # (sinon) : LibreOffice relit ce fichier à chaque vérification, et chaque
-    # poste ne voit que sa propre cible.
-
     def _package_root_dir(self):
         """Racine du paquet installé (dossier contenant description.xml), ou None."""
         here = os.path.dirname(os.path.abspath(__file__))
@@ -2488,156 +2176,6 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
                 return here
             here = os.path.dirname(here)
         return None
-
-    def _feed_target_for(self, directive):
-        """Version à inscrire dans l'adresse du feed : la cible d'une directive
-        `update`, sinon la version installée. Un rollback garde la version
-        installée : LibreOffice ne propose jamais une version plus ancienne, et
-        l'adresse ne doit pas non plus reproposer celle qu'on retire."""
-        if isinstance(directive, dict) and directive.get("action") == "update":
-            target = str(directive.get("target_version") or "").strip()
-            if target:
-                return target
-        return str(self._get_extension_version() or "").strip()
-
-    def _rewrite_feed_for_directive(self, directive):
-        try:
-            self._rewrite_feed_url(self._feed_target_for(directive))
-        except Exception as exc:
-            log_to_file(f"_rewrite_feed_url: {exc}")
-
-    def _rewrite_feed_url(self, version, unless_already_set=False):
-        """Pose ?version=<version> sur l'adresse du feed du description.xml
-        installé. Sans effet si le bloc est absent (profil offline) ou si rien ne
-        change ; installation non inscriptible (couche partagée) → journalisé,
-        la route dirigée reste le repli (_native_feed_offers ne verra pas la
-        cible). Avec `unless_already_set`, n'écrit rien si une adresse a déjà été
-        posée dans ce process. Renvoie le résultat de feed_rewrite (None si rien
-        n'a été tenté)."""
-        if not version:
-            return feed_rewrite.ERROR
-        root = self._package_root_dir()
-        if not root:
-            log_to_file("_rewrite_feed_url: description.xml introuvable")
-            return feed_rewrite.ERROR
-        path = os.path.join(root, "description.xml")
-        with self.runtime.feed_rewrite_lock:
-            if unless_already_set and self.runtime.feed_rewrite_last_result is not None:
-                return None
-            result, detail = feed_rewrite.rewrite_description_file(path, version)
-            # Journal et télémétrie une fois par changement d'état, pas à chaque
-            # lecture de /config.
-            changed = (result, version) != self.runtime.feed_rewrite_last_result
-            self.runtime.feed_rewrite_last_result = (result, version)
-            if result in (feed_rewrite.WRITTEN, feed_rewrite.UNCHANGED):
-                self.runtime.feed_rewrite_last = version
-        if changed and result != feed_rewrite.UNCHANGED:
-            log_to_file(f"_rewrite_feed_url: {result} version={version} {detail}".rstrip())
-            self._send_telemetry("FeedRewrite", {
-                "feed.target": str(version),
-                "feed.result": result,
-                "feed.error": str(detail)[:200],
-            })
-        return result
-
-    def _schedule_feed_rewrite(self):
-        """Réécriture au démarrage, une fois par process, avant le diagnostic
-        du feed (45 s) et avant toute directive : cible = version installée."""
-        if self.runtime.feed_rewrite_started:
-            return
-        self.runtime.feed_rewrite_started = True
-
-        def _safe_rewrite():
-            try:
-                # Une directive lue entre-temps a déjà posé la bonne adresse : ne
-                # pas l'écraser avec la version installée.
-                self._rewrite_feed_url(str(self._get_extension_version() or "").strip(),
-                                       unless_already_set=True)
-            except Exception as exc:
-                log_to_file(f"_rewrite_feed_url (démarrage): {exc}")
-
-        timer = threading.Timer(2.0, _safe_rewrite)
-        timer.daemon = True
-        timer.start()
-
-    def _check_native_feed(self):
-        """Interroge le feed via com.sun.star.deployment.UpdateInformationProvider
-        (la machinerie exacte du bouton « Vérifier les mises à jour »), et rapporte
-        le résultat en log + télémétrie NativeFeedCheck. N'installe rien, aucune
-        UI ; best-effort — toute erreur est non-fatale. Retourne la version
-        annoncée par le feed, ou None."""
-        urls = self._update_feed_urls()
-        if not urls:
-            log_to_file("_check_native_feed: no bootstrap configured, skipped")
-            return None
-        provider = None
-        try:
-            provider = self.ctx.getServiceManager().createInstanceWithContext(
-                "com.sun.star.deployment.UpdateInformationProvider", self.ctx)
-        except Exception as exc:
-            log_to_file(f"_check_native_feed: provider unavailable: {exc}")
-        if provider is None:
-            return None
-        announced = ""
-        error = ""
-        try:
-            infos = provider.getUpdateInformation(tuple(urls), _EXTENSION_IDENTIFIER)
-            for element in infos or ():
-                # Le feed conforme expose <version value="…"/> dans le namespace
-                # update/2006 ; on tolère aussi un document sans namespace.
-                for getter in ("getElementsByTagNameNS", "getElementsByTagName"):
-                    try:
-                        if getter == "getElementsByTagNameNS":
-                            nodes = element.getElementsByTagNameNS(_UPDATE_FEED_NS, "version")
-                        else:
-                            nodes = element.getElementsByTagName("version")
-                        node = nodes.item(0) if nodes is not None and nodes.getLength() > 0 else None
-                        value = str(node.getAttribute("value")) if node is not None else ""
-                    except Exception:
-                        value = ""
-                    if value:
-                        announced = value
-                        break
-                if announced:
-                    break
-            if not announced:
-                error = "feed reachable but no <version value> found"
-        except Exception as exc:
-            error = str(exc)
-        current = str(self._get_extension_version() or "")
-        ok = bool(announced)
-        log_to_file(
-            f"_check_native_feed: ok={ok} announced={announced or '-'} "
-            f"current={current or '-'} urls={len(urls)}"
-            + (f" error={error}" if error else "")
-        )
-        try:
-            self._send_telemetry("NativeFeedCheck", {
-                "feed.ok": "true" if ok else "false",
-                "feed.announced_version": announced,
-                "feed.error": error[:200],
-                "version_current": current,
-            })
-        except Exception:
-            pass
-        return announced or None
-
-    def _schedule_native_feed_check(self):
-        """Lance le diagnostic du feed en fond, une fois par process, après que
-        l'enrollment/config a eu le temps de se poser (réseau via la pile de LO)."""
-        if self.runtime.feed_check_started:
-            return
-        self.runtime.feed_check_started = True
-
-        def _safe_check():
-            try:
-                self._check_native_feed()
-            except Exception as exc:
-                log_to_file(f"_check_native_feed: {exc}")
-
-        timer = threading.Timer(45.0, _safe_check)
-        timer.daemon = True
-        timer.start()
 
     def _report_update_status(self, campaign_id, status, version_before, version_after, error_detail=""):
         """Report update status back to device-management server."""

@@ -1,6 +1,6 @@
-"""Route native pilotée par le DM : le DM décide (directive), LibreOffice
-installe (dialogue « Mise à jour des extensions », feed <update-information>),
-le plugin ferme proprement. Route dirigée en repli ; refus mémorisé 24 h.
+"""Mise à jour pilotée par le DM : le DM décide (directive), le plugin
+télécharge, demande l'accord, installe sur le thread principal et ferme
+LibreOffice proprement ; refus mémorisé 24 h.
 """
 import itertools
 import json
@@ -19,7 +19,6 @@ from tests.stubs.uno_stubs import install, make_job
 install()
 
 from src.mirai import entrypoint
-from src.mirai.entrypoint import MainJob
 from src.mirai.shell import runtime as shell_runtime
 
 TARGET = "0.0.1.0.32"
@@ -30,7 +29,7 @@ _TMPDIRS = []
 
 def _mkdtemp():
     """Répertoire temporaire supprimé à la fin du module (les jobs écrivent un
-    profil et un cache de paquets factices à chaque test)."""
+    profil factice à chaque test)."""
     path = tempfile.mkdtemp()
     _TMPDIRS.append(path)
     return path
@@ -44,23 +43,11 @@ def _purge_tmpdirs():
     _TMPDIRS.clear()
 
 
-@pytest.fixture
-def native_timing(monkeypatch):
-    """Surveillance native accélérée : les tests jouent sur les constantes de
-    module, seul mécanisme d'injection des délais."""
-    def _set(wait=2, poll=0.01):
-        monkeypatch.setattr(entrypoint, "_NATIVE_INSTALL_WAIT_SECONDS", wait)
-        monkeypatch.setattr(entrypoint, "_NATIVE_POLL_SECONDS", poll)
-    _set()
-    return _set
-
-
 def _job(current_version=CURRENT):
     job = make_job(config_dir=_mkdtemp())
     job._get_extension_version = MagicMock(return_value=current_version)
     job._report_update_status = MagicMock()
     job._send_telemetry = MagicMock()
-    job._package_cache_dir = lambda d=_mkdtemp(): d
     return job
 
 
@@ -71,10 +58,7 @@ def _state(job):
 
 def test_constants_match_spec():
     assert entrypoint._UPDATE_POSTPONE_SECONDS == 24 * 3600
-    assert entrypoint._NATIVE_INSTALL_WAIT_SECONDS == 900
-    assert entrypoint._NATIVE_POLL_SECONDS == 5
-    assert entrypoint._NATIVE_TRIGGER_TIMEOUT_SECONDS == 30
-    assert entrypoint._NATIVE_MAX_ATTEMPTS == 2
+    assert entrypoint._RECONCILE_RECHECK_SECONDS == 5
     assert entrypoint._CLOSE_RETRY_SECONDS == 120
     assert entrypoint._CLOSE_RETRY_INTERVAL_SECONDS == 3
     assert entrypoint._PROMPT_WIZARD_WAIT_SECONDS == 120
@@ -85,37 +69,34 @@ def test_constants_match_spec():
 def test_save_update_state_persists_route_and_cooldown_fields():
     job = _job()
     until = time.time() + 3600
-    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "native_dialog",
-                           route="native", postponed_until=until, native_attempts=1)
+    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
+                           route="directed", postponed_until=until)
     state = _state(job)
-    assert state["route"] == "native"
+    assert state["route"] == "directed"
     assert state["postponed_until"] == until
-    assert state["native_attempts"] == 1
-    assert state["stage"] == "native_dialog"
+    assert state["stage"] == "postponed"
 
 
 def test_save_update_state_keeps_fields_for_same_target():
-    """Un enregistrement d'étape ne perd pas route / native_attempts posés avant."""
+    """Un enregistrement d'étape ne perd pas la route posée avant."""
     job = _job()
     d = {"campaign_id": 3, "target_version": TARGET}
-    job._save_update_state(d, "native_dialog", route="native", native_attempts=1)
+    job._save_update_state(d, "user_accepted", route="directed")
     job._save_update_state(d, "postponed", postponed_until=time.time() + 10)
     state = _state(job)
-    assert state["route"] == "native"
-    assert state["native_attempts"] == 1
+    assert state["route"] == "directed"
     assert state["postponed_until"] > time.time()
 
 
 def test_save_update_state_resets_fields_for_new_target():
     job = _job()
     job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
-                           route="native", postponed_until=time.time() + 10, native_attempts=2)
+                           route="directed", postponed_until=time.time() + 10)
     job._save_update_state({"campaign_id": 4, "target_version": "0.0.1.0.33"}, "staged")
     state = _state(job)
     assert state["target_version"] == "0.0.1.0.33"
     assert state["route"] == ""
     assert state["postponed_until"] == 0
-    assert state["native_attempts"] == 0
 
 
 def test_save_update_state_keeps_version_before_across_stages():
@@ -123,9 +104,9 @@ def test_save_update_state_keeps_version_before_across_stages():
     doit rester celle d'avant, sinon la réconciliation rapporte n'importe quoi."""
     job = _job()
     d = {"campaign_id": 3, "target_version": TARGET}
-    job._save_update_state(d, "native_dialog", route="native")
+    job._save_update_state(d, "user_accepted", route="directed")
     job._get_extension_version = MagicMock(return_value=TARGET)
-    job._save_update_state(d, "installed_native")
+    job._save_update_state(d, "installed_inprocess")
     assert _state(job)["version_before"] == CURRENT
 
 
@@ -153,21 +134,21 @@ def _schedule_and_wait(job, directive, seconds=2):
 def test_schedule_update_skips_target_in_cooldown():
     job = _job()
     job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
-                           route="native", postponed_until=time.time() + 3600)
+                           route="directed", postponed_until=time.time() + 3600)
     assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is False
 
 
 def test_schedule_update_runs_after_cooldown_expired():
     job = _job()
     job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
-                           route="native", postponed_until=time.time() - 1)
+                           route="directed", postponed_until=time.time() - 1)
     assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is True
 
 
 def test_schedule_update_ignores_cooldown_of_other_target():
     job = _job()
     job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "postponed",
-                           route="native", postponed_until=time.time() + 3600)
+                           route="directed", postponed_until=time.time() + 3600)
     assert _schedule_and_wait(job, {"action": "update", "target_version": "0.0.1.0.33"}) is True
 
 
@@ -180,113 +161,28 @@ def test_schedule_update_tolerates_corrupt_postponed_until():
     assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is True
 
 
-# C'est LibreOffice qui interroge le feed cuit dans l'extension INSTALLÉE, avec
-# sa pile HTTP. Vrai seulement si la version annoncée == cible de la directive.
-
-PIP_PATH = "/singletons/com.sun.star.deployment.PackageInformationProvider"
-
-
-def _job_with_provider(pairs=None, error=None):
-    job = _job()
-    provider = MagicMock(name="PackageInformationProvider")
-    if error is not None:
-        provider.isUpdateAvailable.side_effect = error
-    else:
-        provider.isUpdateAvailable.return_value = tuple(pairs or ())
-    job.ctx.getValueByName = MagicMock(return_value=provider)
-    return job, provider
-
-
-def test_native_feed_offers_true_when_announced_version_matches():
-    job, provider = _job_with_provider([("fr.gouv.interieur.mirai", TARGET)])
-    assert job._native_feed_offers(TARGET) is True
-    job.ctx.getValueByName.assert_called_with(PIP_PATH)
-    provider.isUpdateAvailable.assert_called_once_with("fr.gouv.interieur.mirai")
-
-
-def test_native_feed_offers_false_when_version_differs():
-    job, _ = _job_with_provider([("fr.gouv.interieur.mirai", "0.0.1.0.40")])
-    assert job._native_feed_offers(TARGET) is False
-
-
-def test_native_feed_offers_false_when_feed_silent():
-    """Bloc feed absent, feed injoignable ou pas plus récent → séquence vide."""
-    job, _ = _job_with_provider([])
-    assert job._native_feed_offers(TARGET) is False
-
-
-def test_native_feed_offers_ignores_other_extensions():
-    job, _ = _job_with_provider([("org.example.other", TARGET)])
-    assert job._native_feed_offers(TARGET) is False
-
-
-def test_native_feed_offers_false_on_error_or_missing_provider():
-    job, _ = _job_with_provider(error=RuntimeError("proxy"))
-    assert job._native_feed_offers(TARGET) is False
-    job2 = _job()
-    job2.ctx.getValueByName = MagicMock(return_value=None)
-    assert job2._native_feed_offers(TARGET) is False
-    assert job2._native_feed_offers("") is False
-
-
-# L'appel exact de la bulle de notification de LibreOffice (updatecheck.cxx →
-# showExtensionDialog). Il met la vérification en file sur le thread de commandes
-# de LO et rend la main ; il doit partir du thread principal (AsyncCallback).
-
-PMD = "com.sun.star.deployment.ui.PackageManagerDialog"
 ASYNC = "com.sun.star.awt.AsyncCallback"
 
 
 def _job_with_services(run_callback=True):
     """AsyncCallback synchrone (le main thread est disponible tout de suite)
-    ou inerte (run_callback=False) ; PackageManagerDialog mocké."""
+    ou inerte (run_callback=False)."""
     job = _job()
     smgr = job.ctx.getServiceManager.return_value
     default = smgr.createInstanceWithContext.return_value
-    dialog = MagicMock(name="PackageManagerDialog")
     async_cb = MagicMock(name="AsyncCallback")
     if run_callback:
         async_cb.addCallback.side_effect = lambda cb, data: cb.notify(data)
-    services = {PMD: dialog, ASYNC: async_cb}
-    smgr.createInstanceWithContext.side_effect = lambda name, ctx: services.get(name, default)
-    return job, dialog, async_cb
-
-
-def test_trigger_opens_update_dialog_on_main_thread():
-    job, dialog, async_cb = _job_with_services()
-    assert job._trigger_native_update_dialog(timeout=2) is True
-    async_cb.addCallback.assert_called_once()
-    dialog.trigger.assert_called_once_with("SHOW_UPDATE_DIALOG")
-
-
-def test_trigger_returns_false_when_dialog_raises():
-    job, dialog, _ = _job_with_services()
-    dialog.trigger.side_effect = RuntimeError("Cannot initialize VCL")
-    assert job._trigger_native_update_dialog(timeout=2) is False
-
-
-def test_trigger_times_out_when_main_thread_unavailable():
-    job, dialog, _ = _job_with_services(run_callback=False)
-    assert job._trigger_native_update_dialog(timeout=0.2) is False
-    dialog.trigger.assert_not_called()
-
-
-def test_trigger_late_callback_after_timeout_is_noop():
-    """Le main thread se libère APRÈS le timeout : le rappel ne doit plus ouvrir
-    le dialogue (l'appelant a déjà dégradé vers la route dirigée)."""
-    job, dialog, async_cb = _job_with_services(run_callback=False)
-    captured = {}
-    async_cb.addCallback.side_effect = lambda cb, data: captured.setdefault("cb", cb)
-    assert job._trigger_native_update_dialog(timeout=0.2) is False
-    captured["cb"].notify(None)
-    dialog.trigger.assert_not_called()
+    smgr.createInstanceWithContext.side_effect = (
+        lambda name, ctx: async_cb if name == ASYNC else default)
+    return job, async_cb
 
 
 def test_main_thread_install_resolves_the_real_extension_manager_singleton():
     """Le singleton UNO est com.sun.star.deployment.ExtensionManager ; le nom
     theExtensionManager n'existe pas (getValueByName → None) : l'install
     retomberait toujours sur le chemin worker."""
-    job, _dialog, _async_cb = _job_with_services()
+    job, _async_cb = _job_with_services()
     mgr = MagicMock(name="ExtensionManager")
     def _by_name(path):
         return mgr if path == "/singletons/com.sun.star.deployment.ExtensionManager" else None
@@ -294,19 +190,6 @@ def test_main_thread_install_resolves_the_real_extension_manager_singleton():
     assert job._run_install_on_main_thread("file:///x.oxt", (), None, timeout=2) is True
     mgr.addExtension.assert_called_once()
     assert job._main_thread_install_in_flight is False
-
-
-def _native_job(versions, trigger=True):
-    """versions : réponses successives de _get_extension_version — version_before,
-    puis la surveillance (la dernière valeur reste collante)."""
-    job = _job()
-    seq = list(versions)
-    job._get_extension_version = MagicMock(side_effect=lambda: seq.pop(0) if len(seq) > 1 else seq[0])
-    job._wait_before_prompting = MagicMock()
-    job._trigger_native_update_dialog = MagicMock(return_value=trigger)
-    job._close_after_inprocess_update = MagicMock()
-    job._package_cache_dir = lambda d=_mkdtemp(): d
-    return job
 
 
 DIRECTIVE = {"action": "update", "target_version": TARGET, "campaign_id": 7,
@@ -317,83 +200,8 @@ def _events(job):
     return [c.args[0] for c in job._send_telemetry.call_args_list]
 
 
-def test_native_update_installed_then_closes(native_timing):
-    job = _native_job([CURRENT, CURRENT, CURRENT, TARGET])
-    assert job._perform_native_update(DIRECTIVE) is True
-    job._wait_before_prompting.assert_called_once()
-    job._trigger_native_update_dialog.assert_called_once()
-    job._report_update_status.assert_called_once_with(7, "deferred", CURRENT, TARGET)
-    job._close_after_inprocess_update.assert_called_once()
-    state = _state(job)
-    assert state["stage"] == "installed_native"
-    assert state["route"] == "native"
-    assert state["native_attempts"] == 1
-    assert state["version_before"] == CURRENT
-    assert _events(job) == ["UpdateNativeDialogShown", "UpdateInstalledPendingRestart"]
-    attrs = job._send_telemetry.call_args_list[1].args[1]
-    assert attrs["route"] == "native" and attrs["version_after"] == TARGET
-
-
-def test_native_update_postponed_when_nothing_installed(native_timing):
-    job = _native_job([CURRENT])
-    before = time.time()
-    native_timing(wait=0.05)
-    assert job._perform_native_update(DIRECTIVE) is True
-
-    job._close_after_inprocess_update.assert_not_called()
-    state = _state(job)
-    assert state["stage"] == "postponed"
-    assert state["route"] == "native"
-    assert state["postponed_until"] >= before + entrypoint._UPDATE_POSTPONE_SECONDS - 1
-    assert _events(job) == ["UpdateNativeDialogShown", "UpdatePostponed"]
-    assert job._send_telemetry.call_args_list[1].args[1]["route"] == "native"
-
-
-def test_native_update_counts_attempts_for_same_target(native_timing):
-    job = _native_job([CURRENT])
-    job._save_update_state(DIRECTIVE, "postponed", route="native", native_attempts=1)
-    native_timing(wait=0.05)
-    job._perform_native_update(DIRECTIVE)
-    assert _state(job)["native_attempts"] == 2
-    attrs = job._send_telemetry.call_args_list[0].args[1]
-    assert attrs["attempt"] == "2"
-
-
-def test_native_update_returns_false_without_side_effects_when_trigger_fails(native_timing):
-    job = _native_job([CURRENT], trigger=False)
-    native_timing(wait=0.05)
-    assert job._perform_native_update(DIRECTIVE) is False
-    job._report_update_status.assert_not_called()
-    job._send_telemetry.assert_not_called()
-    assert not os.path.isfile(job._update_state_path())
-
-
-def test_native_attempts_for_normalises_target_and_tolerates_corruption():
+def _directed_job():
     job = _job()
-    job._save_update_state({"campaign_id": 3, "target_version": TARGET}, "native_dialog",
-                           route="native", native_attempts=1)
-    assert job._native_attempts_for(TARGET) == 1
-    assert job._native_attempts_for(f"  {TARGET} ") == 1
-    assert job._native_attempts_for("0.0.1.0.99") == 0
-    assert job._native_attempts_for("") == 0
-    with open(job._update_state_path(), "w", encoding="utf-8") as fh:
-        json.dump({"target_version": TARGET, "native_attempts": "x"}, fh)
-    assert job._native_attempts_for(TARGET) == 0
-
-
-def test_native_update_still_true_when_close_raises(native_timing):
-    """Installée mais fermeture en échec : l'issue reste « installée » (état
-    installed_native), jamais un rapport failed."""
-    job = _native_job([CURRENT, CURRENT, TARGET])
-    job._close_after_inprocess_update = MagicMock(side_effect=RuntimeError("terminate"))
-    assert job._perform_native_update(DIRECTIVE) is True
-    assert _state(job)["stage"] == "installed_native"
-
-
-def _routing_job(feed_offers=True, native_result=True):
-    job = _job()
-    job._native_feed_offers = MagicMock(return_value=feed_offers)
-    job._perform_native_update = MagicMock(return_value=native_result)
     job._wait_before_prompting = MagicMock()
     job.get_ssl_context = MagicMock()
     job._urlopen = MagicMock(return_value=http_response(b"oxt-bytes"))
@@ -401,49 +209,10 @@ def _routing_job(feed_offers=True, native_result=True):
     return job
 
 
-def test_perform_update_takes_native_route_without_downloading():
-    job = _routing_job()
-    job._perform_update(dict(DIRECTIVE))
-    job._native_feed_offers.assert_called_once_with(TARGET)
-    job._perform_native_update.assert_called_once()
-    job._urlopen.assert_not_called()
-
-
-def test_perform_update_falls_back_to_directed_route_when_native_fails():
-    job = _routing_job(native_result=False)
-    job._perform_update(dict(DIRECTIVE))
-    job._perform_native_update.assert_called_once()
-    assert job._urlopen.called, "la route dirigée doit télécharger"
-
-
-def test_perform_update_skips_native_when_feed_diverges():
-    job = _routing_job(feed_offers=False)
-    job._perform_update(dict(DIRECTIVE))
-    job._perform_native_update.assert_not_called()
-    assert job._urlopen.called
-
-
-def test_perform_update_skips_native_for_deferred_urgency_and_rollback():
-    job = _routing_job()
-    job._perform_update(dict(DIRECTIVE, urgency="deferred"))
-    job._perform_update(dict(DIRECTIVE, action="rollback"))
-    job._native_feed_offers.assert_not_called()
-    job._perform_native_update.assert_not_called()
-
-
-def test_perform_update_skips_native_after_max_attempts():
-    job = _routing_job()
-    job._save_update_state(DIRECTIVE, "postponed", route="native",
-                           native_attempts=entrypoint._NATIVE_MAX_ATTEMPTS)
-    job._perform_update(dict(DIRECTIVE))
-    job._native_feed_offers.assert_not_called()
-    assert job._urlopen.called
-
-
 def test_directed_route_postponed_sets_cooldown():
     """Route dirigée, l'utilisateur répond « Non » (msgbox mocké ≠ 2) → état
     postponed avec échéance, route « directed »."""
-    job = _routing_job(feed_offers=False)
+    job = _directed_job()
     before = time.time()
     job._perform_update(dict(DIRECTIVE))
     state = _state(job)
@@ -453,28 +222,22 @@ def test_directed_route_postponed_sets_cooldown():
     assert "UpdatePostponed" in _events(job)
 
 
-def test_action_names_cover_native_dialog_event():
-    assert MainJob._ACTION_NAMES["UpdateNativeDialogShown"] == "update"
-
-
 def test_reconcile_joins_route_to_extension_updated():
     job = _job(current_version=TARGET)
-    job._save_update_state(DIRECTIVE, "installed_native", route="native")
+    job._save_update_state(DIRECTIVE, "installed_inprocess", route="directed")
     job._reconcile_update_state()
     updated = [c for c in job._send_telemetry.call_args_list if c.args[0] == "ExtensionUpdated"]
     assert len(updated) == 1
-    assert updated[0].args[1]["route"] == "native"
+    assert updated[0].args[1]["route"] == "directed"
     assert updated[0].args[1]["confirmed"] == "true"
 
 
-def _blocking_dialog_job(block):
-    """Le callback main-thread est capturé et exécuté sur un thread qui bloque
-    dans dialog.trigger jusqu'à `block.set()` : simule une action encore en
-    cours quand le worker atteint son timeout."""
-    job, dialog, async_cb = _job_with_services(run_callback=False)
+def _late_main_thread_job():
+    """Le callback main-thread est capturé puis exécuté plus tard, sur un autre
+    thread : l'action peut encore tourner quand le worker atteint son timeout."""
+    job, async_cb = _job_with_services(run_callback=False)
     captured = {}
     async_cb.addCallback.side_effect = lambda cb, data: captured.setdefault("cb", cb)
-    dialog.trigger.side_effect = lambda _evt: block.wait(5)
 
     def _run_later():
         while "cb" not in captured:
@@ -482,15 +245,14 @@ def _blocking_dialog_job(block):
         captured["cb"].notify(None)
 
     threading.Thread(target=_run_later, daemon=True).start()
-    return job, dialog
+    return job
 
 
 def test_run_on_main_thread_reports_timeout_after_start():
     block = threading.Event()
-    job, dialog = _blocking_dialog_job(block)
+    job = _late_main_thread_job()
     try:
-        ok, err = job._run_on_main_thread(
-            lambda: dialog.trigger("SHOW_UPDATE_DIALOG"), 0.3, "test")
+        ok, err = job._run_on_main_thread(lambda: block.wait(5), 0.3, "test")
         assert ok is False
         assert err == entrypoint._MAIN_THREAD_TIMEOUT_AFTER_START
     finally:
@@ -501,7 +263,7 @@ def test_run_on_main_thread_late_callback_never_starts_the_action():
     """Le callback est livré APRÈS l'expiration : l'action ne doit pas démarrer
     (sinon deux flux d'installation concurrents), et l'issue vue par l'appelant
     reste « timeout », jamais « timeout after start »."""
-    job, _dialog, async_cb = _job_with_services(run_callback=False)
+    job, async_cb = _job_with_services(run_callback=False)
     captured = {}
     async_cb.addCallback.side_effect = lambda cb, data: captured.setdefault("cb", cb)
     ran = []
@@ -510,18 +272,6 @@ def test_run_on_main_thread_late_callback_never_starts_the_action():
     captured["cb"].notify(None)
     assert ran == []
     assert job._last_main_thread_action_s == 0.0
-
-
-def test_trigger_counts_started_timeout_as_triggered():
-    """L'action a démarré mais dure : l'effet est en cours, on ne bascule PAS
-    en route dirigée (deux flux d'installation concurrents sinon)."""
-    block = threading.Event()
-    job, dialog = _blocking_dialog_job(block)
-    try:
-        assert job._trigger_native_update_dialog(timeout=0.3) is True
-        dialog.trigger.assert_called_once_with("SHOW_UPDATE_DIALOG")
-    finally:
-        block.set()
 
 
 def _set_open_documents(desktop, modified_flags):
@@ -549,7 +299,7 @@ def _deferred_messages(job):
 def _close_job(terminate_results, modified_documents=()):
     """Desktop.terminate() renvoie successivement les valeurs données ;
     `modified_documents` décrit les documents ouverts (modifiés ou non)."""
-    job, _dialog, _async_cb = _job_with_services()
+    job, _async_cb = _job_with_services()
     smgr = job.ctx.getServiceManager.return_value
     desktop = MagicMock(name="Desktop")
     desktop.terminate.side_effect = list(terminate_results)
@@ -612,7 +362,7 @@ def test_close_after_inprocess_update_ignores_scheduling_latency(monkeypatch):
     terminate() : ce n'est PAS un refus humain → on réessaie et on aboutit."""
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(entrypoint, "_CLOSE_USER_REFUSAL_SECONDS", 0.05)
-    job, _dialog, async_cb = _job_with_services(run_callback=False)
+    job, async_cb = _job_with_services(run_callback=False)
     async_cb.addCallback.side_effect = (
         lambda cb, data: threading.Timer(0.2, cb.notify, args=(data,)).start())
     smgr = job.ctx.getServiceManager.return_value
@@ -629,9 +379,8 @@ def test_close_after_inprocess_update_ignores_scheduling_latency(monkeypatch):
 
 
 def test_run_on_main_thread_exposes_action_duration():
-    job, dialog, _async_cb = _job_with_services()
-    dialog.trigger.side_effect = lambda _evt: time.sleep(0.05)
-    ok, _err = job._run_on_main_thread(lambda: dialog.trigger("SHOW_UPDATE_DIALOG"), 2, "t")
+    job, _async_cb = _job_with_services()
+    ok, _err = job._run_on_main_thread(lambda: time.sleep(0.05), 2, "t")
     assert ok is True
     assert job._last_main_thread_action_s >= 0.04
 
@@ -640,7 +389,7 @@ def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch,
     """Callback jamais démarré (thread principal occupé) → on réessaie, JAMAIS de SIGTERM."""
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_INTERVAL_SECONDS", 1)
     monkeypatch.setattr(entrypoint, "_CLOSE_RETRY_SECONDS", 30)
-    job, _dialog, async_cb = _job_with_services(run_callback=False)
+    job, _async_cb = _job_with_services(run_callback=False)
     job._terminate_on_main_thread = MagicMock()
     job._run_on_main_thread = MagicMock(return_value=(False, "timeout"))
     assert job._close_after_inprocess_update() is False
@@ -651,7 +400,7 @@ def test_close_after_inprocess_update_retries_when_main_thread_busy(monkeypatch,
 
 
 def test_close_after_inprocess_update_sigterm_only_when_unreachable():
-    job, _dialog, _async_cb = _job_with_services()
+    job, _async_cb = _job_with_services()
     job._terminate_on_main_thread = MagicMock()
     job._run_on_main_thread = MagicMock(
         return_value=(False, entrypoint._MAIN_THREAD_ASYNC_UNAVAILABLE))
@@ -662,7 +411,7 @@ def test_close_after_inprocess_update_sigterm_only_when_unreachable():
 def test_close_after_inprocess_update_sigterm_when_scheduling_fails():
     """addCallback en échec : le thread principal est injoignable, SIGTERM reste
     la seule sortie."""
-    job, _dialog, _async_cb = _job_with_services()
+    job, _async_cb = _job_with_services()
     job._terminate_on_main_thread = MagicMock()
     job._run_on_main_thread = MagicMock(
         return_value=(False, entrypoint._MAIN_THREAD_SCHEDULE_FAILED + "boom"))
@@ -685,20 +434,14 @@ def test_close_after_inprocess_update_no_sigterm_on_action_error(monkeypatch):
 
 def test_schedule_update_skips_target_installed_pending_restart():
     job = _job()
-    job._save_update_state({"campaign_id": 9, "target_version": TARGET}, "installed_native", route="native")
+    job._save_update_state({"campaign_id": 9, "target_version": TARGET}, "installed_inprocess",
+                           route="directed")
     assert _schedule_and_wait(job, {"action": "update", "target_version": TARGET}) is False
-
-
-def test_native_close_deferred_emits_telemetry(native_timing):
-    job = _native_job([CURRENT, CURRENT, TARGET, TARGET])
-    job._close_after_inprocess_update = MagicMock(return_value=False)
-    assert job._perform_native_update(DIRECTIVE) is True
-    assert "UpdateCloseDeferred" in _events(job)
 
 
 def _accepting_job():
     """Route dirigée, l'utilisateur accepte le redémarrage (msgbox → YES = 2)."""
-    job = _routing_job(feed_offers=False)
+    job = _directed_job()
     toolkit = job.ctx.getServiceManager.return_value.createInstance.return_value
     toolkit.createMessageBox.return_value.execute.return_value = 2
     return job
@@ -743,8 +486,8 @@ def test_failed_install_keeps_libreoffice_open_and_offers_the_manual_route():
 
 def test_directed_close_deferred_carries_version_and_campaign():
     """UpdateCloseDeferred de la route dirigée doit porter la version et la
-    campagne, comme la variante native — sans quoi l'entonnoir ne relie pas une
-    fermeture reportée à sa campagne."""
+    campagne — sans quoi l'entonnoir ne relie pas une fermeture reportée à sa
+    campagne."""
     job = _accepting_job()
     job._run_install_on_main_thread = MagicMock(return_value=True)
     job._close_after_inprocess_update = MagicMock(return_value=False)
@@ -780,24 +523,6 @@ def test_get_extension_version_falls_back_when_registry_unavailable():
     assert job._get_extension_version() == ""
 
 
-def test_native_poll_sees_new_version_from_registry(native_timing):
-    """Après l'installation native, l'ancien module tourne encore ; il doit voir
-    la nouvelle version via le registre, pas via son propre dossier disparu."""
-    job, pip = _job_with_extension_list([("fr.gouv.interieur.mirai", CURRENT)])
-    job._report_update_status = MagicMock()
-    job._send_telemetry = MagicMock()
-    job._wait_before_prompting = MagicMock()
-    job._trigger_native_update_dialog = MagicMock(return_value=True)
-    job._close_after_inprocess_update = MagicMock()
-    calls = {"n": 0}
-    def _list():
-        calls["n"] += 1
-        return ((("fr.gouv.interieur.mirai", TARGET),) if calls["n"] >= 3 else (("fr.gouv.interieur.mirai", CURRENT),))
-    pip.getExtensionList.side_effect = _list
-    assert job._perform_native_update(DIRECTIVE) is True
-    job._close_after_inprocess_update.assert_called_once()
-
-
 def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
     """L'assistant d'enrôlement s'ouvre PENDANT la grâce : la seconde
     vérification doit le voir et attendre sa fermeture."""
@@ -825,93 +550,14 @@ def test_wait_before_prompting_rechecks_wizard_after_grace(monkeypatch):
         wizard.join(2)
 
 
-def _fake_cache(versions):
-    """Cache <cache>/<lu>/<pkg>.oxt/description.xml pour chaque version donnée."""
-    cache = _mkdtemp()
-    for i, v in enumerate(versions):
-        pkg = os.path.join(cache, f"lu{i}.tmp_", f"mirai-libreoffice-{v}.oxt")
-        os.makedirs(pkg)
-        with open(os.path.join(pkg, "description.xml"), "w", encoding="utf-8") as fh:
-            fh.write('<description><identifier value="fr.gouv.interieur.mirai"/>'
-                     f'<version value="{v}"/></description>')
-    other = os.path.join(cache, "luX.tmp_", "other.oxt")
-    os.makedirs(other)
-    with open(os.path.join(other, "description.xml"), "w", encoding="utf-8") as fh:
-        fh.write('<description><identifier value="org.example.other"/><version value="9"/></description>')
-    return cache
-
-
-def test_package_cache_dir_anchors_on_description_xml(monkeypatch):
-    """Le dossier scruté est déduit de la racine du paquet (le dossier qui
-    contient description.xml), pas d'un compteur de niveaux : une réorganisation
-    de src/mirai/ ne doit pas déplacer silencieusement la sonde."""
-    cache = _mkdtemp()
-    pkg = os.path.join(cache, "lu42.tmp_", "mirai-libreoffice.oxt")
-    os.makedirs(os.path.join(pkg, "python", "src", "mirai"))
-    open(os.path.join(pkg, "description.xml"), "w").close()
-    monkeypatch.setattr(entrypoint, "__file__",
-                        os.path.join(pkg, "python", "src", "mirai", "entrypoint.py"))
-    job = make_job(config_dir=_mkdtemp())
-    assert job._package_cache_dir() == cache
-
-
-def test_package_cache_dir_falls_back_to_fixed_depth_without_description_xml(monkeypatch):
-    """Aucun description.xml au-dessus (tests, arborescence inattendue) :
-    repli sur une profondeur fixe de cinq niveaux."""
-    root = _mkdtemp()
-    deep = os.path.join(root, "cache", "lu42.tmp_", "mirai.oxt", "src", "mirai")
-    os.makedirs(deep)
-    monkeypatch.setattr(entrypoint, "__file__", os.path.join(deep, "entrypoint.py"))
-    job = make_job(config_dir=_mkdtemp())
-    assert job._package_cache_dir() == os.path.join(root, "cache")
-
-
-def test_cached_package_versions_lists_our_identifier_only():
-    job = _job()
-    job._package_cache_dir = lambda: _fake_cache([CURRENT, TARGET])
-    assert job._versions_of(job._cached_package_versions()) == {CURRENT, TARGET}
-
-
-def test_cached_package_versions_never_raises():
-    job = _job()
-    job._package_cache_dir = lambda: "/nonexistent/cache/dir"
-    assert job._cached_package_versions() == set()
-
-
-def test_native_poll_detects_install_via_package_cache_when_registry_stale(native_timing):
-    """En session, getExtensionList renvoie toujours l'ancienne version, mais
-    le dossier du nouveau paquet est dans le cache.
-    Détection confirmée sur deux lectures consécutives (les polls #2 et #3)."""
-    job = _native_job([CURRENT])
-    calls = {"n": 0}
-    def _cache():
-        calls["n"] += 1
-        return _fake_cache([CURRENT, TARGET] if calls["n"] >= 3 else [CURRENT])
-    job._package_cache_dir = _cache
-    assert job._perform_native_update(DIRECTIVE) is True
-    job._close_after_inprocess_update.assert_called_once()
-    assert _state(job)["stage"] == "installed_native"
-
-
-def test_native_poll_ignores_target_folder_present_before_dialog(native_timing):
-    """Dossier résiduel d'une tentative antérieure : présent AVANT le dialogue,
-    il ne doit pas compter comme une installation."""
-    job = _native_job([CURRENT])
-    cache = _fake_cache([CURRENT, TARGET])
-    job._package_cache_dir = lambda: cache
-    native_timing(wait=0.2)
-    assert job._perform_native_update(DIRECTIVE) is True
-    job._close_after_inprocess_update.assert_not_called()
-    assert _state(job)["stage"] == "postponed"
-
-
 def test_schedule_update_reconciles_previous_target_before_new_directive():
     """Cas du banc : la directive suivante arrive avant le timer de
     réconciliation. La campagne précédente est active (registre à jour après
     redémarrage) : elle doit être rapportée installed et purgée, puis la
     nouvelle directive s'exécuter."""
     job = _job(current_version=CURRENT)
-    job._save_update_state({"campaign_id": 6, "target_version": CURRENT}, "installed_native", route="native")
+    job._save_update_state({"campaign_id": 6, "target_version": CURRENT}, "installed_inprocess",
+                           route="directed")
     done = threading.Event()
     job._perform_update = lambda d: done.set()
     job._schedule_update({"action": "update", "target_version": TARGET, "campaign_id": 7})
@@ -921,18 +567,22 @@ def test_schedule_update_reconciles_previous_target_before_new_directive():
     assert not os.path.isfile(job._update_state_path()), "l'état réconcilié doit être purgé"
 
 
-def test_schedule_update_defers_new_directive_while_previous_install_pending_restart():
+# installed_native : étape laissée par les versions qui installaient aussi par le
+# dialogue de LibreOffice.
+@pytest.mark.parametrize("stage,route", [("installed_inprocess", "directed"),
+                                         ("installed_native", "native")])
+def test_schedule_update_defers_new_directive_while_previous_install_pending_restart(stage, route):
     """Cible X installée, fermeture refusée, l'utilisateur continue de travailler :
     en session le registre reste sur l'ancienne version. Une directive Y ne doit
     ni s'exécuter ni écraser l'état de X — sinon la campagne X ne serait jamais
     rapportée installed."""
     job = _job(current_version=CURRENT)
-    job._save_update_state({"campaign_id": 6, "target_version": TARGET}, "installed_native", route="native")
+    job._save_update_state({"campaign_id": 6, "target_version": TARGET}, stage, route=route)
     assert _schedule_and_wait(
         job, {"action": "update", "target_version": "0.0.1.0.33", "campaign_id": 7}) is False
     state = _state(job)
     assert state["target_version"] == TARGET
-    assert state["stage"] == "installed_native"
+    assert state["stage"] == stage
     assert state["campaign_id"] == 6
 
 

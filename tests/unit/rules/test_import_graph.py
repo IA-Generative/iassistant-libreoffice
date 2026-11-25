@@ -15,11 +15,11 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 _SRC = os.path.join(_REPO_ROOT, "src", "mirai")
 _TESTS = os.path.join(_REPO_ROOT, "tests")
 
-COMMON = {"local_config", "credentials", "log_setup", "feed_rewrite", "i18n"}
+COMMON = {"local_config", "credentials", "log_setup", "i18n"}
 SHELL = {"entrypoint", "shell"}
 ADDIN = "calc_prompt_function"
 # Ce que le moteur et la palette prennent dans les modules communs ; le reste
-# (configuration, coffres, feed) passe par la façade.
+# (configuration, coffres) passe par la façade.
 COMMON_FOR_ENGINE = {"log_setup", "i18n"}
 
 TOLERATED_EDGES = {

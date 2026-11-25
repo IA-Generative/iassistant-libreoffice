@@ -41,16 +41,6 @@ class ShellRuntime:
         self.update_reconcile_started = False
         self.self_update_in_flight = False
 
-        # Diagnostic passif du feed natif : une seule fois par processus.
-        self.feed_check_started = False
-        # Réécriture de l'adresse du feed dans description.xml : planifiée une
-        # fois par processus au démarrage ; verrou partagé avec les réécritures
-        # déclenchées par /config.
-        self.feed_rewrite_started = False
-        self.feed_rewrite_lock = threading.Lock()
-        self.feed_rewrite_last = None           # dernière version inscrite avec succès
-        self.feed_rewrite_last_result = None    # (résultat, version) du dernier appel
-
         # Préparation du stockage local (journal, migration, empreinte) :
         # retentée par chaque MainJob jusqu'à ce qu'elle réussisse.
         self.storage_ready = False

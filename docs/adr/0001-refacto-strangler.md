@@ -65,7 +65,7 @@ ajoute ou justifie la hausse en revue.
   fois ses décisions reprises en ADR (fait : [ADR 0002](0002-moteur-et-palette.md)).
   « Corriger » et « Traduire » reviennent comme chips de la palette (#81).
 - **Rangement** : les modules communs restent à plat dans `src/mirai/`
-  (`local_config`, `credentials`, `log_setup`, `feed_rewrite`, `i18n`).
+  (`local_config`, `credentials`, `log_setup`, `i18n`).
   `ShellRuntime`, propriétaire unique de l'état du processus, vit dans
   `src/mirai/shell/runtime.py`.
 - **Releases** : tant que le Device Management n'a pas de garde de version minimale

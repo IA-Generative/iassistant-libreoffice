@@ -213,19 +213,15 @@ git checkout vX.Y.Z
 1. Le plugin appelle `/config/{slug}/config.json` au demarrage et a chaque action
 2. Le DM compare la version du plugin (`X-Plugin-Version` header) avec la campagne active
 3. Si une mise a jour est disponible, le DM renvoie un bloc `"update"` dans la reponse
-4. Le plugin choisit la route : **native** si le feed `<update-information>` de
-   l'extension installee annonce exactement la version cible (LibreOffice
-   telecharge l'OXT lui-meme) ; sinon **dirigee** : telechargement via
-   `/catalog/{slug}/download` avec failover multi-bootstrap, puis verification
-   du checksum SHA-256
-5. Installation par `addExtension` sur le thread principal, en cascade : route
-   native pilotee (dialogue natif "Mise a jour des extensions"), sinon route
-   dirigee (`addExtension` in-process, aucun processus enfant), sinon boite
-   "mise a jour bloquee" avec bouton "Ouvrir le dossier". Apres installation,
-   le plugin ferme LibreOffice proprement. Un refus n'est pas repropose avant 24 h
+4. Le plugin telecharge l'artefact via `/catalog/{slug}/download` avec failover
+   multi-bootstrap, puis verifie le checksum SHA-256
+5. Installation par `addExtension` sur le thread principal (in-process, aucun
+   processus enfant), sinon boite "mise a jour bloquee" avec bouton "Ouvrir le
+   dossier". Apres installation, le plugin ferme LibreOffice proprement. Un
+   refus n'est pas repropose avant 24 h
 6. Le plugin rapporte le statut au DM via `/update/status`
 
-Details : [update-natif-libreoffice.md](update-natif-libreoffice.md)
+Details : [mise-a-jour.md](mise-a-jour.md)
 
 ## Simulation (test sans impact)
 

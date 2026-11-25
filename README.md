@@ -161,12 +161,11 @@ Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe
 
 1. Le plugin appelle `/config/{slug}/config.json` au démarrage et à chaque action
 2. Le DM compare la version du plugin avec la campagne active
-3. Si une mise à jour est disponible, le plugin choisit la route. **Native** si le feed `<update-information>` de l'extension installée annonce exactement la version cible : LibreOffice télécharge alors l'OXT lui-même, avec sa pile HTTP, rien ne transite par le plugin. Sinon **dirigée** : le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé dans l'ordre annoncé par le DM puis celui de l'OXT, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
-4. Route dirigée : vérifie le checksum SHA-256. Route native : pas de hash, la confiance repose sur TLS vers le DM
-5. **Installe la mise à jour**, avec repli en cascade — un seul primitif, `addExtension` sur le thread principal :
-   1. **Route native pilotée** — si le feed `<update-information>` de l'extension installée annonce exactement la version cible, le plugin ouvre le dialogue natif « Mise à jour des extensions » (`PackageManagerDialog`, `SHOW_UPDATE_DIALOG`) : LibreOffice télécharge et installe lui-même, avec sa pile HTTP ; le plugin ferme ensuite LibreOffice proprement, en réessayant tant que la fenêtre de mise à jour est ouverte ; s'il doit y renoncer, la nouvelle version s'active au prochain démarrage. _(#5, #9)_
-   2. **Route dirigée** — sinon (amorçage, rollback, feed injoignable ou divergent) : téléchargement avec failover multi-bootstrap, sha256, `addExtension` in-process, fermeture propre. **Aucun processus enfant.** _(#4, #15, #16)_
-   3. Sinon, **boîte « mise à jour bloquée »** : mode opératoire manuel + bouton **« Ouvrir le dossier »** (natif, `SystemShellExecute`). _(#7, #12)_
+3. Si une mise à jour est disponible, le plugin télécharge l'artefact via `/catalog/{slug}/download` — avec **failover multi-bootstrap** (chaque DM essayé dans l'ordre annoncé par le DM puis celui de l'OXT, TLS par-URL) pour ne pas rester bloqué sur une URL injoignable _(#16)_
+4. Vérifie le checksum SHA-256
+5. **Installe la mise à jour**, avec repli — un seul primitif, `addExtension` sur le thread principal :
+   1. **Route dirigée** — `addExtension` in-process, puis fermeture propre de LibreOffice. **Aucun processus enfant.** _(#4, #15, #16)_
+   2. Sinon, **boîte « mise à jour bloquée »** : mode opératoire manuel + bouton **« Ouvrir le dossier »** (natif, `SystemShellExecute`). _(#7, #12)_
    Un refus n'est pas reproposé avant 24 h.
 6. Report du statut au DM via `/update/status` (relay-headers requis)
 
@@ -176,7 +175,7 @@ Le pourcentage est calculé par un hash du `client_uuid` — c'est déterministe
 - `MIRAI_SELFTEST_UPDATE_BLOCKED=1` force la boîte « mise à jour bloquée » via *À propos ▸ Vérifier les mises à jour*, sans déployer de MAJ _(#7)_.
 - Le dialogue *À propos* expose aussi un bouton **« Ouvrir dossier »** (même ouverture native que ci-dessus) pour tester localement, Mac inclus.
 
-> **Suivi du mécanisme de MAJ** : issue-parapluie **#9** · install in-process **#4** (singleton `.get` **#15**) · download failover **#16** · bouton « Ouvrir le dossier » **#7**/**#12** · option native `<update-information>` **#5** (flux format LibreOffice côté DM : IA-Generative/device-management#4) · cache binaire DM : IA-Generative/device-management#24.
+> **Suivi du mécanisme de MAJ** : issue-parapluie **#9** · install in-process **#4** (singleton `.get` **#15**) · download failover **#16** · bouton « Ouvrir le dossier » **#7**/**#12** · cache binaire DM : IA-Generative/device-management#24.
 
 ### Suivi et contrôle
 
@@ -358,9 +357,7 @@ et se ré-enrôle en silence tant que sa session Keycloak est vivante ; sinon l'
 d'enrôlement s'ouvre de lui-même. Le premier DM de la liste est réessayé une fois avant le repli :
 un raté passager ne change pas de DM. Un repli vers le DM suivant quand le premier ne répond
 toujours pas est aussi une passation ; le DM qui n'a pas répondu passe en queue jusqu'au
-redémarrage de LibreOffice, où son retour en tête est une autre passation. Limite connue : le flux de mise à
-jour natif (`<update-information>`) reste celui de l'OXT ; après une passation, la route dirigée
-livre la mise à jour une fois la route native en échec.
+redémarrage de LibreOffice, où son retour en tête est une autre passation.
 
 ---
 

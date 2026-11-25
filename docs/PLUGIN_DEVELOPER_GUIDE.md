@@ -60,7 +60,7 @@ Le DM est une **source de vérité unique** : version courante, version cible, c
 
 | Plate-forme              | Format artefact | Manifest natif         | Hôte d'exécution                  | Mise à jour                                       | Statut MIrAI |
 |---|---|---|---|---|---|
-| **LibreOffice (Writer/Calc/Impress)** | `.oxt` (zip) | `description.xml`, `Addons.xcu`, `Jobs.xcu` | Python UNO bridge intégré | Auto via DM (dialogue natif `<update-information>`, repli `addExtension` in-process) | ✅ Production |
+| **LibreOffice (Writer/Calc/Impress)** | `.oxt` (zip) | `description.xml`, `Addons.xcu`, `Jobs.xcu` | Python UNO bridge intégré | Auto via DM (`addExtension` in-process) | ✅ Production |
 | **Chrome / Edge / Chromium** | `.crx` (zip signé) | `manifest.json` (MV3) | Service worker + content scripts | Chrome Web Store (notification DM seulement) | ✅ Production |
 | **Firefox / Firefox ESR** | `.xpi` (zip signé) | `manifest.json` (MV3 partiel) + `browser_specific_settings.gecko` | Background scripts + content | AMO ou self-host (notification DM) | ✅ Production |
 | **Thunderbird**         | `.xpi` (WebExtension)  | `manifest.json` + APIs `messenger.*` | Background script | AMO Thunderbird ou self-host | 🛠 Roadmap |
