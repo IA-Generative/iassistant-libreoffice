@@ -878,11 +878,15 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         cfg = self._local_config()
         settings = cfg.settings()
         scope = self._credential_scope()
+        # Transport changé depuis la dernière installation enregistrée : ceux liés à
+        # un environnement sont à l'ancien et quittent settings.json sans entrer dans
+        # le coffre. Transport inchangé : ils prennent l'empreinte courante.
+        dropped = credentials.SCOPED_KEYS if cfg.transport_changed() else frozenset()
         stored = []
         refused = []
         for key in credentials.STORED_KEYS:
             value = settings.get(key)
-            if value in (None, "") or self.runtime.secrets_copied:
+            if value in (None, "") or self.runtime.secrets_copied or key in dropped:
                 continue
             if self._store_secret(key, value, scope):
                 stored.append(key)
@@ -908,8 +912,9 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         remove = list(self._DERIVED_CACHE_KEYS)
         if "transport" in changes:
             remove += list(self._ENVIRONMENT_BOUND_KEYS)
+            credentials.delete_other_scopes(self._credential_scope())
+            # La mémoire ne dit pas pour quel environnement un secret a été écrit.
             for key in credentials.SCOPED_KEYS:
-                credentials.delete_secret(key)
                 credentials.forget(key)
             credentials.forget("access_token")
         cfg = self._local_config()
@@ -6197,8 +6202,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return False
 
     def execute(self, args):
-        """XJob.execute : appelé par oxt/Jobs.xcu (onFirstVisibleTask, onLoad,
-        onNew). Le constructeur a déjà lancé les tâches de démarrage."""
+        """XJob.execute : appelé par oxt/Jobs.xcu (onFirstVisibleTask). Le
+        constructeur a déjà lancé les tâches de démarrage."""
         log_to_file("=== XJob.execute called ===")
 
     # Actions qui ne portent ni sur le document ni sur une sélection : elles

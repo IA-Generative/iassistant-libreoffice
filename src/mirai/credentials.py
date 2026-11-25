@@ -317,6 +317,15 @@ def delete_secret(name):
     _safe(store().delete, name)
 
 
+def delete_other_scopes(scope):
+    """Efface les secrets liés à un autre environnement que `scope`. Ceux de
+    `scope` restent : la session a pu s'enrôler sur le nouvel environnement
+    avant que le changement ne soit constaté."""
+    for name in SCOPED_KEYS:
+        if not get_secret(name, scope):
+            delete_secret(name)
+
+
 def wipe():
     for name in STORED_KEYS:
         delete_secret(name)

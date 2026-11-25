@@ -1,5 +1,6 @@
 """Jetons courts en mémoire du processus, jamais sur disque."""
 
+import json
 import subprocess
 import time
 from unittest.mock import MagicMock, patch
@@ -93,6 +94,26 @@ def test_scoped_secret_is_invisible_in_another_environment():
     assert credentials.get_secret("relay_client_key", "scope-b") == ""
     assert store.get("relay_client_key") is not None
     assert credentials.get_secret("relay_client_key", "scope-a") == "rk"
+
+
+def test_dropping_other_environments_keeps_the_current_one_and_unbound_secrets():
+    store = _fresh_store()
+    credentials.set_secret("relay_client_id", "id-b", "env-b")
+    credentials.set_secret("relay_client_key", "key-a", "env-a")
+    credentials.set_secret("proxy_password", "pw", "env-a")
+    credentials.delete_other_scopes("env-b")
+    assert credentials.get_secret("relay_client_id", "env-b") == "id-b"
+    assert store.get("relay_client_key") is None
+    assert credentials.get_secret("proxy_password", "env-b") == "pw"
+
+
+def test_dropping_other_environments_deletes_bound_entries_without_a_readable_scope():
+    store = _fresh_store()
+    store.set("relay_client_id", json.dumps({"scope": None, "value": "id"}))
+    store.set("refresh_token", "pas du json")
+    credentials.delete_other_scopes("env-b")
+    assert store.get("relay_client_id") is None
+    assert store.get("refresh_token") is None
 
 
 def test_wipe_deletes_every_stored_key_and_memory():
