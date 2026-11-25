@@ -4,7 +4,7 @@ import pytest
 
 from src.mirai.core.context import ToolContext
 from src.mirai.core.registry import ToolRegistry
-from src.mirai.core.tools import register_all
+from src.mirai.core.tools import calc_tools, register_all
 from tests.stubs.fake_docs import FakeCalcDoc, FakeCalcSheet, FakeWriterDoc
 from tests.stubs.fake_shell import FakeShell
 
@@ -114,6 +114,119 @@ def test_calc_read_range():
                                    _calc_ctx(doc))
     assert result.ok
     assert result.content == "a | b\nc | "
+
+
+def test_calc_read_range_gives_each_formula_next_to_the_value_it_shows():
+    """Une cellule à formule se lit « valeur (formule =…) », même quand elle
+    n'affiche rien ; les autres cellules se lisent telles qu'affichées."""
+    sheet = FakeCalcSheet(grid={(0, 0): "Err:502", (1, 0): "10", (0, 1): ""})
+    sheet.formulas.update({(0, 0): "=LOG10(C1)", (0, 1): '=IF(B1>50;"élevé";"")'})
+    result = _registry().call_tool("calc_read_range", {"range": "A1:B2"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.ok
+    assert result.content == ('Err:502 (formule =LOG10(C1)) | 10\n'
+                              '(formule =IF(B1>50;"élevé";"")) | ')
+
+
+def test_calc_read_range_gives_the_formula_of_each_adjacent_formula_cell():
+    sheet = FakeCalcSheet(grid={(0, 0): "1", (1, 0): "2", (2, 0): "3", (3, 0): "x"})
+    sheet.formulas.update({(0, 0): "=0+1", (1, 0): "=A1+1", (2, 0): "=B1+1"})
+    result = _registry().call_tool("calc_read_range", {"range": "A1:D1"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content == ("1 (formule =0+1) | 2 (formule =A1+1) | "
+                              "3 (formule =B1+1) | x")
+
+
+def test_calc_read_range_reads_a_text_starting_with_equals_as_text():
+    """Un texte saisi « =… » n'est pas une formule : il se lit tel quel."""
+    sheet = FakeCalcSheet(grid={(0, 0): "=pas une formule"})
+    result = _registry().call_tool("calc_read_range", {"range": "A1"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content == "=pas une formule"
+
+
+@pytest.mark.parametrize("protected, shown", [
+    (True, "12 | 24 (formule =C1*4)"),
+    (False, "12 (formule =C1*2) | 24 (formule =C1*4)"),
+], ids=["feuille_protegee", "feuille_libre"])
+def test_calc_read_range_keeps_a_hidden_formula_hidden_while_the_sheet_is_protected(
+        protected, shown):
+    """Comme dans Calc, une formule masquée ne se lit que feuille déprotégée ;
+    sa valeur reste lisible."""
+    sheet = FakeCalcSheet(grid={(0, 0): "12", (1, 0): "24"})
+    sheet.formulas.update({(0, 0): "=C1*2", (1, 0): "=C1*4"})
+    sheet.hidden_formulas.add((0, 0))
+    sheet.protected = protected
+    result = _registry().call_tool("calc_read_range", {"range": "A1:B1"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content == shown
+
+
+def test_calc_read_range_keeps_the_formula_of_a_hide_all_cell_hidden_while_the_sheet_is_protected():
+    """« Masquer tout » cache aussi la formule d'une feuille protégée."""
+    sheet = FakeCalcSheet(grid={(0, 0): "12", (1, 0): "24"})
+    sheet.formulas.update({(0, 0): "=C1*2", (1, 0): "=C1*4"})
+    sheet.hidden_cells.add((0, 0))
+    sheet.protected = True
+    result = _registry().call_tool("calc_read_range", {"range": "A1:B1"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert "=C1*2" not in result.content
+    assert result.content.endswith(" | 24 (formule =C1*4)")
+
+
+def test_calc_read_range_gives_the_formula_of_each_cell_of_a_formula_column():
+    sheet = FakeCalcSheet(grid={(0, r): str(2 * r) for r in range(5)})
+    sheet.formulas.update({(0, r): f"=B{r + 1}*2" for r in range(5)})
+    result = _registry().call_tool("calc_read_range", {"range": "A1:A5"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content.splitlines() == [f"{2 * r} (formule =B{r + 1}*2)" for r in range(5)]
+
+
+@pytest.mark.parametrize("block_cells", [4, 1], ids=["deux_lignes_par_bloc", "une_ligne_par_bloc"])
+def test_calc_read_range_finds_the_formulas_of_every_reading_block(monkeypatch, block_cells):
+    """Une grande plage est lue par blocs de lignes : une formule en bord de
+    bloc, ou à cheval sur deux, se lit comme les autres."""
+    monkeypatch.setattr(calc_tools, "_FORMULA_QUERY_CELLS", block_cells)
+    sheet = FakeCalcSheet(grid={(c, r): str(10 * r + c) for c in range(2) for r in range(4)})
+    sheet.formulas.update({(0, r): f"=B{r + 1}-1" for r in range(3)})
+    sheet.formulas[(1, 2)] = "=A3+1"
+    result = _registry().call_tool("calc_read_range", {"range": "A1:B4"},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content.splitlines() == [
+        "0 (formule =B1-1) | 1",
+        "10 (formule =B2-1) | 11",
+        "20 (formule =B3-1) | 21 (formule =A3+1)",
+        "30 | 31",
+    ]
+
+
+def test_calc_read_range_of_a_long_column_does_not_search_formulas_row_by_row():
+    sheet = FakeCalcSheet(grid={(0, r): str(r) for r in range(5000)}, num_rows=10000)
+    sheet.formulas.update({(0, r): f"=B{r + 1}" for r in range(0, 5000, 10)})
+    result = _registry().call_tool("calc_read_range",
+                                   {"range": "A1:A5000", "max_cells": 5000},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content.startswith("0 (formule =B1)\n1\n")
+    assert sheet.formula_queries < 10
+
+
+def test_calc_read_range_reads_no_more_cells_than_max_cells():
+    sheet = FakeCalcSheet(grid={(c, r): "x" for c in range(10) for r in range(3)})
+    result = _registry().call_tool("calc_read_range", {"range": "A1:J3", "max_cells": 15},
+                                   _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.content == (" | ".join(["x"] * 10) + "\n" + " | ".join(["x"] * 5)
+                              + "\n[... tronqué à 15 cellules ...]")
+    assert sheet.cells_asked == 15
+
+
+@pytest.mark.parametrize("name", ["calc_get_selection", "calc_read_range",
+                                  "calc_get_sheet_overview"])
+def test_calc_read_tools_tell_the_model_how_a_formula_reads(name):
+    """Le modèle apprend la forme d'une cellule à formule, et que la formule
+    lue est dans la syntaxe que calc_set_formula accepte."""
+    spec = next(s for s in _registry().list_tools("calc") if s.name == name)
+    assert "(formule =…)" in spec.description
+    assert "calc_set_formula" in spec.description
 
 
 def test_calc_write_cells():
@@ -238,3 +351,21 @@ def test_calc_get_selection_overview():
     result = _registry().call_tool("calc_get_selection", {}, _calc_ctx(doc))
     assert result.ok and "A1:A2" in result.content
     assert result.data["n_rows"] == 2
+
+
+def test_calc_get_selection_preview_gives_each_formula_next_to_its_value():
+    sheet = FakeCalcSheet(grid={(0, 0): "Total", (1, 0): "160"})
+    sheet.formulas[(1, 0)] = "=SUM(B2:B5)"
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B1")
+    result = _registry().call_tool("calc_get_selection", {}, _calc_ctx(doc))
+    assert result.content.endswith("Aperçu :\nTotal | 160 (formule =SUM(B2:B5))")
+
+
+def test_calc_sheet_overview_gives_the_formulas_of_the_current_row():
+    sheet = FakeCalcSheet(grid={(0, 0): "Prix", (1, 0): "Log", (2, 0): "Note",
+                                (0, 2): "0", (1, 2): "Err:502", (2, 2): ""})
+    sheet.formulas.update({(1, 2): "=LOG10(A3)", (2, 2): '=IF(A3>9;"cher";"")'})
+    doc = FakeCalcDoc(sheet, selection_ref="D3")
+    result = _registry().call_tool("calc_get_sheet_overview", {}, _calc_ctx(doc))
+    assert ("Current row values: 'Prix'='0', 'Log'='Err:502 (formule =LOG10(A3))', "
+            """'Note'='(formule =IF(A3>9;"cher";""))'""") in result.content

@@ -125,6 +125,33 @@ def test_transform_skips_empty_rows():
     assert (1, 1) not in sheet.grid and (1, 2) not in sheet.grid
 
 
+def test_transform_sends_each_formula_with_the_value_it_shows():
+    """Le modèle reçoit la valeur d'une cellule calculée suivie de sa formule,
+    et apprend ce que veut dire « (formule =…) »."""
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (1, 0): "Err:502"})
+    sheet.formulas[(1, 0)] = "=LOG10(C1)"
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B1")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE"))])
+    presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    messages = shell.requests[0]["messages"]
+    assert messages[-1]["content"].startswith(
+        "VALEUR SOURCE :\npomme | Err:502 (formule =LOG10(C1))\n")
+    assert "(formule =…)" in messages[0]["content"]
+
+
+def test_transform_leaves_out_a_row_whose_formulas_show_nothing():
+    """Une ligne dont aucune cellule n'affiche de valeur n'a rien à
+    transformer, même si des formules y rendent "" : une feuille modèle aux
+    formules recopiées sous les données ne coûte pas un appel par ligne."""
+    sheet = FakeCalcSheet(grid={(0, 0): "pomme", (1, 0): "POMME", (0, 1): "", (1, 1): ""})
+    sheet.formulas.update({(1, 0): "=UPPER(A1)", (1, 1): "=UPPER(A2)"})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=1, col="C")
+    assert len(shell.requests) == 1
+
+
 def test_transform_shows_each_row_on_its_own_line_in_the_palette():
     sheet = FakeCalcSheet(grid={(0, 0): "pomme", (0, 1): "poire"})
     doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
@@ -204,6 +231,47 @@ def test_analyze_writes_merged_cell_below_selection():
     assert "sous la sélection" in message
     prompt = shell.requests[0]["messages"][-1]["content"]
     assert "Paris | 100" in prompt
+
+
+def test_analyze_sends_each_formula_with_the_value_it_shows():
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes",
+                                (0, 1): "Paris", (1, 1): "100",
+                                (0, 2): "Total", (1, 2): "100"})
+    sheet.formulas[(1, 2)] = "=SUM(B2:B2)"
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    messages = shell.requests[0]["messages"]
+    assert ("DONNÉES :\nVille | Ventes\nParis | 100\nTotal | 100 (formule =SUM(B2:B2))\n\n"
+            in messages[-1]["content"])
+    assert "(formule =…)" in messages[0]["content"]
+
+
+def test_analyze_of_a_template_sheet_sends_all_its_data():
+    """Des formules recopiées sous les données, qui n'affichent rien, ne
+    prennent pas la place des données : l'analyse porte sur tout le tableau,
+    sans mention d'extrait."""
+    sheet = FakeCalcSheet(grid={(0, 0): "Ville", (1, 0): "Ventes", (2, 0): "Double",
+                                (0, 1): "Paris", (1, 1): "100", (2, 1): "200"})
+    sheet.formulas.update({(2, row): f'=IF(A{row + 1}="";"";B{row + 1}*2)'
+                           for row in range(1, 30)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:C30")
+    shell = FakeShell(config={"document_chunk_max_chars": 300},
+                      responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert message == _t("preset.done_analyze")
+    assert sheet.grid[(0, 31)] == "Paris domine."
+    prompt = shell.requests[0]["messages"][-1]["content"]
+    assert 'Paris | 100 | 200 (formule =IF(A2="";"";B2*2))\n |  | \n' in prompt
+
+
+def test_analyze_of_formulas_that_show_nothing_asks_for_data():
+    sheet = FakeCalcSheet(grid={(0, 0): "", (0, 1): ""})
+    sheet.formulas.update({(0, 0): '=IF(B1>0;B1;"")', (0, 1): '=IF(B2>0;B2;"")'})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell()
+    assert presets.run_analyze(_ctx(doc, shell), shell, "", None) == _t("preset.need_range")
+    assert shell.requests == []
 
 
 @pytest.mark.parametrize("runner,instruction", [(presets.run_transform, "en majuscules"),

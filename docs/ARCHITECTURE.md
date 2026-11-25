@@ -119,7 +119,7 @@ Chaque règle d'architecture est un test, dans `tests/unit/rules/` (ADR 0001).
 | writer_insert_text | W | ✔ | insère après sélection / fin de doc |
 | writer_find_replace | W | ✔ | paires find/replace exactes |
 | calc_get_selection | C | | plage, dimensions, en-têtes, aperçu |
-| calc_read_range | C | | plage → tableau texte |
+| calc_read_range | C | | plage → tableau texte, cellule à formule « valeur (formule =…) » |
 | calc_get_sheet_overview | C | | structure de la feuille |
 | calc_write_cells | C | ✔ | écrit des cellules |
 | calc_write_result_column | C | ✔ | colonne « Résultat IA » non destructive |

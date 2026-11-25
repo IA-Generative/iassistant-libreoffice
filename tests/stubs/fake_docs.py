@@ -249,7 +249,9 @@ class FakeCell:
         self._sheet.grid[(self._col, self._row)] = display
 
     def getFormula(self):
-        return self._sheet.formulas.get((self._col, self._row), "")
+        """Comme Calc, le contenu saisi pour une cellule sans formule."""
+        key = (self._col, self._row)
+        return self._sheet.formulas.get(key, self._sheet.grid.get(key, ""))
 
     def getError(self):
         return self._sheet.formula_errors.get(self.getFormula(), 0)
@@ -263,6 +265,12 @@ class FakeCell:
     def getPropertyValue(self, name):
         if name in self.properties:
             return self.properties[name]
+        if name == "CellProtection":
+            key = (self._col, self._row)
+            return UnoStruct(IsLocked=True,
+                             IsFormulaHidden=key in self._sheet.hidden_formulas,
+                             IsHidden=key in self._sheet.hidden_cells,
+                             IsPrintHidden=False)
         raise RuntimeError(f"property {name}")
 
     def getText(self):
@@ -322,6 +330,36 @@ class _FakeRange:
     def merge(self, value):
         self._sheet.merged.append((self._area, value))
 
+    def queryContentCells(self, flags):
+        """Cellules à formule de la plage (seul le drapeau CellFlags.FORMULA
+        est simulé), en rectangles comme Calc les forme : les lignes
+        consécutives d'une colonne, puis les colonnes voisines aux mêmes
+        lignes (ScMarkData::FillRangeListWithMarks)."""
+        assert flags == 16, flags
+        self._sheet.formula_queries += 1
+        area = self._area
+        cells = sorted((col, row) for col, row in self._sheet.formulas
+                       if area.StartColumn <= col <= area.EndColumn
+                       and area.StartRow <= row <= area.EndRow)
+        spans = []                            # [col, ligne début, ligne fin]
+        for col, row in cells:
+            if spans and spans[-1][0] == col and spans[-1][2] == row - 1:
+                spans[-1][2] = row
+            else:
+                spans.append([col, row, row])
+        rects = []                            # [col début, col fin, ligne début, ligne fin]
+        for col, start, end in spans:
+            joined = next((r for r in rects if r[1] == col - 1 and r[2:] == [start, end]),
+                          None)
+            if joined:
+                joined[1] = col
+            else:
+                rects.append([col, col, start, end])
+        found = tuple(UnoStruct(Sheet=0, StartColumn=first, EndColumn=last,
+                                StartRow=start, EndRow=end)
+                      for first, last, start, end in rects)
+        return SimpleNamespace(getRangeAddresses=lambda: found)
+
 
 class _FakeSheetCursor:
     """Curseur de feuille. Seule la fin de la zone utilisée est simulée, telle
@@ -351,7 +389,10 @@ class FakeCalcSheet:
         self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
         self.protected = False
+        self.hidden_formulas = set()          # (col, row) « Masquer la formule »
+        self.hidden_cells = set()             # (col, row) « Masquer tout »
         self.cells_asked = 0                  # cellules demandées, lues ou écrites
+        self.formula_queries = 0              # recherches de cellules à formule
         self._columns = _FakeAxis(num_cols)
         self._rows = _FakeAxis(num_rows)
 
