@@ -58,6 +58,7 @@ def test_transport_change_at_startup_clears_bound_secrets(tmp_path):
     job = make_job(config_dir=str(tmp_path))
     job.set_config("refresh_token", "rt")
     job.set_config("proxy_password", "pw")
+    job._local_config().update({"bootstrap_url": "https://dm-b"})
     job._apply_install_changes({"transport"})
     assert credentials.store().get("refresh_token") is None
     assert job._get_config_from_file("proxy_password", "") == "pw"

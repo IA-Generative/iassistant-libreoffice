@@ -281,6 +281,13 @@ class LocalConfig:
             with contextlib.suppress(FileNotFoundError):
                 _retried(lambda: _remove(path))
 
+    def transport_changed(self):
+        """Vrai si l'empreinte du transport diffère de celle de la dernière
+        installation enregistrée (faux sans enregistrement) ; n'enregistre rien."""
+        path = self._path(INSTALL_STATE_FILE)
+        previous = read_json(path) if path else {}
+        return bool(previous) and previous.get("transport") != self.transport_scope()
+
     def record_install(self, version, package, apply):
         """Compare l'installation courante à la précédente, fait appliquer les
         changements par `apply`, puis l'enregistre : si `apply` échoue, la
