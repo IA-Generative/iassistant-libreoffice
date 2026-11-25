@@ -6197,8 +6197,8 @@ class MainJob(unohelper.Base, XJobExecutor, XJob):
         return False
 
     def execute(self, args):
-        """XJob.execute : appelé par oxt/Jobs.xcu (onFirstVisibleTask, onLoad,
-        onNew). Le constructeur a déjà lancé les tâches de démarrage."""
+        """XJob.execute : appelé par oxt/Jobs.xcu (onFirstVisibleTask). Le
+        constructeur a déjà lancé les tâches de démarrage."""
         log_to_file("=== XJob.execute called ===")
 
     # Actions qui ne portent ni sur le document ni sur une sélection : elles

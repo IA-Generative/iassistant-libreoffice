@@ -22,24 +22,6 @@
         </node>
       </node>
     </node>
-    <node oor:name="onLoad" oor:op="fuse">
-      <node oor:name="JobList">
-        <node oor:name="fr.gouv.interieur.mirai.startup" oor:op="replace">
-          <prop oor:name="Service">
-            <value>fr.gouv.interieur.mirai.do</value>
-          </prop>
-        </node>
-      </node>
-    </node>
-    <node oor:name="onNew" oor:op="fuse">
-      <node oor:name="JobList">
-        <node oor:name="fr.gouv.interieur.mirai.startup" oor:op="replace">
-          <prop oor:name="Service">
-            <value>fr.gouv.interieur.mirai.do</value>
-          </prop>
-        </node>
-      </node>
-    </node>
   </node>
 
 </oor:component-data>
