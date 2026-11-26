@@ -169,9 +169,15 @@ def _read_cell(cell, is_formula, protected):
     la protection : comme dans Calc, la formule d'une feuille protégée ne se
     lit pas sous « Masquer la formule » ni sous « Masquer tout »."""
     if is_formula and protected:
-        protection = cell.getPropertyValue("CellProtection")
-        is_formula = not (protection.IsFormulaHidden or protection.IsHidden)
+        is_formula = not _formula_hidden(cell)
     return cell.getString(), (cell.getFormula() if is_formula else "")
+
+
+def _formula_hidden(cell):
+    """Vrai sous « Masquer la formule » ou « Masquer tout », qui ne jouent que
+    sur une feuille protégée."""
+    protection = cell.getPropertyValue("CellProtection")
+    return protection.IsFormulaHidden or protection.IsHidden
 
 
 def cell_text(value, formula):
@@ -526,6 +532,12 @@ def fill_formula_down(ctx, args):
     if not formula.startswith("="):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"{from_ref} ne contient pas de formule.")
+    # Avant tout message qui citerait la formule : recopiée dans une cellule
+    # déverrouillée, une formule masquée s'y lirait.
+    if sheet.isProtected() and _formula_hidden(source_cell):
+        return ToolResult(call_id="", ok=False, content="",
+                          error=(f"Formule de {from_ref} non recopiée : la protection de "
+                                 "la feuille la masque."))
     refusal = formula_refusal(formula)
     if refusal:
         return ToolResult(call_id="", ok=False, content="",

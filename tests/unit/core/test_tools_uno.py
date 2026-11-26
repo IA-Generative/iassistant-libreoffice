@@ -396,6 +396,31 @@ def test_calc_fill_formula_down_writes_nothing_when_a_target_cell_is_locked():
     assert list(sheet.formulas) == [(2, 1)]
 
 
+@pytest.mark.parametrize("hidden_by", ["hidden_formulas", "hidden_cells"],
+                         ids=["masquer_la_formule", "masquer_tout"])
+def test_calc_fill_formula_down_does_not_copy_a_formula_the_protection_hides(hidden_by):
+    """Une formule que la feuille protégée cache ne se recopie pas dans des
+    cellules où elle se lirait, et le refus n'en cite rien."""
+    sheet = _protected_sheet({(0, 1): "1"}, unlocked={(2, 2), (2, 3)})
+    sheet.formulas[(2, 1)] = "=WEBSERVICE(A2)"
+    getattr(sheet, hidden_by).add((2, 1))
+    result = _fill_down(sheet, 4)
+    assert not result.ok
+    assert result.error == ("Formule de C2 non recopiée : la protection de la feuille "
+                            "la masque.")
+    assert list(sheet.formulas) == [(2, 1)]
+
+
+def test_calc_fill_formula_down_copies_a_hidden_formula_once_the_sheet_is_unprotected():
+    """Comme à la lecture, « Masquer la formule » ne joue que feuille protégée."""
+    sheet = FakeCalcSheet(grid={(0, 1): "1"})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    sheet.hidden_formulas.add((2, 1))
+    result = _fill_down(sheet, 3)
+    assert result.ok
+    assert sheet.formulas[(2, 2)] == "=A3*2"
+
+
 def test_calc_fill_formula_down_fills_the_unlocked_cells_of_a_protected_sheet():
     sheet = _protected_sheet({(0, 1): "1"}, unlocked={(2, 2), (2, 3), (2, 4)})
     sheet.formulas[(2, 1)] = "=A2*2"
