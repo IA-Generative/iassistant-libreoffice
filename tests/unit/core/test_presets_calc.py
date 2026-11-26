@@ -573,6 +573,29 @@ def test_rows_whose_cell_gets_locked_during_the_run_are_not_written():
     assert sheet.grid == {**original, (1, 0): "APPLE"}
 
 
+def test_a_header_locked_during_the_run_writes_no_row():
+    """La feuille est protégée pendant le run, avant l'en-tête : rien n'est
+    écrit, et la palette dit combien de lignes ont été retenues."""
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris",
+                (0, 2): "poire"}
+    sheet = FakeCalcSheet(grid=original)
+    sheet.unlocked.update({(2, 1), (2, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR")])
+
+    def protect_the_sheet(chunk):
+        if chunk == "APPLE":       # la première réponse arrive : l'utilisateur protège la feuille
+            sheet.protected = True
+
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    protect_the_sheet)
+
+    assert message == (_t("preset.done_transform", count=0, col="C") + " "
+                       + _t("preset.locked_transform", count=2))
+    assert sheet.grid == original
+
+
 def test_transform_writes_in_the_unlocked_cells_of_a_protected_sheet():
     """L'assistant écrit là où l'utilisateur peut saisir."""
     original = {(0, 0): "pomme", (0, 1): "poire"}
