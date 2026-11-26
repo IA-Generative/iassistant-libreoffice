@@ -328,6 +328,18 @@ def test_calc_set_formula_applies_in_an_unlocked_cell_of_a_protected_sheet():
     assert sheet.formulas[(2, 0)] == "=A1*3"
 
 
+def test_calc_set_formula_applies_in_a_hide_formula_cell_of_a_protected_sheet_when_unlocked():
+    """« Masquer la formule » ne bloque pas la saisie : Calc laisse taper une
+    formule dans une cellule déverrouillée, la masquer ne joue qu'à la lecture."""
+    sheet = _protected_sheet(unlocked={(2, 0)})
+    sheet.hidden_formulas.add((2, 0))
+    sheet.formula_results["=A1*3"] = "36"
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.ok
+    assert sheet.formulas[(2, 0)] == "=A1*3"
+
+
 def test_calc_write_cells_writes_the_unlocked_cells_and_names_each_locked_one():
     """Sur une feuille protégée, l'assistant écrit là où l'utilisateur peut
     saisir. Un texte à apostrophe initiale ne passe pas davantage."""
