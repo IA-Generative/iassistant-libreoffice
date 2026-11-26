@@ -608,6 +608,18 @@ def test_transform_writes_in_the_unlocked_cells_of_a_protected_sheet():
     assert sheet.grid == {**original, (1, 0): "APPLE", (1, 1): "PEAR"}
 
 
+def test_transform_without_a_header_ignores_a_locked_title_row():
+    original = {(0, 1): "pomme", (0, 2): "poire"}
+    sheet = _protect(FakeCalcSheet(grid=original), unlocked={(1, 1), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 FakeSSEResponse(text_chunks("PEAR"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=2, col="B")
+    assert sheet.grid[(1, 1)] == "APPLE" and sheet.grid[(1, 2)] == "PEAR"
+    assert (1, 0) not in sheet.grid
+
+
 _TABLE = {(0, 0): "Ville", (1, 0): "Ventes", (0, 1): "Paris", (1, 1): "100"}
 
 
