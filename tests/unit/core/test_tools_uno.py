@@ -340,8 +340,10 @@ def test_calc_write_cells_writes_the_unlocked_cells_and_names_each_locked_one():
                    {"ref": "A2", "value": "'0612"}]},
         _calc_ctx(FakeCalcDoc(sheet)))
     assert not result.ok
-    assert result.content.startswith("1 cellule(s) écrite(s).")
-    assert result.error == ("A1 : cellule verrouillée (feuille protégée); "
+    # Le modèle ne reçoit que l'erreur d'un appel en échec : elle dit aussi
+    # ce qui a été écrit.
+    assert result.error == ("1 cellule(s) écrite(s). Erreurs : "
+                            "A1 : cellule verrouillée (feuille protégée) | "
                             "A2 : cellule verrouillée (feuille protégée)")
     assert sheet.grid == {**original, (1, 0): "saisie"}
 

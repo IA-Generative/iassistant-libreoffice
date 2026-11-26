@@ -426,8 +426,10 @@ def write_cells(ctx, args):
     content = f"{written} cellule(s) écrite(s)."
     if errors:
         content += " Erreurs : " + " | ".join(errors)
+    # Le modèle ne lit que `error` d'un appel en échec : elle porte aussi le
+    # nombre de cellules écrites.
     return ToolResult(call_id="", ok=not errors, content=content,
-                      error="; ".join(errors))
+                      error=content if errors else "")
 
 
 def write_result_column(ctx, args):
