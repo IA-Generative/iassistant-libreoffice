@@ -83,6 +83,7 @@ class FakeNetwork:
         self.unexpected = []
         self.system_proxies = {}
         self._routes = []
+        self._threads_before = set()
 
     def install(self, monkeypatch):
         def open_(opener, request, data=None, timeout=None):
@@ -90,6 +91,13 @@ class FakeNetwork:
 
         monkeypatch.setattr(urllib.request.OpenerDirector, "open", open_)
         monkeypatch.setattr(urllib.request, "getproxies", lambda: dict(self.system_proxies))
+        self._threads_before = set(threading.enumerate())
+
+    def settle(self):
+        """Attend les threads lancés depuis l'installation : un envoi fait en
+        arrière-plan (télémétrie) est alors visible dans `sent`."""
+        for thread in set(threading.enumerate()) - self._threads_before:
+            thread.join(timeout=2)
 
     def on(self, method, url_part, body=None, status=200, headers=None, error=None):
         """Réponse à une requête `method` dont l'URL contient `url_part`.
