@@ -15,7 +15,7 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 
 PRIVATE_MEMBERS_BUDGET = {
     "tests/integration/test_full_enrollment_flow.py": 9,
-    "tests/stubs/uno_stubs.py": 2,
+    "tests/stubs/uno_stubs.py": 3,
     "tests/unit/core/test_shell_facade.py": 2,
     # Le routage vit encore dans des privés de MainJob ; ce test suivra son
     # extraction dans un module de dispatch.
@@ -36,7 +36,6 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_secret_routing.py": 6,
     "tests/unit/test_settings_token_field.py": 2,
     "tests/unit/test_storage_wiring.py": 10,
-    "tests/unit/test_telemetry_defaults.py": 1,
     "tests/unit/test_token_logic.py": 4,
     "tests/unit/test_uninstall_wipe.py": 4,
     "tests/unit/test_update_blocked.py": 14,

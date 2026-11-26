@@ -116,7 +116,7 @@ def install():
     })
 
 
-def make_job(config_dir=None, ui_locale="fr", lo_version="26.2.0"):
+def make_job(config_dir=None, ui_locale="fr", lo_version="26.2.0", announce_load=False):
     """
     Instantiate MainJob with a fully mocked UNO context.
 
@@ -128,6 +128,8 @@ def make_job(config_dir=None, ui_locale="fr", lo_version="26.2.0"):
         ui_locale: interface language of the simulated LibreOffice.
         lo_version: version of the simulated LibreOffice, as sent in the
                     User-Agent and to the Device Management.
+        announce_load: keep the telemetry span sent when the extension loads;
+                       the other startup tasks stay disarmed.
     Returns:
         A MainJob instance ready for unit testing.
     """
@@ -157,11 +159,13 @@ def make_job(config_dir=None, ui_locale="fr", lo_version="26.2.0"):
     # charge, l'un d'eux écrase la valeur que le test vient d'écrire, et l'échec
     # se déplace d'un test à l'autre. Elles sont donc masquées sur l'instance le
     # temps de la construction.
+    disarmed = [name for name in MainJob.STARTUP_TASKS
+                if not (announce_load and name == "_send_telemetry")]
     job = MainJob.__new__(MainJob)
-    for name in MainJob.STARTUP_TASKS:
+    for name in disarmed:
         setattr(job, name, lambda *a, **k: None)
     job.__init__(ctx)
-    for name in MainJob.STARTUP_TASKS:
+    for name in disarmed:
         delattr(job, name)
 
     deadline = time.time() + 2.0
