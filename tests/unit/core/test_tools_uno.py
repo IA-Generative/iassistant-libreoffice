@@ -487,6 +487,16 @@ def test_calc_result_column_fills_the_unlocked_cells_of_a_protected_sheet():
     assert sheet.grid == {**original, (2, 0): "Résultat IA", (2, 1): "A", (2, 2): "B"}
 
 
+def test_calc_result_column_leaves_the_locked_cells_it_does_not_write_alone():
+    sheet = _protected_sheet({(0, 1): "a", (0, 2): "b", (0, 3): "c"}, unlocked={(1, 1), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A4")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B"]}, _calc_ctx(doc))
+    assert result.ok
+    assert sheet.grid[(1, 1)] == "A" and sheet.grid[(1, 2)] == "B"
+    assert (1, 0) not in sheet.grid and (1, 3) not in sheet.grid
+
+
 def test_calc_get_selection_overview():
     sheet = FakeCalcSheet(grid={(0, 0): "Nom", (0, 1): "Alice"})
     doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
