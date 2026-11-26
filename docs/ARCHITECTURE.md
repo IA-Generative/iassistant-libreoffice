@@ -384,6 +384,11 @@ Outils partagés des tests (`tests/stubs/`, `tests/unit/conftest.py`) :
 - `fast_clock` : les `sleep` de la coquille rendent la main tout de suite et
   `time()` avance d'autant, si bien que les boucles à échéance se terminent.
 - `helpers.http_response` : réponse `urllib` factice.
+- `network` : faux réseau placé sous la coquille (`fake_network.FakeNetwork`). Il
+  montre chaque requête telle qu'elle partirait (en-têtes, corps, délai, proxy,
+  vérification des certificats) sans citer un membre de `MainJob`, et fait
+  échouer le test si une requête part sans réponse prévue. Sans lui, un test
+  unitaire reste hors ligne : toute requête échoue comme sur un poste sans réseau.
 - `thread_guard` : enveloppe un faux document ou ServiceManager dans un
   `ThreadGuard` ; tout accès hors du thread propriétaire fait échouer le test.
 

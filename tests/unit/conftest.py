@@ -11,6 +11,7 @@ mockés.
 import glob
 import os
 import shutil
+import threading
 import time
 
 import pytest
@@ -95,6 +96,29 @@ def fast_clock(monkeypatch):
     monkeypatch.setattr(entrypoint, "time", clock)
     monkeypatch.setattr(local_config, "time", clock)
     return clock
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """Aucun test unitaire n'atteint le vrai réseau : une requête qu'il n'a pas
+    prévue échoue comme sur un poste hors ligne."""
+    from tests.stubs.fake_network import FakeNetwork
+    fake = FakeNetwork()
+    fake.install(monkeypatch)
+    started_before = set(threading.enumerate())
+    yield fake
+    # Un thread lancé par le test (télémétrie) peut émettre après lui : attendu
+    # ici, sa requête ne part ni vers le vrai réseau ni dans le test suivant.
+    for thread in set(threading.enumerate()) - started_before:
+        thread.join(timeout=2)
+
+
+@pytest.fixture
+def network(_offline):
+    """Faux réseau sous la coquille ; le test échoue si une requête est partie
+    sans qu'il lui ait prévu de réponse."""
+    yield _offline
+    assert _offline.unexpected == [], f"requêtes sans réponse prévue : {_offline.unexpected}"
 
 
 @pytest.fixture
