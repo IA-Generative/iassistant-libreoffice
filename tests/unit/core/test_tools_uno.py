@@ -485,8 +485,8 @@ def test_calc_result_column_of_a_whole_column_scans_only_the_used_rows():
     assert sheet.cells_asked < 30
 
 
-@pytest.mark.parametrize("unlocked", [{(2, 1)}, {(2, 1), (2, 2)}],
-                         ids=["cellule_de_resultat", "en_tete"])
+@pytest.mark.parametrize("unlocked", [{(2, 0), (2, 1)}, {(2, 1), (2, 2)}],
+                         ids=["seule_cellule_de_resultat_verrouillee", "seul_en_tete_verrouille"])
 def test_calc_result_column_writes_nothing_when_one_of_its_cells_is_locked(unlocked):
     """Une colonne de résultats à trous tromperait : l'en-tête et chaque
     résultat doivent pouvoir s'écrire, sinon rien ne l'est."""
