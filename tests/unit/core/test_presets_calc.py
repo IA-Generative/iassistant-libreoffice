@@ -535,8 +535,10 @@ def _protect(sheet, unlocked=()):
     return sheet
 
 
-@pytest.mark.parametrize("unlocked", [{(2, 0), (2, 1)}, {(2, 1), (2, 2)}],
-                         ids=["seule_cellule_de_resultat_verrouillee", "seul_en_tete_verrouille"])
+@pytest.mark.parametrize("unlocked", [{(2, 0), (2, 1)}, {(2, 0), (2, 2)}, {(2, 1), (2, 2)}],
+                         ids=["derniere_cellule_de_resultat_verrouillee",
+                              "premiere_cellule_de_resultat_verrouillee",
+                              "seul_en_tete_verrouille"])
 def test_transform_into_locked_cells_is_refused_before_the_model_is_asked(unlocked):
     # Colonne B occupée : les résultats iraient en C, sous un en-tête en C1.
     original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris",
