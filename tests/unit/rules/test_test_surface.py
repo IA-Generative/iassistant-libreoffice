@@ -22,7 +22,6 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/rules/test_dispatch_routes.py": 9,
     "tests/unit/rules/test_import_graph.py": 1,
     "tests/unit/test_action_dispatch.py": 9,
-    "tests/unit/test_bootstrap_insecure_ssl.py": 2,
     "tests/unit/test_config_cache_secrets.py": 3,
     "tests/unit/test_config_fetch.py": 27,
     "tests/unit/test_credentials.py": 1,
