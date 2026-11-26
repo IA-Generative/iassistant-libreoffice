@@ -5,6 +5,7 @@ plugin-dm-protocol-update-features.md § 8 bis : un événement par erreur du re
 (429, 401, 403, 5xx), corrélé à l'audit serveur par X-Request-Id, au plus un par
 code d'erreur et par minute, et jamais de contenu de prompt.
 """
+import urllib.error
 import urllib.request
 
 import pytest
@@ -17,7 +18,8 @@ from tests.stubs.uno_stubs import make_job, seed_user_config
 COLLECTOR = "https://collecteur.example/v1/traces"
 LLM = "https://ia.example/v1"
 
-_RATE_LIMITED = '{"error": {"code": "rate_limit_exceeded"}, "retry_after": 30}'
+_RATE_LIMITED = ('{"error": {"code": "rate_limit_exceeded", '
+                 '"message": "Quota atteint pour : Résume ce contrat"}, "retry_after": 30}')
 
 
 @pytest.fixture
@@ -28,7 +30,7 @@ def relay(network):
     return network
 
 
-def _device(tmp_path, **settings):
+def _seed(tmp_path, **settings):
     seed_user_config(str(tmp_path), {
         "telemetryEndpoint": COLLECTOR, "llm_base_urls": LLM,
         "llm_default_models": "modele-a", **settings})
@@ -41,7 +43,7 @@ def _new_action(tmp_path):
 
 
 def _shell(tmp_path, **settings):
-    _device(tmp_path, **settings)
+    _seed(tmp_path, **settings)
     return _new_action(tmp_path)
 
 
@@ -107,7 +109,6 @@ def test_naming_the_model_asks_the_relay_for_its_models(tmp_path, relay):
     """Le modèle rapporté est le réglage courant, dont la lecture interroge le
     relais."""
     _shell(tmp_path).report_llm_error(429, _RATE_LIMITED)
-    spans_sent(relay, COLLECTOR)
     assert len(relay.requests("GET", LLM + "/models")) == 1
 
 
@@ -133,12 +134,26 @@ def test_each_error_code_keeps_its_own_window(tmp_path, relay):
 
 
 def test_an_error_met_while_telemetry_is_off_still_opens_its_window(tmp_path, relay):
-    """L'erreur tue par le réglage occupe quand même le créneau de son code."""
+    """L'erreur tue par le réglage occupe quand même le créneau de son code : la
+    télémétrie rétablie, seule une erreur d'un autre code part."""
     shell = _shell(tmp_path, telemetryEnabled=False)
     shell.report_llm_error(429, _RATE_LIMITED)
     shell.set_config("telemetryEnabled", True)
     shell.report_llm_error(429, _RATE_LIMITED)
-    assert _relay_errors(relay) == []
+    shell.report_llm_network_error("timed out")
+    assert _codes(relay) == ["timeout"]
+
+
+def test_an_error_whose_report_fails_still_opens_its_window(tmp_path, network):
+    """Le collecteur injoignable n'est pas sollicité de nouveau pour le même code."""
+    network.on("POST", COLLECTOR, error=urllib.error.URLError("hôte injoignable"))
+    network.on("GET", LLM + "/models", {"data": [{"id": "modele-a"}]})
+    shell = _shell(tmp_path)
+    shell.report_llm_error(429, _RATE_LIMITED)
+    network.settle()
+    shell.report_llm_error(429, _RATE_LIMITED)
+    network.settle()
+    assert len(network.requests("POST", COLLECTOR)) == 1
 
 
 def test_a_429_from_the_relay_is_correlated_with_the_server_audit(tmp_path, relay):
