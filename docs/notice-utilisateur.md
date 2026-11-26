@@ -233,7 +233,7 @@ Applique une instruction IA sur une plage de cellules et écrit les résultats d
 >
 > *Exemple : vous avez 50 descriptions de produits en français ? Sélectionnez la colonne, Ctrl+Alt+Espace, tapez "Traduire en anglais", et la traduction apparaît à côté.*
 
-> 🔵 **Expert** — L'extension détecte automatiquement la première colonne libre à droite de la sélection. L'en-tête de la colonne de résultat reprend le style de la ligne d'en-tête existante. Le traitement est séquentiel (cellule par cellule) avec le contexte de chaque ligne. Transformer traite au plus 500 lignes et 50 000 cellules à la fois : au-delà, rien n'est lu ni écrit, et l'assistant demande une sélection plus petite. Sur une feuille protégée, l'assistant n'écrit que dans les cellules déverrouillées, comme Calc le permet à l'utilisateur : si la colonne de résultat contient une cellule verrouillée, il le dit et n'écrit rien.
+> 🔵 **Expert** — L'extension détecte automatiquement la première colonne libre à droite de la sélection. L'en-tête de la colonne de résultat reprend le style de la ligne d'en-tête existante. Le traitement est séquentiel (cellule par cellule) avec le contexte de chaque ligne. Transformer traite au plus 500 lignes et 50 000 cellules à la fois : au-delà, rien n'est lu ni écrit, et l'assistant demande une sélection plus petite. Sur une feuille protégée, l'assistant n'écrit que dans les cellules déverrouillées, comme Calc le permet à l'utilisateur : si une cellule qu'il devrait écrire dans la colonne de résultat est verrouillée, il le dit et n'écrit rien.
 
 ### 4.2 🧮 Générer une formule (Ctrl+Alt+Espace)
 
