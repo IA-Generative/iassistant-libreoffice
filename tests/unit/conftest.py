@@ -11,6 +11,7 @@ mockés.
 import glob
 import os
 import shutil
+import threading
 import time
 
 import pytest
@@ -104,7 +105,12 @@ def _offline(monkeypatch):
     from tests.stubs.fake_network import FakeNetwork
     fake = FakeNetwork()
     fake.install(monkeypatch)
-    return fake
+    started_before = set(threading.enumerate())
+    yield fake
+    # Un thread lancé par le test (télémétrie) peut émettre après lui : attendu
+    # ici, sa requête ne part ni vers le vrai réseau ni dans le test suivant.
+    for thread in set(threading.enumerate()) - started_before:
+        thread.join(timeout=2)
 
 
 @pytest.fixture
