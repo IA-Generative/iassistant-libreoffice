@@ -573,6 +573,26 @@ def test_rows_whose_cell_gets_locked_during_the_run_are_not_written():
     assert sheet.grid == {**original, (1, 0): "APPLE"}
 
 
+def test_an_error_marker_is_not_written_into_a_cell_locked_during_the_run():
+    """La feuille est protégée après la première ligne : l'erreur de la
+    deuxième ligne ne s'écrit pas dans sa cellule verrouillée."""
+    original = {(0, 0): "pomme", (0, 1): "poire"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+
+    class _Shell(FakeShell):
+        def urlopen(self, request, timeout=None):
+            if self.urlopen_calls == 1:
+                sheet.protected = True
+            return super().urlopen(request, timeout)
+
+    shell = _Shell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                              OSError("connexion refusée")])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert sheet.grid == {**original, (1, 0): "APPLE"}
+    assert message == _t("run.err_network")
+
+
 def test_a_header_locked_during_the_run_writes_no_row():
     """La feuille est protégée pendant le run, avant l'en-tête : rien n'est
     écrit, et la palette dit combien de lignes ont été retenues."""
