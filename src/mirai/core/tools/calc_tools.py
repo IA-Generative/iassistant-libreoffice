@@ -104,6 +104,9 @@ def any_locked(sheet, cells):
 
 
 def _input_refused(cell):
+    """Ne voit que la protection propre à la cellule. Calc tient aussi compte
+    d'un format conditionnel dont le style porte une protection, mais l'API ne
+    dit pas si sa condition est vraie : un verrou posé ainsi n'est pas vu."""
     protection = cell.getPropertyValue("CellProtection")
     return protection.IsLocked or protection.IsHidden
 
