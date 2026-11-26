@@ -1,12 +1,16 @@
 """Télémétrie de la coquille : la requête envoyée au collecteur, ce qui la retient
 et les spans que la coquille émet d'elle-même."""
+import json
 import logging
 import re
+import threading
+import time
 import urllib.error
 import webbrowser
 
 import pytest
 
+from src.mirai import local_config
 from src.mirai.core.shell_facade import MainJobShell
 from src.mirai.entrypoint import get_user_agent
 from tests.stubs.helpers import otlp_values, spans_sent
@@ -74,6 +78,19 @@ def test_a_span_is_posted_to_the_collector_off_the_main_thread(tmp_path, network
     assert not post.on_main_thread
 
 
+def test_a_span_emitted_from_a_worker_thread_reaches_the_collector(tmp_path, network):
+    """Le moteur émet depuis le thread de son run, une fois son travail fait."""
+    network.on("POST", COLLECTOR)
+    shell = MainJobShell(_job(tmp_path))
+
+    def work_then_emit():
+        time.sleep(0.05)
+        shell.telemetry("Exemple")
+
+    threading.Thread(target=work_then_emit).start()
+    assert [name for name, _ in _spans(network)] == ["Exemple"]
+
+
 def test_the_request_names_the_extension_and_the_device(tmp_path, network):
     post = _emit(tmp_path, network)
     assert post.header("Content-Type") == "application/json"
@@ -100,6 +117,17 @@ def test_a_key_left_in_the_user_settings_is_not_presented(tmp_path, network):
     """Les secrets quittent les réglages de l'utilisateur au démarrage : la clé
     de télémétrie n'y est pas relue."""
     assert _emit(tmp_path, network, telemetryKey="cle-locale").header("Authorization") is None
+
+
+def test_a_key_packaged_with_the_extension_is_presented(tmp_path, network, monkeypatch):
+    """Un profil hors ligne embarque ses réglages dans l'OXT, clé comprise."""
+    package = tmp_path / "oxt" / "config.default.json"
+    package.parent.mkdir()
+    package.write_text(json.dumps({"enabled": False, "telemetryKey": "cle-du-paquet"}),
+                       encoding="utf-8")
+    monkeypatch.setattr(
+        local_config, "package_config_candidates", lambda module_dir: [str(package)])
+    assert _emit(tmp_path, network).header("Authorization") == "Basic cle-du-paquet"
 
 
 def test_the_body_is_one_otlp_span_always_successful_and_one_millisecond_long(tmp_path, network):
