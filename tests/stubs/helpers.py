@@ -21,6 +21,27 @@ def http_response(body=b"", status=200):
     return resp
 
 
+def otlp_values(attributes):
+    """Attributs OTLP décodés ; un entier, émis en chaîne par le format, revient
+    en entier."""
+    values = {}
+    for attribute in attributes:
+        (kind, value), = attribute["value"].items()
+        values[attribute["key"]] = int(value) if kind == "intValue" else value
+    return values
+
+
+def spans_sent(network, collector):
+    """Spans reçus par le collecteur de télémétrie une fois les envois de fond
+    terminés : (nom, attributs décodés), dans l'ordre d'arrivée."""
+    network.settle()
+    return [(span["name"], otlp_values(span["attributes"]))
+            for post in network.requests("POST", collector)
+            for resource in post.json()["resourceSpans"]
+            for scope in resource["scopeSpans"]
+            for span in scope["spans"]]
+
+
 def refuse_settings_writes(monkeypatch, refusals=None):
     """Écriture de settings.json refusée comme sous Windows quand un autre
     programme tient le fichier : les `refusals` premières fois, ou toujours."""

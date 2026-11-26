@@ -389,6 +389,8 @@ Outils partagés des tests (`tests/stubs/`, `tests/unit/conftest.py`) :
   vérification des certificats) sans citer un membre de `MainJob`, et fait
   échouer le test si une requête part sans réponse prévue. Sans lui, un test
   unitaire reste hors ligne : toute requête échoue comme sur un poste sans réseau.
+  `network.settle()` attend les envois faits en arrière-plan, et
+  `helpers.spans_sent` rend les spans reçus par le collecteur de télémétrie.
 - `thread_guard` : enveloppe un faux document ou ServiceManager dans un
   `ThreadGuard` ; tout accès hors du thread propriétaire fait échouer le test.
 

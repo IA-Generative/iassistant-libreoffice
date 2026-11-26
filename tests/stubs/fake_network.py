@@ -10,6 +10,7 @@ import io
 import json
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -83,6 +84,7 @@ class FakeNetwork:
         self.unexpected = []
         self.system_proxies = {}
         self._routes = []
+        self._threads_before = set()
 
     def install(self, monkeypatch):
         def open_(opener, request, data=None, timeout=None):
@@ -90,6 +92,19 @@ class FakeNetwork:
 
         monkeypatch.setattr(urllib.request.OpenerDirector, "open", open_)
         monkeypatch.setattr(urllib.request, "getproxies", lambda: dict(self.system_proxies))
+        self._threads_before = set(threading.enumerate())
+
+    def settle(self):
+        """Attend les threads lancés depuis l'installation et ceux qu'ils lancent
+        à leur tour : un envoi fait en arrière-plan (télémétrie) est alors visible
+        dans `sent`. Rend la main au bout de deux secondes si l'un d'eux dure."""
+        deadline = time.monotonic() + 2
+        while True:
+            pending = set(threading.enumerate()) - self._threads_before
+            if not pending or time.monotonic() >= deadline:
+                return
+            for thread in pending:
+                thread.join(timeout=max(0, deadline - time.monotonic()))
 
     def on(self, method, url_part, body=None, status=200, headers=None, error=None):
         """Réponse à une requête `method` dont l'URL contient `url_part`.
