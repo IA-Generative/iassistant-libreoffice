@@ -298,6 +298,10 @@ comme « la demande porte sur le document entier ».
   d'annulation qui comprend l'en-tête ; un arrêt garde les lignes finies ;
   une ligne dont la source a changé pendant le run n'est pas écrite,
   et une réponse refusée par la garde des formules est comptée et signalée.
+  Sur une feuille protégée, Transformer et Analyser refusent avant le premier
+  appel au modèle si une cellule qu'ils écriraient est verrouillée ; ils
+  revérifient à chaque écriture, car la feuille peut être protégée pendant le
+  run.
 - **agentique** (le LLM pilote les tools) : Formule (Calc — contexte de feuille
   + retrieval `config/calc-functions.json`) et le **prompt libre**, qui couvre
   désormais les demandes documentaires (« restructure en deux paragraphes »)
@@ -368,7 +372,9 @@ chaque `POST /enroll`.
 > au lieu d'agir.
 
 1. Handler `def mon_tool(ctx, args) -> ToolResult` dans `core/tools/…`. Un tool
-   Calc écrit par `safe_set_string` ou après `formula_refusal` (règle 6).
+   Calc écrit par `safe_set_string` ou après `formula_refusal` (règle 6). Il
+   teste d'abord `calc_tools.any_locked` : la protection de feuille ne bloque
+   que l'interface.
 2. `registry.register(ToolSpec(name="app_mon_tool", description=…, parameters=
    {schema}, handler=…, apps=(…), mutates=bool))` dans `register()`.
 3. Libellé du journal d'actions : une clé `tool.<nom>` dans
