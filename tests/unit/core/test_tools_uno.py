@@ -296,6 +296,29 @@ def test_calc_set_formula_leaves_a_locked_cell_of_a_protected_sheet_as_it_was():
     assert sheet.grid[(2, 0)] == "24"
 
 
+def test_calc_set_formula_leaves_an_unlocked_hide_all_cell_of_a_protected_sheet_as_it_was():
+    """Calc refuse aussi la saisie dans une cellule « Masquer tout » d'une
+    feuille protégée, même déverrouillée."""
+    sheet = _protected_sheet({(2, 0): "24"}, unlocked={(2, 0)})
+    sheet.hidden_cells.add((2, 0))
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error == "C1 : cellule verrouillée (feuille protégée)"
+    assert sheet.formulas == {}
+    assert sheet.grid[(2, 0)] == "24"
+
+
+def test_calc_set_formula_applies_in_a_hide_all_cell_of_an_unprotected_sheet():
+    sheet = FakeCalcSheet()
+    sheet.hidden_cells.add((2, 0))
+    sheet.formula_results["=A1*3"] = "36"
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.ok
+    assert sheet.formulas[(2, 0)] == "=A1*3"
+
+
 def test_calc_set_formula_applies_in_an_unlocked_cell_of_a_protected_sheet():
     sheet = _protected_sheet(unlocked={(2, 0)})
     sheet.formula_results["=A1*3"] = "36"

@@ -95,13 +95,17 @@ LOCKED = "cellule verrouillée (feuille protégée)"
 
 
 def any_locked(sheet, cells):
-    """Vrai si Calc refuserait la saisie dans l'une des `cells` : une cellule
-    verrouillée d'une feuille protégée. La protection ne retient que
-    l'interface : l'API y écrit texte, valeur et formule sans erreur. Le
-    verrou, posé par défaut sur toute cellule, ne compte que sur une feuille
-    protégée."""
-    return sheet.isProtected() and any(
-        cell.getPropertyValue("CellProtection").IsLocked for cell in cells)
+    """Vrai si Calc refuserait la saisie dans l'une des `cells` : sur une
+    feuille protégée, une cellule verrouillée ou sous « Masquer tout ». La
+    protection ne retient que l'interface : l'API y écrit texte, valeur et
+    formule sans erreur. Le verrou, posé par défaut sur toute cellule, ne
+    compte que sur une feuille protégée."""
+    return sheet.isProtected() and any(_input_refused(cell) for cell in cells)
+
+
+def _input_refused(cell):
+    protection = cell.getPropertyValue("CellProtection")
+    return protection.IsLocked or protection.IsHidden
 
 
 def cell_by_ref(sheet, ref):
