@@ -635,10 +635,14 @@ def test_a_locked_result_cell_on_a_row_without_source_does_not_hold_the_run_back
 _TABLE = {(0, 0): "Ville", (1, 0): "Ventes", (0, 1): "Paris", (1, 1): "100"}
 
 
-def test_analysis_under_locked_cells_is_refused_before_the_model_is_asked():
+@pytest.mark.parametrize("unlocked", [{(0, 3)}, {(1, 3)}],
+                         ids=["cellule_fusionnee_verrouillee",
+                              "cellule_recevant_le_texte_verrouillee"])
+def test_analysis_under_locked_cells_is_refused_before_the_model_is_asked(unlocked):
     """L'analyse occuperait A4:B4, fusionnées : une seule cellule verrouillée
-    de cette ligne suffit à la retenir."""
-    sheet = _protect(FakeCalcSheet(grid=_TABLE), unlocked={(0, 3)})
+    de cette ligne suffit à la retenir, qu'elle soit la voisine fusionnée ou
+    celle qui reçoit le texte."""
+    sheet = _protect(FakeCalcSheet(grid=_TABLE), unlocked)
     doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
     shell = FakeShell()
     message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
