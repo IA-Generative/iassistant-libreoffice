@@ -28,7 +28,6 @@ PRIVATE_MEMBERS_BUDGET = {
     "tests/unit/test_data_paths.py": 6,
     "tests/unit/test_enrollment.py": 7,
     "tests/unit/test_install_changes.py": 4,
-    "tests/unit/test_llm_relay_error.py": 3,
     "tests/unit/test_llm_token_auth.py": 19,
     "tests/unit/test_log_hygiene.py": 11,
     "tests/unit/test_models_fetch.py": 4,
