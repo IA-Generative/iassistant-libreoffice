@@ -97,6 +97,24 @@ def fast_clock(monkeypatch):
     return clock
 
 
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """Aucun test unitaire n'atteint le vrai réseau : une requête qu'il n'a pas
+    prévue échoue comme sur un poste hors ligne."""
+    from tests.stubs.fake_network import FakeNetwork
+    fake = FakeNetwork()
+    fake.install(monkeypatch)
+    return fake
+
+
+@pytest.fixture
+def network(_offline):
+    """Faux réseau sous la coquille ; le test échoue si une requête est partie
+    sans qu'il lui ait prévu de réponse."""
+    yield _offline
+    assert _offline.unexpected == [], f"requêtes sans réponse prévue : {_offline.unexpected}"
+
+
 @pytest.fixture
 def thread_guard():
     """Enveloppe des faux objets UNO dans un ThreadGuard partagé ; le test
