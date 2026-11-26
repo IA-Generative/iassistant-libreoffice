@@ -262,7 +262,7 @@ Analyse une plage de cellules et produit un résumé des tendances, anomalies et
 >
 > *Exemple : sélectionnez un tableau trimestriel, Ctrl+Alt+Espace, et obtenez "Hausse de 12% au T3, baisse notable en juillet, valeur aberrante en cellule C7".*
 
-> 🔵 **Expert** — Le résultat est inséré deux lignes sous la sélection. La cellule de résultat est fusionnée sur la largeur de la sélection pour une meilleure lisibilité. Un tableau plus long que `document_chunk_max_chars` (20 000 caractères par défaut) n'est envoyé qu'en partie, ses premières lignes : le modèle le sait, la cellule de résultat le dit en première ligne, et l'assistant annonce combien de lignes ont été analysées. Sur une feuille protégée, l'assistant n'écrit que dans les cellules déverrouillées, comme Calc le permet à l'utilisateur : si la ligne sous la plage est verrouillée, il le dit et n'analyse pas.
+> 🔵 **Expert** — Le résultat est inséré deux lignes sous la sélection. La cellule de résultat est fusionnée sur la largeur de la sélection pour une meilleure lisibilité. Un tableau plus long que `document_chunk_max_chars` (20 000 caractères par défaut) n'est envoyé qu'en partie, ses premières lignes : le modèle le sait, la cellule de résultat le dit en première ligne, et l'assistant annonce combien de lignes ont été analysées. Sur une feuille protégée, l'assistant n'écrit que dans les cellules déverrouillées, comme Calc le permet à l'utilisateur : si les cellules où l'analyse s'écrirait sont verrouillées, il le dit et n'analyse pas.
 
 ---
 
