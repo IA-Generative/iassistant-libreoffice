@@ -426,10 +426,11 @@ def write_cells(ctx, args):
     content = f"{written} cellule(s) écrite(s)."
     if errors:
         content += " Erreurs : " + " | ".join(errors)
-    # Le modèle ne lit que `error` d'un appel en échec : elle porte aussi le
-    # nombre de cellules écrites.
+    # Le modèle ne lit que `error` d'un appel en échec : après un refus pour
+    # verrou, elle porte aussi le nombre de cellules écrites.
+    locked = any(entry.endswith(LOCKED) for entry in errors)
     return ToolResult(call_id="", ok=not errors, content=content,
-                      error=content if errors else "")
+                      error=content if locked else "; ".join(errors))
 
 
 def write_result_column(ctx, args):

