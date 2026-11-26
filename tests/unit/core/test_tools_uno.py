@@ -406,6 +406,16 @@ def test_calc_fill_formula_down_refuses_when_only_the_last_target_row_is_locked(
     assert list(sheet.formulas) == [(2, 1)]
 
 
+def test_calc_fill_formula_down_names_a_single_locked_target_as_one_cell():
+    sheet = _protected_sheet({(0, 1): "1"})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 3)
+    assert not result.ok
+    assert result.error == ("Formule de C2 non recopiée : C3 contient des cellules "
+                            "verrouillées (feuille protégée).")
+    assert sheet.formulas == {(2, 1): "=A2*2"}
+
+
 @pytest.mark.parametrize("hidden_by", ["hidden_formulas", "hidden_cells"],
                          ids=["masquer_la_formule", "masquer_tout"])
 def test_calc_fill_formula_down_does_not_copy_a_formula_the_protection_hides(hidden_by):
