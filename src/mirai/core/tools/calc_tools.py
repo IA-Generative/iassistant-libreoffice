@@ -51,6 +51,14 @@ def range_ref(area):
             f"{col_letter(area.EndColumn)}{area.EndRow + 1}")
 
 
+def block_ref(cols, rows):
+    """Référence d'un bloc de colonnes et de lignes (0-based) : « C3:C5 »,
+    « C3 » pour une seule cellule."""
+    first = f"{col_letter(cols.start)}{rows.start + 1}"
+    last = f"{col_letter(cols.stop - 1)}{rows.stop}"
+    return first if first == last else f"{first}:{last}"
+
+
 def text_refusal(text):
     """Raison du refus d'un texte « =… » qui serait une formule refusée, ou "".
     Écrit par setString, ce texte reste inerte dans la cellule, mais une
@@ -81,6 +89,19 @@ def safe_set_string(cell, text):
             pass
     cell.setString(text)
     return refusal
+
+
+LOCKED = "cellule verrouillée (feuille protégée)"
+
+
+def any_locked(sheet, cells):
+    """Vrai si Calc refuserait la saisie dans l'une des `cells` : une cellule
+    verrouillée d'une feuille protégée. La protection ne retient que
+    l'interface : l'API y écrit texte, valeur et formule sans erreur. Le
+    verrou, posé par défaut sur toute cellule, ne compte que sur une feuille
+    protégée."""
+    return sheet.isProtected() and any(
+        cell.getPropertyValue("CellProtection").IsLocked for cell in cells)
 
 
 def cell_by_ref(sheet, ref):
@@ -380,7 +401,11 @@ def write_cells(ctx, args):
         if not ref:
             continue
         try:
-            refusal = safe_set_string(cell_by_ref(sheet, ref), strip_markdown(value))
+            cell = cell_by_ref(sheet, ref)
+            if any_locked(sheet, [cell]):
+                errors.append(f"{ref} : {LOCKED}")
+                continue
+            refusal = safe_set_string(cell, strip_markdown(value))
         except Exception as exc:
             errors.append(f"{ref}: {exc}")
             continue
@@ -405,6 +430,11 @@ def write_result_column(ctx, args):
     row_range = range(area.StartRow, area.EndRow + 1)
 
     out_col, needs_header = find_free_output_column(sheet, col_range, row_range)
+    target_rows = list(row_range[:len(values)]) + ([0] if needs_header else [])
+    if any_locked(sheet, (sheet.getCellByPosition(out_col, row) for row in target_rows)):
+        return ToolResult(call_id="", ok=False, content="",
+                          error=(f"Résultats non écrits : la colonne {col_letter(out_col)} "
+                                 "contient des cellules verrouillées (feuille protégée)."))
     refused = []
     if needs_header:
         try:
@@ -466,6 +496,9 @@ def set_formula(ctx, args):
         return ToolResult(call_id="", ok=False, content="",
                           error=f"Formule refusée, {refusal}.")
     cell = cell_by_ref(sheet, args["ref"])
+    if any_locked(sheet, [cell]):
+        return ToolResult(call_id="", ok=False, content="",
+                          error=f"{args['ref']} : {LOCKED}")
     cell.setFormula(formula)
     error_token = get_cell_error(cell)
     value = cell.getString()
@@ -497,17 +530,19 @@ def fill_formula_down(ctx, args):
     if refusal:
         return ToolResult(call_id="", ok=False, content="",
                           error=f"Formule de {from_ref} non recopiée, {refusal}.")
-    # setFormula écrit même sur une feuille protégée : le refus est explicite.
-    if sheet.isProtected():
-        return ToolResult(call_id="", ok=False, content="",
-                          error=f"Formule de {from_ref} non recopiée : la feuille est protégée.")
     if to_row <= start_row + 1:
         return ToolResult(call_id="", ok=False, content="",
                           error=f"to_row ({to_row}) doit dépasser la ligne de {from_ref}.")
+    target_rows = range(start_row + 1, to_row)
+    if any_locked(sheet, (sheet.getCellByPosition(out_col, row) for row in target_rows)):
+        targets = block_ref(range(out_col, out_col + 1), target_rows)
+        return ToolResult(call_id="", ok=False, content="",
+                          error=(f"Formule de {from_ref} non recopiée : {targets} contient "
+                                 "des cellules verrouillées (feuille protégée)."))
     parser = ctx.model.createInstance("com.sun.star.sheet.FormulaParser")
     parser.CompileEnglish = True
     tokens = parser.parseFormula(formula, source_cell.getCellAddress())
-    for row_idx in range(start_row + 1, to_row):
+    for row_idx in target_rows:
         target = sheet.getCellByPosition(out_col, row_idx)
         target.setFormula("=" + parser.printFormula(tokens, target.getCellAddress()))
     return ToolResult(call_id="", ok=True,
