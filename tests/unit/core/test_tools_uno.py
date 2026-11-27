@@ -565,6 +565,18 @@ def test_calc_result_column_leaves_the_locked_cells_it_does_not_write_alone():
     assert (1, 0) not in sheet.grid and (1, 3) not in sheet.grid
 
 
+def test_calc_result_column_ignores_a_locked_cell_below_the_selection():
+    """Une valeur de trop n'est pas écrite : la cellule sous la sélection peut
+    rester verrouillée."""
+    sheet = _protected_sheet({(0, 1): "a", (0, 2): "b"}, unlocked={(1, 1), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B", "C"]}, _calc_ctx(doc))
+    assert result.ok
+    assert sheet.grid[(1, 1)] == "A" and sheet.grid[(1, 2)] == "B"
+    assert (1, 3) not in sheet.grid
+
+
 def test_calc_get_selection_overview():
     sheet = FakeCalcSheet(grid={(0, 0): "Nom", (0, 1): "Alice"})
     doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
