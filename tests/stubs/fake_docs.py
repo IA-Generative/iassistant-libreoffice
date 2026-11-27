@@ -267,7 +267,7 @@ class FakeCell:
             return self.properties[name]
         if name == "CellProtection":
             key = (self._col, self._row)
-            return UnoStruct(IsLocked=True,
+            return UnoStruct(IsLocked=key not in self._sheet.unlocked,
                              IsFormulaHidden=key in self._sheet.hidden_formulas,
                              IsHidden=key in self._sheet.hidden_cells,
                              IsPrintHidden=False)
@@ -389,6 +389,7 @@ class FakeCalcSheet:
         self.formula_errors = {}              # formule → code d'erreur Calc simulé
         self.merged = []
         self.protected = False
+        self.unlocked = set()                 # (col, row) déverrouillées ; verrou par défaut, comme Calc
         self.hidden_formulas = set()          # (col, row) « Masquer la formule »
         self.hidden_cells = set()             # (col, row) « Masquer tout »
         self.cells_asked = 0                  # cellules demandées, lues ou écrites

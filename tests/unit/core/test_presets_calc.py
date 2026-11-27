@@ -525,6 +525,206 @@ def test_a_row_whose_source_moved_during_the_run_is_not_written():
     assert [sheet.grid.get((0, row)) for row in range(5)] == ["pomme", "poire", None, "prune", "cerise"]
 
 
+# Sur une feuille protégée, Calc refuse la saisie dans une cellule verrouillée :
+# l'assistant n'y écrit pas davantage, et le dit avant d'interroger le modèle.
+
+def _protect(sheet, unlocked=()):
+    """Protège la feuille : toute cellule y est verrouillée, sauf `unlocked`."""
+    sheet.protected = True
+    sheet.unlocked.update(unlocked)
+    return sheet
+
+
+@pytest.mark.parametrize("unlocked", [{(2, 0), (2, 1)}, {(2, 0), (2, 2)}, {(2, 1), (2, 2)}],
+                         ids=["derniere_cellule_de_resultat_verrouillee",
+                              "premiere_cellule_de_resultat_verrouillee",
+                              "seul_en_tete_verrouille"])
+def test_transform_into_locked_cells_is_refused_before_the_model_is_asked(unlocked):
+    # Colonne B occupée : les résultats iraient en C, sous un en-tête en C1.
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris",
+                (0, 2): "poire"}
+    sheet = _protect(FakeCalcSheet(grid=original), unlocked)
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    shell = FakeShell()
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.transform_locked_column", col="C")
+    assert "(C)" in message
+    assert shell.requests == []
+    assert sheet.grid == original
+
+
+def test_rows_whose_cell_gets_locked_during_the_run_are_not_written():
+    """La feuille est protégée pendant le run : les lignes qui restent ne
+    reçoivent rien, et la palette dit combien."""
+    original = {(0, 0): "pomme", (0, 1): "poire", (0, 2): "prune"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR", "PLUM")])
+
+    def protect_the_sheet(chunk):
+        if chunk == "PEAR":        # la deuxième réponse arrive : l'utilisateur protège la feuille
+            sheet.protected = True
+
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    protect_the_sheet)
+
+    assert message == (_t("preset.done_transform", count=1, col="B") + " "
+                       + _t("preset.locked_transform", count=2))
+    assert "2 ligne(s)" in message
+    assert sheet.grid == {**original, (1, 0): "APPLE"}
+
+
+def test_a_row_locked_during_the_run_does_not_hold_the_next_ones_back():
+    """Chaque ligne est jugée sur sa propre cellule : une cellule verrouillée
+    au milieu de la colonne laisse écrire les lignes suivantes."""
+    original = {(0, 0): "pomme", (0, 1): "poire", (0, 2): "prune"}
+    sheet = FakeCalcSheet(grid=original)
+    sheet.unlocked.update({(1, 0), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR", "PLUM")])
+
+    def protect_the_sheet(chunk):
+        if chunk == "APPLE":       # la première réponse arrive : l'utilisateur protège la feuille
+            sheet.protected = True
+
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    protect_the_sheet)
+
+    assert message == (_t("preset.done_transform", count=2, col="B") + " "
+                       + _t("preset.locked_transform", count=1))
+    assert sheet.grid == {**original, (1, 0): "APPLE", (1, 2): "PLUM"}
+
+
+def test_an_error_marker_is_not_written_into_a_cell_locked_during_the_run():
+    """La feuille est protégée après la première ligne : l'erreur de la
+    deuxième ligne ne s'écrit pas dans sa cellule verrouillée."""
+    original = {(0, 0): "pomme", (0, 1): "poire"}
+    sheet = FakeCalcSheet(grid=original)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+
+    class _Shell(FakeShell):
+        def urlopen(self, request, timeout=None):
+            if self.urlopen_calls == 1:
+                sheet.protected = True
+            return super().urlopen(request, timeout)
+
+    shell = _Shell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                              OSError("connexion refusée")])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert sheet.grid == {**original, (1, 0): "APPLE"}
+    assert message == _t("run.err_network")
+
+
+def test_a_header_locked_during_the_run_writes_no_row():
+    """La feuille est protégée pendant le run, avant l'en-tête : rien n'est
+    écrit, et la palette dit combien de lignes ont été retenues."""
+    original = {(0, 0): "Nom", (1, 0): "Autre", (0, 1): "pomme", (1, 1): "pris",
+                (0, 2): "poire"}
+    sheet = FakeCalcSheet(grid=original)
+    sheet.unlocked.update({(2, 1), (2, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR")])
+
+    def protect_the_sheet(chunk):
+        if chunk == "APPLE":       # la première réponse arrive : l'utilisateur protège la feuille
+            sheet.protected = True
+
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    protect_the_sheet)
+
+    assert message == (_t("preset.done_transform", count=0, col="C") + " "
+                       + _t("preset.locked_transform", count=2))
+    assert sheet.grid == original
+
+
+def test_transform_writes_in_the_unlocked_cells_of_a_protected_sheet():
+    """L'assistant écrit là où l'utilisateur peut saisir."""
+    original = {(0, 0): "pomme", (0, 1): "poire"}
+    sheet = _protect(FakeCalcSheet(grid=original), unlocked={(1, 0), (1, 1)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 FakeSSEResponse(text_chunks("PEAR"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=2, col="B")
+    assert sheet.grid == {**original, (1, 0): "APPLE", (1, 1): "PEAR"}
+
+
+def test_transform_without_a_header_ignores_a_locked_title_row():
+    original = {(0, 1): "pomme", (0, 2): "poire"}
+    sheet = _protect(FakeCalcSheet(grid=original), unlocked={(1, 1), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A2:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 FakeSSEResponse(text_chunks("PEAR"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=2, col="B")
+    assert sheet.grid[(1, 1)] == "APPLE" and sheet.grid[(1, 2)] == "PEAR"
+    assert (1, 0) not in sheet.grid
+
+
+def test_a_locked_result_cell_on_a_row_without_source_does_not_hold_the_run_back():
+    original = {(0, 0): "pomme", (0, 2): "prune"}
+    sheet = _protect(FakeCalcSheet(grid=original), unlocked={(1, 0), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("APPLE")),
+                                 FakeSSEResponse(text_chunks("PLUM"))])
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais", None)
+    assert message == _t("preset.done_transform", count=2, col="B")
+    assert sheet.grid[(1, 0)] == "APPLE" and sheet.grid[(1, 2)] == "PLUM"
+    assert (1, 1) not in sheet.grid
+
+
+_TABLE = {(0, 0): "Ville", (1, 0): "Ventes", (0, 1): "Paris", (1, 1): "100"}
+
+
+@pytest.mark.parametrize("unlocked", [{(0, 3)}, {(1, 3)}],
+                         ids=["cellule_fusionnee_verrouillee",
+                              "cellule_recevant_le_texte_verrouillee"])
+def test_analysis_under_locked_cells_is_refused_before_the_model_is_asked(unlocked):
+    """L'analyse occuperait A4:B4, fusionnées : une seule cellule verrouillée
+    de cette ligne suffit à la retenir, qu'elle soit la voisine fusionnée ou
+    celle qui reçoit le texte."""
+    sheet = _protect(FakeCalcSheet(grid=_TABLE), unlocked)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    shell = FakeShell()
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert message == _t("preset.analyze_locked_cells", range="A4:B4")
+    assert "(A4:B4)" in message
+    assert shell.requests == []
+    assert sheet.grid == _TABLE
+    assert sheet.merged == []
+
+
+@pytest.mark.parametrize("unlocked", [set(), {(0, 3)}, {(1, 3)}],
+                         ids=["toute_la_ligne_verrouillee", "cellule_fusionnee_verrouillee",
+                              "cellule_recevant_le_texte_verrouillee"])
+def test_an_analysis_whose_cells_get_locked_during_the_run_is_not_written(unlocked):
+    sheet = FakeCalcSheet(grid=_TABLE)
+    sheet.unlocked.update(unlocked)
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris ", "domine."))])
+
+    def protect_the_sheet(chunk):
+        sheet.protected = True     # la réponse arrive : l'utilisateur protège la feuille
+
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", protect_the_sheet)
+
+    assert message == _t("preset.locked_analyze")
+    assert sheet.grid == _TABLE
+    assert sheet.merged == []
+
+
+def test_analysis_is_written_in_the_unlocked_cells_of_a_protected_sheet():
+    sheet = _protect(FakeCalcSheet(grid=_TABLE), unlocked={(0, 3), (1, 3)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris domine."))])
+    message = presets.run_analyze(_ctx(doc, shell), shell, "", None)
+    assert message == _t("preset.done_analyze")
+    assert sheet.grid == {**_TABLE, (0, 3): "Paris domine."}
+
+
 # Une sélection de colonnes ou de lignes entières est lue sur le thread
 # principal, d'un seul appel : seule sa partie utilisée doit l'être.
 

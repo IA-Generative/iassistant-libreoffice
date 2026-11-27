@@ -13,6 +13,7 @@ import dataclasses
 import json
 import os
 import re
+from collections import Counter
 from functools import partial
 
 from ..i18n import get_locale
@@ -669,6 +670,7 @@ class _TransformPlan:
     sources: list        # (ligne, texte source) des lignes non vides
     out_col: int
     header: str          # en-tête à poser avec la première écriture, puis ""
+    locked: bool = False  # une cellule à écrire est verrouillée
 
     @property
     def too_large(self):
@@ -694,7 +696,18 @@ def _read_transform(ctx):
         plan.out_col, needs_header = calc_tools.find_free_output_column(
             sheet, col_range, row_range)
         plan.header = calc_tools.next_result_header(sheet) if needs_header else ""
+        plan.locked = calc_tools.any_locked(
+            sheet, _result_cells(plan, [row for row, _ in plan.sources]))
     return plan
+
+
+def _result_cells(plan, rows):
+    """Cellules que Transformer écrit pour `rows` : l'en-tête tant qu'il reste
+    à poser, puis le résultat de chaque ligne."""
+    if plan.header:
+        yield plan.sheet.getCellByPosition(plan.out_col, 0)
+    for row in rows:
+        yield plan.sheet.getCellByPosition(plan.out_col, row)
 
 
 SOURCE_CHANGED = "source modifiée pendant le run"
@@ -713,10 +726,13 @@ def _write_result_row(plan, row, source_text, text):
     """Écrit le résultat d'une ligne, précédé de l'en-tête à la première
     écriture du run, et rend la raison d'un refus. Une ligne qui ne porte
     plus la source lue avant le run n'est pas écrite : le résultat ne lui
-    correspond plus. Thread principal exclusivement."""
+    correspond plus. Une ligne dont une cellule à écrire a été verrouillée
+    depuis ne l'est pas non plus. Thread principal exclusivement."""
     sheet = plan.sheet
     if _source_text(calc_tools.row_cells(sheet, plan.col_range, row)) != source_text:
         return SOURCE_CHANGED
+    if calc_tools.any_locked(sheet, _result_cells(plan, [row])):
+        return calc_tools.LOCKED
     if plan.header:
         try:
             header_cell = sheet.getCellByPosition(plan.out_col, 0)
@@ -755,22 +771,43 @@ def _fit_result_column(plan):
         pass
 
 
-def _transform_message(out_col, transformed, refused, skipped):
+def _row_outcome(sink):
+    """Ce qu'une ligne est devenue : "written", la raison qui l'a laissée
+    sans résultat (SOURCE_CHANGED, calc_tools.LOCKED), "refused" pour une
+    formule refusée, "" pour une réponse vide."""
+    if sink.written:
+        return "written"
+    if sink.refusal in (SOURCE_CHANGED, calc_tools.LOCKED):
+        return sink.refusal
+    return "refused" if sink.refusal else ""
+
+
+def _transform_message(out_col, outcomes):
+    transformed = outcomes["written"]
     message = _t("preset.done_transform", count=transformed,
                  col=calc_tools.col_letter(out_col))
-    if refused:
-        message += " " + _t("preset.refused_transform", count=refused)
-    if skipped:
-        message += " " + _t("preset.skipped_transform", count=skipped)
+    if outcomes["refused"]:
+        message += " " + _t("preset.refused_transform", count=outcomes["refused"])
+    if outcomes[SOURCE_CHANGED]:
+        message += " " + _t("preset.skipped_transform", count=outcomes[SOURCE_CHANGED])
+    if outcomes[calc_tools.LOCKED]:
+        message += " " + _t("preset.locked_transform", count=outcomes[calc_tools.LOCKED])
     return Written(message) if transformed else message
 
 
-def _no_source_message(plan):
+def _transform_refusal(plan):
+    """Pourquoi Transformer ne peut pas partir, avant tout appel au modèle ;
+    "" s'il le peut."""
     if plan.too_large:
         return _t("preset.transform_too_large", rows=plan.row_count,
                   cols=len(plan.col_range), max_rows=TRANSFORM_MAX_ROWS,
                   max_cells=TRANSFORM_MAX_CELLS)
-    return _t("preset.need_transform_values")
+    if not plan.sources:
+        return _t("preset.need_transform_values")
+    if plan.locked:
+        return _t("preset.transform_locked_column",
+                  col=calc_tools.col_letter(plan.out_col))
+    return ""
 
 
 def run_transform(ctx, shell, user_text, tee, cancel_event=None,
@@ -780,8 +817,9 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
     plan = ctx.on_main(lambda: _read_transform(ctx))
     _legacy_telemetry(ctx, "TransformToColumn",
                       {"context": "calc", "rows": str(plan.row_count)})
-    if not plan.sources:
-        return _no_source_message(plan)
+    refusal = _transform_refusal(plan)
+    if refusal:
+        return refusal
 
     system_prompt = _system(
         "Tu es un assistant de transformation de données. "
@@ -794,7 +832,7 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
 
     # Chaque ligne est écrite dès sa réponse complète, dans un seul contexte
     # d'annulation ouvert à la première écriture : un Ctrl+Z retire le run.
-    transformed = refused = skipped = 0
+    outcomes = Counter()
     interrupted = ""
     try:
         for row, source_text in plan.sources:
@@ -816,20 +854,15 @@ def run_transform(ctx, shell, user_text, tee, cancel_event=None,
                 break
             ctx.undo_begin(_t("preset.undo_transform"))
             sink.finish(step.text, step.streamed)
-            if sink.written:
-                transformed += 1
-            elif sink.refusal == SOURCE_CHANGED:
-                skipped += 1
-            elif sink.refusal:
-                refused += 1
-        if transformed or refused:
+            outcomes[_row_outcome(sink)] += 1
+        if outcomes["written"] or outcomes["refused"]:
             ctx.on_main(lambda: _fit_result_column(plan))
     finally:
         ctx.undo_end()
 
     if interrupted:
         return Failed(interrupted)
-    return _transform_message(plan.out_col, transformed, refused, skipped)
+    return _transform_message(plan.out_col, outcomes)
 
 
 def _read_table(ctx, max_chars):
@@ -871,10 +904,22 @@ def _excerpt_note(read, total):
     return ""
 
 
+def _analysis_locked(sheet, cols, rows):
+    """Vrai si une cellule de la ligne que l'analyse occupe, fusionnée sur
+    `cols` deux lignes sous le tableau, est verrouillée. Thread principal
+    exclusivement."""
+    out_row = rows.stop + 1
+    return calc_tools.any_locked(
+        sheet, (sheet.getCellByPosition(col, out_row) for col in cols))
+
+
 def _write_analysis(sheet, cols, rows, note, text):
     """Écrit l'analyse dans une cellule fusionnée deux lignes sous le tableau,
-    précédée de `note`, et rend la raison d'un refus. Thread principal
-    exclusivement."""
+    précédée de `note`, et rend la raison d'un refus. Rien n'est écrit ni
+    fusionné si une de ces cellules a été verrouillée depuis le début du run.
+    Thread principal exclusivement."""
+    if _analysis_locked(sheet, cols, rows):
+        return calc_tools.LOCKED
     out_row = rows.stop + 1
     target_cell = sheet.getCellByPosition(cols.start, out_row)
     try:
@@ -902,6 +947,9 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
     _legacy_telemetry(ctx, "AnalyzeRange", {"context": "calc"})
     if not has_data:
         return _t("preset.need_range")
+    if ctx.on_main(lambda: _analysis_locked(sheet, cols, rows)):
+        return _t("preset.analyze_locked_cells", range=calc_tools.block_ref(
+            cols, range(rows.stop + 1, rows.stop + 2)))
 
     prompt = (
         "DONNÉES :\n" + _table_text(lines, len(rows)) + "\n\n"
@@ -930,6 +978,8 @@ def run_analyze(ctx, shell, user_text, tee, cancel_event=None,
         sink.finish(step.text, step.streamed)
     finally:
         ctx.undo_end()
+    if sink.refusal == calc_tools.LOCKED:
+        return _t("preset.locked_analyze")
     if sink.refusal:
         return _t("preset.refused_analyze")
     if not sink.written:

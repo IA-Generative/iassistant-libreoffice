@@ -406,6 +406,41 @@ l'assistant a essayé, l'onglet **Actions** montre une ligne ✗ avec « Formule
 
 ☐ Conforme ☐ Non conforme · *observations :* ______________________________
 
+### 4.6 Une feuille protégée
+
+**Faites :** préparez la feuille. Cliquez sur la cellule vide **F1**, ouvrez **Format ▸
+Cellules**, onglet **Protection de cellule**, décochez **Protégé**, puis validez. Ouvrez
+ensuite **Outils ▸ Protéger la feuille** et validez sans mot de passe.
+
+**Faites ensuite :** sélectionnez A1:A10, tapez `Mets en majuscules`, cliquez sur **🔄
+Transformer**.
+
+**Vous devez voir :** tout de suite, le message « Transformation non lancée : la feuille est
+protégée et la colonne de résultat (…) contient des cellules verrouillées. ». La lettre de
+la colonne est entre les parenthèses. Rien n'est écrit.
+
+**Faites ensuite :** sélectionnez B1:B10, cliquez sur **📊 Analyser**.
+
+**Vous devez voir :** tout de suite, le message « Analyse non lancée : la feuille est
+protégée et les cellules sous la sélection (…) sont verrouillées. ». Rien n'est écrit.
+
+**Faites ensuite :** cliquez sur A1, tapez `écris Bonjour dans la cellule A1` dans le champ
+de saisie, puis **Entrée**.
+
+**Vous devez voir :** A1 garde son contenu, et l'assistant répond que la cellule est
+verrouillée.
+
+**Faites ensuite :** cliquez sur **F1**, la cellule déverrouillée, tapez `la somme des
+nombres de la colonne B`, puis cliquez sur **🧮 Formule**.
+
+**Vous devez voir :** une formule s'écrit dans F1 et affiche un résultat, pas une erreur.
+L'assistant écrit donc là où la feuille vous laisse écrire.
+
+**Faites enfin :** retirez la protection avec **Outils ▸ Protéger la feuille**, avant de
+passer à la suite.
+
+☐ Conforme ☐ Non conforme · *observations :* ______________________________
+
 ---
 
 ## 5 — Pendant que l'assistant travaille
@@ -731,13 +766,13 @@ Mac).
 | Installation et connexion | 4 | | |
 | La fenêtre de l'assistant | 4 | | |
 | Actions Writer | 12 | | |
-| Actions Calc | 5 | | |
+| Actions Calc | 6 | | |
 | Pendant le travail | 3 | | |
 | Zone du bas et fenêtre | 6 | | |
 | Quand ça se passe mal | 4 | | |
 | Menu MIrAI | 4 | | |
 | Mise à jour | 2 | | |
-| **Total** | **44** | | |
+| **Total** | **45** | | |
 
 **Testeur :** ____________________  **Date :** ____________________
 
