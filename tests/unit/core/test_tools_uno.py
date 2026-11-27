@@ -360,6 +360,25 @@ def test_calc_write_cells_writes_the_unlocked_cells_and_names_each_locked_one():
     assert sheet.grid == {**original, (1, 0): "saisie"}
 
 
+def test_calc_write_cells_reports_locked_and_refused_cells_in_one_error():
+    """Un verrou parmi les refus suffit pour que l'erreur dise aussi ce qui a
+    été écrit, quel que soit le motif des autres refus."""
+    sheet = _protected_sheet({(0, 0): "Titre"}, unlocked={(1, 0), (2, 0)})
+    result = _registry().call_tool(
+        "calc_write_cells",
+        {"cells": [{"ref": "A1", "value": "x"},
+                   {"ref": "B1", "value": "=WEBSERVICE(A1)"},
+                   {"ref": "C1", "value": "ok"}]},
+        _calc_ctx(FakeCalcDoc(sheet)))
+    assert not result.ok
+    assert result.error == (
+        "1 cellule(s) écrite(s). Erreurs : A1 : cellule verrouillée (feuille protégée) | "
+        "B1: texte refusé, fonction(s) réseau ou fichier interdite(s) : WEBSERVICE")
+    assert sheet.grid[(0, 0)] == "Titre"
+    assert sheet.grid[(1, 0)].startswith("#ERREUR")
+    assert sheet.grid[(2, 0)] == "ok"
+
+
 def test_calc_write_cells_names_only_the_refused_cells_when_none_is_locked():
     sheet = FakeCalcSheet()
     result = _registry().call_tool(
