@@ -697,8 +697,12 @@ def test_analysis_under_locked_cells_is_refused_before_the_model_is_asked(unlock
     assert sheet.merged == []
 
 
-def test_an_analysis_whose_cells_get_locked_during_the_run_is_not_written():
+@pytest.mark.parametrize("unlocked", [set(), {(0, 3)}, {(1, 3)}],
+                         ids=["toute_la_ligne_verrouillee", "cellule_fusionnee_verrouillee",
+                              "cellule_recevant_le_texte_verrouillee"])
+def test_an_analysis_whose_cells_get_locked_during_the_run_is_not_written(unlocked):
     sheet = FakeCalcSheet(grid=_TABLE)
+    sheet.unlocked.update(unlocked)
     doc = FakeCalcDoc(sheet, selection_ref="A1:B2")
     shell = FakeShell(responses=[FakeSSEResponse(text_chunks("Paris ", "domine."))])
 
