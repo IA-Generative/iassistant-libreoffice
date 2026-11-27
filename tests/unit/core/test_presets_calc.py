@@ -575,6 +575,28 @@ def test_rows_whose_cell_gets_locked_during_the_run_are_not_written():
     assert sheet.grid == {**original, (1, 0): "APPLE"}
 
 
+def test_a_row_locked_during_the_run_does_not_hold_the_next_ones_back():
+    """Chaque ligne est jugée sur sa propre cellule : une cellule verrouillée
+    au milieu de la colonne laisse écrire les lignes suivantes."""
+    original = {(0, 0): "pomme", (0, 1): "poire", (0, 2): "prune"}
+    sheet = FakeCalcSheet(grid=original)
+    sheet.unlocked.update({(1, 0), (1, 2)})
+    doc = FakeCalcDoc(sheet, selection_ref="A1:A3")
+    shell = FakeShell(responses=[FakeSSEResponse(text_chunks(word))
+                                 for word in ("APPLE", "PEAR", "PLUM")])
+
+    def protect_the_sheet(chunk):
+        if chunk == "APPLE":       # la première réponse arrive : l'utilisateur protège la feuille
+            sheet.protected = True
+
+    message = presets.run_transform(_ctx(doc, shell), shell, "traduire en anglais",
+                                    protect_the_sheet)
+
+    assert message == (_t("preset.done_transform", count=2, col="B") + " "
+                       + _t("preset.locked_transform", count=1))
+    assert sheet.grid == {**original, (1, 0): "APPLE", (1, 2): "PLUM"}
+
+
 def test_an_error_marker_is_not_written_into_a_cell_locked_during_the_run():
     """La feuille est protégée après la première ligne : l'erreur de la
     deuxième ligne ne s'écrit pas dans sa cellule verrouillée."""
